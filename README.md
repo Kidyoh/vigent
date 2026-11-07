@@ -9,8 +9,10 @@ A vim-style, lightweight terminal app for running several coding agents at once,
 ## Install
 
 ```bash
-npm install -g vigent
+npm install -g @vigent/vigent
 ```
+
+The package is `@vigent/vigent` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`.
 
 Requires Node.js 20 or newer and git. Then, inside any git repository:
 
@@ -21,7 +23,7 @@ vigent --demo             # scripted agents, nothing needed
 vigent --help
 ```
 
-`vigent --version` shows which vigent runs (with the commit, when it runs from a clone). An older build may be missing a theme or command from these docs, for example `E185: Cannot find color scheme 'lazyvim'`. In a clone, `git pull && npm install` updates and rebuilds it, and vigent warns at startup when its build is older than its source. From npm, run `npm install -g vigent@latest`.
+`vigent --version` shows which vigent runs (with the commit, when it runs from a clone). An older build may be missing a theme or command from these docs, for example `E185: Cannot find color scheme 'lazyvim'`. In a clone, `git pull && npm install` updates and rebuilds it, and vigent warns at startup when its build is older than its source. From npm, run `npm install -g @vigent/vigent@latest`.
 
 ### Start screen and which-key
 
