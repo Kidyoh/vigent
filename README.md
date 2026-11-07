@@ -67,9 +67,15 @@ Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `r
 :queue <prompt>        " send a follow-up after the current run (:queue alone lists them)
 :pause  /  :resume     " hold an agent and its queue, then continue
 :w [file]              " save the transcript as Markdown
+:diff split            " side by side; s switches layouts inside the diff window
+:attach <branch>       " reopen an agent in a kept worktree (see :worktrees)
 ```
 
+Agents survive a restart: quit vigent, start it again in the same repo, and the agents you didn't `:kill` come back with their conversations. Their records live in git's own worktree metadata (`.git/worktrees/<name>/vigent/`), not in your files, and are deleted along with the worktree.
+
 `:merge` and `:pr` first commit anything the agent left uncommitted. `:merge` only touches your checkout when it's on the agent's base branch with no uncommitted changes, and a conflict is rolled back so nothing changes. After a merge, `:kill!` removes the worktree and the merged branch. `:q` won't quit while agents are running; `:q!` or `ZQ` does. Use `:new <task> --model <id>` to give one agent a different model.
+
+![:diff split](docs/screenshots/diff-split.png)
 
 ![:merge](docs/screenshots/merge.png)
 

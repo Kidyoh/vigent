@@ -265,6 +265,8 @@ export interface PiSessionOptions {
 	authStorage?: unknown;
 	/** pi's config dir; default ~/.pi/agent */
 	agentDir?: string;
+	/** keep the conversation in this folder so the agent survives a restart (default: memory only) */
+	sessionDir?: string;
 }
 
 export class PiSession extends Session {
@@ -280,8 +282,12 @@ export class PiSession extends Session {
 
 	private async init() {
 		const sdk = await import("@mariozechner/pi-coding-agent");
+		const sessionManager = this.opts.sessionDir
+			? sdk.SessionManager.continueRecent(this.cwd, this.opts.sessionDir)
+			: sdk.SessionManager.inMemory();
+		const resuming = sessionManager.buildSessionContext().messages.length > 0;
 		let model = this.opts.modelObject;
-		if (!model) {
+		if (!model && !resuming) {
 			const ai = await import("@mariozechner/pi-ai");
 			try {
 				model = (ai as any).getModel("anthropic", this.model);
@@ -289,14 +295,22 @@ export class PiSession extends Session {
 				model = undefined; // let pi pick its default
 			}
 		}
+		// a resumed conversation keeps the model it was saved with, unless one is given
 		const { session } = await sdk.createAgentSession({
 			cwd: this.cwd,
-			model: model as any,
-			sessionManager: sdk.SessionManager.inMemory(),
+			...(model ? { model: model as any } : {}),
+			sessionManager,
 			...(this.opts.authStorage ? { authStorage: this.opts.authStorage as any } : {}),
 			...(this.opts.agentDir ? { agentDir: this.opts.agentDir } : {}),
 		});
 		this.session = session;
+		if (resuming) {
+			const restored = itemsFromMessages(session.messages ?? []);
+			this.items.push(...restored.items);
+			this.tokens += restored.tokens;
+			this.pushInfo(`resumed: ${restored.items.filter((i) => i.kind === "user").length} earlier prompts`);
+			this.refreshStat(0);
+		}
 		session.subscribe((event: any) => this.onEvent(event));
 	}
 
@@ -377,6 +391,38 @@ export class PiSession extends Session {
 		super.dispose();
 		this.session?.dispose?.();
 	}
+}
+
+/** Rebuild the transcript from pi's saved messages: prompts, replies, and tool calls with their output. */
+export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; tokens: number } {
+	const items: TranscriptItem[] = [];
+	const byCallId = new Map<string, TranscriptItem>();
+	let tokens = 0;
+	for (const m of messages) {
+		if (m?.role === "user") {
+			const text = extractText(m.content);
+			if (text) items.push({ kind: "user", text });
+		} else if (m?.role === "assistant") {
+			const blocks: any[] = Array.isArray(m.content) ? m.content : [];
+			const text = extractText(blocks);
+			if (text) items.push({ kind: "agent", text });
+			for (const b of blocks) {
+				if (b?.type !== "toolCall") continue;
+				const item: TranscriptItem = {
+					kind: "tool",
+					text: "",
+					tool: { name: b.name, summary: summarizeArgs(b.arguments), output: "", folded: true },
+				};
+				items.push(item);
+				if (b.id) byCallId.set(b.id, item);
+			}
+			if (m.usage) tokens += (m.usage.input ?? 0) + (m.usage.output ?? 0);
+		} else if (m?.role === "toolResult") {
+			const item = byCallId.get(m.toolCallId);
+			if (item?.tool) item.tool.output = extractText(m.content);
+		}
+	}
+	return { items, tokens };
 }
 
 function extractText(content: any): string {

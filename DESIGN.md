@@ -91,7 +91,8 @@ Alternate full-screen views (like vim "windows" you toggle into):
 ```
 :new <task> [--model id]                spawn an agent in its own worktree (:new! = no worktree)
 :kill   :kill!    :pause     :resume    stop (keep / remove worktree), hold, continue
-:diff             :merge [--no-squash]  :pr          review and land the work (squash by default)
+:diff [split]     :merge [--no-squash]  :pr          review and land the work (squash by default)
+:attach <branch>                        reopen an agent in a kept worktree
 :queue <prompt>                         follow-up for the focused agent
 :dash                                   every agent at a glance
 :model <id>                             switch model for focused session
@@ -186,8 +187,10 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
   import of any vim / nvim colorscheme, 256-color fallback.
 - **M4 — review flow.** ✅ `:diff` with `]c` / `[c`, `:merge` (squash by
   default), `:pr`, `:dash`.
-- **Not yet.** `:tree` (pi's session tree), side-by-side diff, resuming
-  agents after a restart (their worktrees are kept and listed in `:worktrees`).
+- **M5 — polish.** ✅ Agents and their conversations survive a restart
+  (`:attach` reopens a kept worktree), side-by-side `:diff split`, Esc typed
+  quickly before a key is no longer lost.
+- **Not yet.** `:tree` (pi's session tree, branching from an earlier point).
 - **Later.** Server/remote mode (phone follows a session), pi extensions
   passthrough, partial-hunk accept, session templates.
 

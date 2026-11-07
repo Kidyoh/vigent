@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
+import { loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
 import { createDemoSessions } from "./demo.js";
@@ -50,7 +51,8 @@ keys (NORMAL mode):
   V y  yy yib  select and copy, last reply     :merge  :pr     land the agent's work
   {  }         previous / next message         :dash           all agents at a glance
   dd           kill agent (asks first)         :queue <text>   follow-up after this run
-  :worktrees   list agent worktrees            :nmap <lhs> <rhs> map keys (see :help)
+  :worktrees   list agent worktrees            :attach <branch> reopen a kept agent
+  :diff split  side-by-side diff               :nmap <lhs> <rhs> map keys (see :help)
   :help        every key, including yours      :q              quit
 
 Runs in demo mode (scripted sessions, no network) when --demo is passed
@@ -269,7 +271,20 @@ async function main(): Promise<number | undefined> {
 			return new DemoSession(name, m, shown);
 		}
 		const wt = worktree && root ? createWorktree(root, name, config.worktree) : undefined;
-		return new PiSession(name, m, { cwd: wt?.path ?? process.cwd(), worktree: wt });
+		if (!wt?.path) return new PiSession(name, m, { cwd: process.cwd() });
+		saveAgentMeta(wt.path, { name, model: m, base: wt.base, createdAt: new Date().toISOString() });
+		return new PiSession(name, m, { cwd: wt.path, worktree: wt, sessionDir: sessionDir(wt.path) });
+	};
+	app.attachSession = (wt) => {
+		if (demo || !wt.path) throw new Error("attaching needs a real agent (not --demo)");
+		const meta = loadAgentMeta(wt.path) ?? {
+			name: wt.branch.split("/").pop()?.replace(/-/g, " ") ?? wt.branch,
+			model,
+			createdAt: new Date().toISOString(),
+		};
+		saveAgentMeta(wt.path, { ...meta, detached: undefined }); // reopened at the next start again
+		const worktree = { ...wt, base: wt.base ?? meta.base };
+		return new PiSession(meta.name, meta.model, { cwd: wt.path, worktree, sessionDir: sessionDir(wt.path) });
 	};
 
 	app.onQuit = () => {
@@ -285,6 +300,22 @@ async function main(): Promise<number | undefined> {
 	if (demo) {
 		for (const s of createDemoSessions()) app.addSession(s, false);
 		app.focusIdx = 0;
+	} else if (root && config.worktree.enabled) {
+		// reopen the agents that were running when vigent last quit
+		for (const { meta, worktree } of restorableAgents(root, config.worktree)) {
+			try {
+				app.addSession(
+					new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!) }),
+					false,
+				);
+			} catch (err) {
+				warnings.push(`couldn't reopen '${meta.name}': ${(err as Error).message}`);
+			}
+		}
+		if (app.sessions.length > 0) {
+			app.focusIdx = 0;
+			app.notify(`reopened ${app.sessions.length} agent${app.sessions.length === 1 ? "" : "s"} from last time`, "Comment");
+		}
 	}
 
 	tui.addChild(app);

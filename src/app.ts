@@ -32,7 +32,9 @@ import {
 } from "./keys.js";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { setDetached } from "./agents.js";
 import { copyToClipboard } from "./clipboard.js";
+import { splitView, unifiedView } from "./diffview.js";
 import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
@@ -45,6 +47,7 @@ import {
 	type DiffStat,
 	diffText,
 	findWorktree,
+	type WorktreeInfo,
 	listWorktrees,
 	removeWorktree,
 	type WorktreeConfig,
@@ -155,6 +158,11 @@ export class App implements Component {
 	private paneCache: { lines: PaneLine[]; key: string } = { lines: [], key: "" };
 
 	onQuit: () => void = () => {};
+	/** reopen an agent in an existing worktree (`:attach`) */
+	attachSession: (worktree: WorktreeInfo) => Session = () => {
+		throw new Error("attaching isn't available here");
+	};
+
 	/** create an agent; `worktree: false` runs it in the current checkout */
 	newSession: (name: string, opts: { worktree: boolean; model?: string }) => Session = () => {
 		throw new Error("newSession factory not set");
@@ -211,6 +219,7 @@ export class App implements Component {
 			this.altIdx = this.focusIdx;
 			this.focusIdx = this.sessions.length - 1;
 		}
+		s.refreshStat(0); // reopened agents show their changes right away
 		if (s.worktree?.path && !this.statTimer) {
 			// edits made outside the agent (you, your editor) show up too
 			this.statTimer = setInterval(() => {
@@ -307,8 +316,22 @@ export class App implements Component {
 		const key = keyFromInput(data);
 		if (!key) return;
 		if (this.mode === "NORMAL" && this.seq.pendingKeys.length === 0) this.message = "";
-		this.seq.feed(key);
+		for (const k of this.splitEscape(key)) this.seq.feed(k);
 		this.tui.requestRender();
+	}
+
+	/**
+	 * Esc followed quickly by a key arrives as one Alt-key sequence (<M-j>).
+	 * Vim resolves this with a timeout; here, an Alt key that nothing is
+	 * mapped to is read as Esc and then the key, which is what was typed.
+	 */
+	private splitEscape(key: string): string[] {
+		const m = /^<M-(.+)>$/.exec(key);
+		if (!m) return [key];
+		const r = this.keymap.lookup(this.keyMode(), [...this.seq.pendingKeys, key]);
+		if (r.exact || r.prefix) return [key];
+		const rest = m[1];
+		return ["<Esc>", ...parseKeys([...rest].length === 1 ? rest : `<${rest}>`)];
 	}
 
 	private typeText(text: string) {
@@ -660,12 +683,15 @@ export class App implements Component {
 				this.killFocused(cmd === "kill!");
 				return;
 			case "diff":
-				this.openDiff();
+				this.openDiff(/^(split|vert|vertical|side)$/.test(arg));
 				return;
 			case "worktrees":
 			case "worktree":
 			case "wt":
 				this.execWorktree(arg);
+				return;
+			case "attach":
+				this.execAttach(arg);
 				return;
 			case "colorscheme":
 			case "colo":
@@ -913,11 +939,46 @@ export class App implements Component {
 			return;
 		}
 		if (!removeTree) {
-			this.setMessage(`killed '${s.name}' · kept ${wt.branch} (remove it with :worktree remove ${wt.branch})`, "WarningMsg");
+			try {
+				setDetached(wt.path, true); // not reopened at the next start; :attach brings it back
+			} catch {
+				// the worktree may already be gone
+			}
+			this.setMessage(`killed '${s.name}' · kept ${wt.branch} (:attach ${wt.branch} reopens it, :worktree remove deletes it)`, "WarningMsg");
 			return;
 		}
 		const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch, base: wt.base });
 		this.setMessage(`killed '${s.name}' · ${r.message}`, r.removed ? "WarningMsg" : "ErrorMsg");
+	}
+
+	/** `:attach <branch>` reopens an agent in one of the worktrees listed by :worktrees. */
+	private execAttach(arg: string) {
+		const root = this.workspace.root;
+		if (!root) {
+			this.setMessage("not in a git repository", "ErrorMsg");
+			return;
+		}
+		if (!arg) {
+			this.setMessage("usage: :attach <branch>  (see :worktrees)", "Comment");
+			return;
+		}
+		const w = findWorktree(root, arg, this.workspace.config);
+		if (!w?.branch) {
+			this.setMessage(`no worktree '${arg}' (see :worktrees)`, "ErrorMsg");
+			return;
+		}
+		const owner = this.sessions.findIndex((s) => s.worktree?.path === w.path);
+		if (owner >= 0) {
+			this.focusSession(owner);
+			return;
+		}
+		try {
+			const s = this.attachSession({ branch: w.branch, path: w.path });
+			this.addSession(s);
+			this.setMessage(`attached '${s.name}' to ${w.branch}`, "ModeMsg");
+		} catch (err) {
+			this.setMessage((err as Error).message, "ErrorMsg");
+		}
 	}
 
 	/** `:worktrees` lists them; `:worktree remove[!] <branch>` deletes one. */
@@ -968,12 +1029,12 @@ export class App implements Component {
 			];
 		});
 		lines.push([]);
-		lines.push([["Comment", "● = an agent is working in it · :worktree remove <branch> deletes one"]]);
+		lines.push([["Comment", "● = an agent is working in it · :attach <branch> reopens one · :worktree remove <branch> deletes it"]]);
 		this.openFloat("Worktrees", lines, 96);
 	}
 
 	/** `:diff`: what the focused agent changed since its worktree was created. */
-	private openDiff() {
+	private openDiff(split = false) {
 		const s = this.focusedSession;
 		const wt = s?.worktree;
 		if (!s || !wt?.path) {
@@ -987,11 +1048,18 @@ export class App implements Component {
 					this.tui.requestRender();
 					return;
 				}
-				const raw = text.replace(/\n$/, "").split("\n");
-				const lines: FloatLine[] = raw.map((l) => [[diffGroup(l), l]]);
-				const jumps = raw.map((l, i) => (l.startsWith("@@") ? i : -1)).filter((i) => i >= 0);
-				const hunks = `${jumps.length} hunk${jumps.length === 1 ? "" : "s"} · ]c [c jump`;
-				this.openFloat(`${wt.branch} vs ${wt.base ?? "base"} · ${hunks}`, lines, this.terminal.columns - 4, { jumps });
+				const width = this.terminal.columns - 4;
+				const unified = unifiedView(text);
+				const side = splitView(text, width - 3);
+				const n = unified.jumps.length;
+				const title = (layout: string) =>
+					`${wt.branch} vs ${wt.base ?? "base"} · ${n} hunk${n === 1 ? "" : "s"} · ]c [c jump · s ${layout}`;
+				const views = [
+					{ title: title("side by side"), lines: unified.lines, jumps: unified.jumps },
+					{ title: title("unified"), lines: side.lines, jumps: side.jumps },
+				];
+				const [first, second] = split ? [views[1], views[0]] : views;
+				this.openFloat(first.title, first.lines, width, { jumps: first.jumps, alternate: second });
 			})
 			.catch((err) => {
 				this.setMessage(`git diff failed: ${(err as Error).message.split("\n")[0]}`, "ErrorMsg");
@@ -1642,14 +1710,6 @@ const VERSION: string = (() => {
 
 const MODE_LETTER: Record<KeyMode, string> = { normal: "n", insert: "i", visual: "x", command: "c" };
 
-function diffGroup(line: string): string {
-	if (line.startsWith("+++") || line.startsWith("---")) return "Title";
-	if (line.startsWith("+")) return "Added";
-	if (line.startsWith("-")) return "Removed";
-	if (line.startsWith("@@")) return "Special";
-	if (/^(diff --git|index |new file|deleted file|similarity|rename )/.test(line)) return "Comment";
-	return "NormalFloat";
-}
 
 function mapModes(letter: string): KeyMode[] {
 	if (letter === "i") return ["insert"];
@@ -1683,7 +1743,7 @@ const EX_HELP: [string, string][] = [
 	[":new [task]", "start an agent in its own worktree"],
 	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
 	[":new! [name]", "agent in this checkout, no worktree"],
-	[":diff", "what the focused agent changed (]c [c hunks)"],
+	[":diff  /  :diff split", "the agent's changes, unified / side by side (s switches)"],
 	[":merge [--no-squash]", "squash-merge the agent's branch into yours"],
 	[":pr", "push the branch and open a pull request"],
 	[":queue <prompt>", "send after the current run (:queue lists)"],
@@ -1691,6 +1751,7 @@ const EX_HELP: [string, string][] = [
 	[":dash", "all agents at a glance"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],
+	[":attach <branch>", "reopen an agent in a kept worktree"],
 	[":worktree remove <branch>", "delete a worktree (safe; ! forces)"],
 	[":colorscheme [name]", "switch theme (no name: picker)"],
 	[":hi Group guifg=.. guibg=..", "change a highlight group"],

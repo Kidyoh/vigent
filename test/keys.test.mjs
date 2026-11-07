@@ -51,6 +51,9 @@ test("typed keys match the notation you write", () => {
 		"<": "<lt>",
 		é: "é",
 		":": ":",
+		"\x1b:": "<M-:>", // Esc then : arriving together
+		"\x1bG": "<M-S-g>",
+		"\x1b<": "<M-lt>",
 	};
 	for (const [raw, notation] of Object.entries(cases)) {
 		assert.equal(keyFromInput(raw), notation, JSON.stringify(raw));

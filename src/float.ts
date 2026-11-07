@@ -19,6 +19,8 @@ export interface FloatOptions {
 	initial?: number;
 	/** line indices `]c` / `[c` jump between */
 	jumps?: number[];
+	/** a second layout that `s` switches to and back (unified / side-by-side diff) */
+	alternate?: { title: string; lines: FloatLine[]; jumps?: number[] };
 }
 
 export class TextFloat implements Component {
@@ -98,6 +100,16 @@ export class TextFloat implements Component {
 			case "[":
 				this.pending = key;
 				return;
+			case "s": {
+				const alt = this.opts.alternate;
+				if (!alt) break;
+				this.opts.alternate = { title: this.title, lines: this.lines, jumps: this.opts.jumps };
+				this.title = alt.title;
+				this.lines = alt.lines;
+				this.opts.jumps = alt.jumps;
+				this.top = 0;
+				break;
+			}
 			case "j":
 			case "down":
 				if (!this.select(1)) this.scroll(1);

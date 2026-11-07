@@ -124,10 +124,14 @@ A first or last word of `feat`, `fix` (also `bugfix`, `hotfix`, `bug`), `docs`, 
 :worktree remove <branch>   " remove a worktree no agent is using (:worktree remove! forces it)
 :worktrees                  " list them; ● marks the ones an agent is working in
 :diff                       " everything the focused agent changed, new files included (]c / [c between hunks)
+:diff split                 " side by side (s switches layouts in the diff window)
+:attach <branch>            " reopen an agent in a worktree that's kept (after :kill, or made elsewhere)
 :merge                      " squash-merge the agent's branch into its base, in your checkout
 :merge --no-squash          " a regular merge commit instead
 :pr                         " push the branch and open a pull request
 ```
+
+**Restarting:** vigent saves each agent's name, model and conversation inside git's own record of its worktree (`.git/worktrees/<name>/vigent/`). When you start vigent again in the repo, every agent you didn't `:kill` comes back where it left off. `:kill` keeps the worktree but doesn't reopen it; `:attach <branch>` does. Removing the worktree removes the record too.
 
 `:merge` and `:pr` first commit anything the agent left uncommitted, using a message built from the branch (`fix/flaky-checkout-test` → `fix: flaky checkout test`). `:merge` only runs when your checkout is on the base branch with no uncommitted changes, and a conflict is rolled back so your checkout is left as it was. A squash merge makes a new commit, so git doesn't count the branch as merged. vigent checks the content instead, so `:kill!` afterwards deletes the branch too. `:pr` uses `gh` when it's installed and signed in; otherwise it pushes and prints the GitHub compare URL.
 

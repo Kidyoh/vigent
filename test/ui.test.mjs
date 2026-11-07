@@ -295,3 +295,70 @@ test(":new <task> --model picks a model for one agent", () => {
 	assert.deepEqual(made[0], { name: "docs pass", worktree: false, model: "claude-haiku-4-5" });
 	assert.equal(app.focusedSession.model, "claude-haiku-4-5");
 });
+
+test("diff layouts: unified and side by side, with hunk jumps in both", async () => {
+	const { splitView, unifiedView } = await import("../dist/diffview.js");
+	const diff = [
+		"diff --git a/cart.js b/cart.js",
+		"index 1..2 100644",
+		"--- a/cart.js",
+		"+++ b/cart.js",
+		"@@ -1,3 +1,4 @@",
+		" one",
+		"-two",
+		"+TWO",
+		"+2b",
+		" three",
+		"diff --git a/new.js b/new.js",
+		"new file mode 100644",
+		"--- /dev/null",
+		"+++ b/new.js",
+		"@@ -0,0 +1 @@",
+		"+hello",
+	].join("\n");
+	const u = unifiedView(diff);
+	assert.deepEqual(u.jumps, [4, 14]);
+	const v = splitView(diff, 60);
+	const rows = v.lines.map((l) => strip(l.map(([, t]) => t).join("")));
+	assert.equal(rows[0], "cart.js");
+	assert.match(rows[1], /^@@ -1,3 \+1,4 @@/);
+	assert.match(rows[2], /^ +1 one +│ +1 one/);
+	assert.match(rows[3], /^ +2 two +│ +2 TWO/, "a removed line sits next to the line that replaced it");
+	assert.match(rows[4], /^ +│ +3 2b/, "an extra added line has nothing on the left");
+	assert.match(rows[5], /^ +3 three +│ +4 three/);
+	assert.equal(rows[7], "new.js");
+	assert.match(rows[9], /│ +1 hello/);
+	assert.deepEqual(v.jumps, [1, 8]);
+	for (const l of v.lines) assert.ok(strip(l.map(([, t]) => t).join("")).length <= 60);
+	assert.equal(v.lines[3][1][0], "Removed");
+	assert.equal(v.lines[3].at(-1)[0], "Added");
+
+	const f = new TextFloat(new Painter(BUILTIN_THEMES.default), PICKER_ICONS.unicode, "unified", u.lines, () => 20, () => {}, () => {}, {
+		jumps: u.jumps,
+		alternate: { title: "split", lines: v.lines, jumps: v.jumps },
+	});
+	assert.match(strip(f.render(64)[0]), /unified/);
+	f.handleInput("s");
+	assert.match(strip(f.render(64)[0]), /split/);
+	assert.match(strip(f.render(64).join("\n")), /two +│ +2 TWO/);
+	f.handleInput("s");
+	assert.match(strip(f.render(64)[0]), /unified/);
+});
+
+test("Esc pressed right before a key isn't lost (arrives as Alt-key)", () => {
+	const s = sessionWithReply();
+	const { app, type } = makeApp({ sessions: [s] });
+	type("i", ..."hi", "\x1b:");
+	assert.equal(app.mode, "COMMAND", "Esc then : opened the command line");
+	type("\x1b");
+	type("V", "\x1bj");
+	assert.equal(app.mode, "NORMAL", "Esc then j left VISUAL and scrolled");
+	app.keymap.set("normal", "<M-j>", "session.next");
+	const before = app.focusIdx;
+	type("\x1bj");
+	assert.equal(app.focusIdx, before, "a mapped Alt key still works as Alt (one session, so no move)");
+	assert.equal(app.mode, "NORMAL");
+	type("i", "\x1bG");
+	assert.equal(app.mode, "NORMAL");
+	assert.equal(app.scrollOffset, 0, "Esc then G (uppercase) went to the bottom");
+});

@@ -221,6 +221,11 @@ function token(mods: Set<string>, base: string): string {
 		mods.delete("S");
 		key = key.toUpperCase();
 	}
+	if (key.length === 1 && mods.has("M") && !mods.has("C") && key !== key.toLowerCase()) {
+		// Alt keeps case apart, as <M-S-g>, so Esc-then-G stays G
+		mods.add("S");
+		key = key.toLowerCase();
+	}
 	if (key.length === 1 && (mods.has("C") || mods.has("M"))) key = key.toLowerCase();
 	if (mods.size === 0) {
 		if (key === "<") return "<lt>";
@@ -317,6 +322,10 @@ export function keyFromInput(data: string): string | undefined {
 	if (id === undefined) {
 		const chars = [...data];
 		if (chars.length === 1 && data >= " " && data !== "\x7f") return data === "<" ? "<lt>" : data;
+		// Esc + any printable key (pi-tui only names Esc + lowercase letters): Alt + that key
+		if (chars.length === 2 && chars[0] === "\x1b" && chars[1] >= " " && chars[1] !== "\x7f") {
+			return token(new Set(["M"]), chars[1]);
+		}
 		return undefined;
 	}
 	const parts = id.split("+");
