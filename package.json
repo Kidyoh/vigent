@@ -1,25 +1,50 @@
 {
   "name": "vigent",
   "version": "0.1.0",
-  "description": "Vim-native, lightweight coding-agent orchestrator built on the pi engine",
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/cli.js",
-    "demo": "node dist/cli.js --demo",
-    "test": "tsc && node --test test/*.test.mjs"
+  "description": "A vim-style terminal app for running coding agents side by side, each in its own git worktree. Built on pi.",
+  "keywords": [
+    "vim",
+    "neovim",
+    "tui",
+    "terminal",
+    "coding-agent",
+    "ai",
+    "agents",
+    "git-worktree",
+    "pi",
+    "llm",
+    "cli"
+  ],
+  "homepage": "https://github.com/farming-labs/vigent#readme",
+  "bugs": {
+    "url": "https://github.com/farming-labs/vigent/issues"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/farming-labs/vigent.git"
   },
   "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/farming-labs/vigent/issues"
-  },
-  "homepage": "https://github.com/farming-labs/vigent#readme",
+  "author": "KinfeMichael Tariku",
   "type": "module",
   "bin": {
     "vigent": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "demo": "node dist/cli.js --demo",
+    "test": "tsc && node --test test/*.test.mjs",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "npm test"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.73.1",
@@ -29,8 +54,5 @@
   },
   "devDependencies": {
     "typescript": "^7.0.2"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }

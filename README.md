@@ -2,20 +2,33 @@
 
 A vim-style, lightweight terminal app for running several coding agents at once, built on the [pi](https://github.com/badlogic/pi-mono) engine.
 
-![vigent with the default Neovim theme](docs/screenshots/vigent-default-theme.png)
+![vigent with the default Neovim theme](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/vigent-default-theme.png)
 
-![vigent with the gruvbox theme, second session focused](docs/screenshots/vigent-gruvbox.png)
+![vigent with the gruvbox theme, second session focused](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/vigent-gruvbox.png)
 
-## Quick start
+## Install
 
 ```bash
+npm install -g vigent
+```
+
+Requires Node.js 20 or newer and git. Then, inside any git repository:
+
+```bash
+vigent            # with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY) set
+vigent --demo     # scripted agents, no API key needed
+vigent --help
+```
+
+## From source
+
+```bash
+git clone https://github.com/farming-labs/vigent && cd vigent
 npm install
 npm run build
 npm run demo      # scripted sessions, no API key needed
 npm test          # build and run the test suite
 ```
-
-With a provider key set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`), `npm start` runs a real pi agent session instead of the demo.
 
 ## Keys
 
@@ -34,9 +47,9 @@ With a provider key set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
 
 Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
 
-![Neovim-style intro screen](docs/screenshots/intro.png)
+![Neovim-style intro screen](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/intro.png)
 
-![VISUAL mode on a markdown reply](docs/screenshots/visual-mode.png)
+![VISUAL mode on a markdown reply](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/visual-mode.png)
 
 ## Worktrees
 
@@ -50,11 +63,11 @@ Every agent gets its own git worktree and branch, so agents never touch your che
 :kill                            " stop the agent, keep its work  (:kill! also removes the worktree, safely)
 ```
 
-Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `refactor/…`) and are taken from the task you type. The sidebar and statusline show each agent's branch with live `+added −removed` counts. Removing a worktree goes through git's own safety checks, so uncommitted or unmerged work is never thrown away. Folder, branch pattern and base branch are set in `[worktree]` ([docs/config.md](docs/config.md#worktree)).
+Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `refactor/…`) and are taken from the task you type. The sidebar and statusline show each agent's branch with live `+added −removed` counts. Removing a worktree goes through git's own safety checks, so uncommitted or unmerged work is never thrown away. Folder, branch pattern and base branch are set in `[worktree]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#worktree)).
 
-![agents in their own worktrees](docs/screenshots/worktrees-sidebar.png)
+![agents in their own worktrees](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/worktrees-sidebar.png)
 
-![:diff](docs/screenshots/worktrees-diff.png)
+![:diff](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/worktrees-diff.png)
 
 ## Reviewing and landing work
 
@@ -78,13 +91,13 @@ Agents survive a restart: quit vigent, start it again in the same repo, and the 
 
 `:merge` and `:pr` first commit anything the agent left uncommitted. `:merge` only touches your checkout when it's on the agent's base branch with no uncommitted changes, and a conflict is rolled back so nothing changes. After a merge, `:kill!` removes the worktree and the merged branch. `:q` won't quit while agents are running; `:q!` or `ZQ` does. Use `:new <task> --model <id>` to give one agent a different model.
 
-![:diff split](docs/screenshots/diff-split.png)
+![:diff split](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/diff-split.png)
 
-![:tree](docs/screenshots/tree.png)
+![:tree](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/tree.png)
 
-![:merge](docs/screenshots/merge.png)
+![:merge](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/merge.png)
 
-![:dash](docs/screenshots/dashboard.png)
+![:dash](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/dashboard.png)
 
 ## Configuration
 
@@ -113,9 +126,9 @@ Normal = { bg = "NONE" }
 "jk" = "<Esc>"
 ```
 
-You can also change keys while vigent runs, with `:nmap`, `:imap`, `:cmap`, `:unmap` and `:let mapleader`. **[docs/config.md](docs/config.md)** has every option, action and built-in key.
+You can also change keys while vigent runs, with `:nmap`, `:imap`, `:cmap`, `:unmap` and `:let mapleader`. **[docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md)** has every option, action and built-in key.
 
-![:help lists every key, yours first](docs/screenshots/keys-help.png)
+![:help lists every key, yours first](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/keys-help.png)
 
 ## Themes
 
@@ -144,13 +157,13 @@ CursorLine = "guibg=#2a2f3a"
 
 Built in: `default` (Neovim's default look), `gruvbox`, `tokyonight`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
 
-![colorscheme picker with live preview](docs/screenshots/colorscheme-picker.png)
+![colorscheme picker with live preview](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/colorscheme-picker.png)
 
-![habamax imported from Neovim](docs/screenshots/imported-habamax.png)
+![habamax imported from Neovim](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/imported-habamax.png)
 
-![nord with :hi and :set changes applied live](docs/screenshots/live-customization.png)
+![nord with :hi and :set changes applied live](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/live-customization.png)
 
-The full guide covers importing, theme files, palettes, every option and every highlight group: **[docs/themes.md](docs/themes.md)**.
+The full guide covers importing, theme files, palettes, every option and every highlight group: **[docs/themes.md](https://github.com/farming-labs/vigent/blob/main/docs/themes.md)**.
 
 ## Layout
 
@@ -171,4 +184,4 @@ src/
 test/                node:test suites (npm test)
 ```
 
-See [DESIGN.md](DESIGN.md) for the full plan and milestones.
+See [DESIGN.md](https://github.com/farming-labs/vigent/blob/main/DESIGN.md) for the full plan and milestones.
