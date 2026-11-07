@@ -1,6 +1,6 @@
 {
   "name": "@vigent/cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A vim-style terminal app for running coding agents side by side, each in its own git worktree. Built on pi.",
   "keywords": [
     "vim",
