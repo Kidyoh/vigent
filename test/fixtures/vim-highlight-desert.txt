@@ -1,0 +1,90 @@
+
+SpecialKey     xxx term=bold ctermfg=9 guifg=#9acd32
+EndOfBuffer    xxx cleared
+NonText        xxx ctermfg=9 guifg=#6dceeb guibg=#4d4d4d
+Directory      xxx ctermfg=11 guifg=#6dceeb
+ErrorMsg       xxx term=bold,reverse cterm=reverse ctermfg=15 ctermbg=4
+                   gui=reverse guifg=#ff0000 guibg=#ffffff
+IncSearch      xxx term=bold,underline,reverse guifg=#f0e68c guibg=#cd853f
+Search         xxx term=reverse ctermfg=0 ctermbg=14 guifg=#f0e68c
+                   guibg=#7f7f8c
+CurSearch      xxx term=reverse
+MoreMsg        xxx cterm=bold ctermfg=10 gui=bold guifg=#9acd32
+ModeMsg        xxx term=bold cterm=bold gui=bold guifg=#ffde9b
+LineNr         xxx ctermfg=14 guifg=#eeee00
+LineNrAbove    xxx links to LineNr
+LineNrBelow    xxx links to LineNr
+CursorLineNr   xxx term=bold cterm=bold ctermfg=14 gui=bold guifg=#eeee00
+CursorLineSign xxx term=underline
+CursorLineFold xxx term=underline
+Question       xxx term=standout cterm=bold ctermfg=10 gui=bold guifg=#89fb98
+StatusLine     xxx term=bold,reverse guifg=#333333 guibg=#c2bfa5
+StatusLineNC   xxx term=bold,underline guifg=#7f7f8c guibg=#c2bfa5
+VertSplit      xxx guifg=#7f7f8c guibg=#c2bfa5
+Title          xxx cterm=bold ctermfg=13 gui=bold guifg=#cd5c5c
+Visual         xxx term=reverse guifg=#f0e68c guibg=#6b8e24
+VisualNOS      xxx guifg=#f0e68c guibg=#6dceeb
+WarningMsg     xxx term=standout cterm=bold ctermfg=12 gui=bold guifg=#cd5c5c
+WildMenu       xxx term=bold ctermfg=0 ctermbg=14 guifg=#333333 guibg=#eeee00
+Folded         xxx ctermfg=11 ctermbg=8 guifg=#eeee00 guibg=#4d4d4d
+FoldColumn     xxx ctermfg=11 ctermbg=8 guifg=#eeee00 guibg=#4d4d4d
+DiffAdd        xxx term=reverse ctermbg=1 guifg=#ffffff guibg=#5f875f
+DiffChange     xxx ctermbg=5 guifg=#ffffff guibg=#5f87af
+DiffDelete     xxx term=reverse ctermfg=9 ctermbg=3 guifg=#ffffff guibg=#af5faf
+DiffText       xxx term=reverse ctermbg=12 guifg=#000000 guibg=#c6c6c6
+SignColumn     xxx term=reverse
+Conceal        xxx ctermfg=7 ctermbg=8 guifg=#666666
+SpellBad       xxx term=underline cterm=underline ctermbg=12 gui=undercurl
+                   guifg=#cd5c5c guisp=#cd5c5c
+SpellCap       xxx term=underline cterm=underline ctermbg=9 gui=undercurl
+                   guifg=#75a0ff guisp=#75a0ff
+SpellRare      xxx term=underline cterm=underline ctermbg=13 gui=undercurl
+                   guifg=#9acd32 guisp=#9acd32
+SpellLocal     xxx term=underline cterm=underline ctermbg=11 gui=undercurl
+                   guifg=#ffde9b guisp=#ffde9b
+Pmenu          xxx term=reverse ctermfg=0 ctermbg=13 guifg=#ffffff
+                   guibg=#666666
+PmenuSel       xxx term=bold ctermfg=8 ctermbg=0 guifg=#333333 guibg=#f0e68c
+PmenuKind      xxx links to Pmenu
+PmenuKindSel   xxx links to PmenuSel
+PmenuExtra     xxx links to Pmenu
+PmenuExtraSel  xxx links to PmenuSel
+PmenuSbar      xxx term=reverse ctermbg=7 guibg=#333333
+PmenuThumb     xxx ctermbg=15 guibg=#c2bfa5
+TabLine        xxx term=bold,underline ctermfg=15 ctermbg=8 guifg=#333333
+                   guibg=#c2bfa5
+TabLineSel     xxx term=bold,reverse guifg=#333333 guibg=#f0e68c
+TabLineFill    xxx guibg=#c2bfa5
+CursorColumn   xxx ctermbg=8 guibg=#666666
+CursorLine     xxx term=underline guibg=#666666
+ColorColumn    xxx term=reverse ctermbg=4 guifg=#ffffff guibg=#cd5c5c
+QuickFixLine   xxx guifg=#333333 guibg=#f0e68c
+StatusLineTerm xxx term=bold,reverse ctermfg=0 ctermbg=10 guifg=#333333
+                   guibg=#c2bfa5
+StatusLineTermNC xxx term=reverse ctermfg=0 ctermbg=10 guifg=#ffffff
+                   guibg=#c2bfa5
+Normal         xxx guifg=#ffffff guibg=#333333
+MatchParen     xxx term=bold,underline ctermbg=3 guifg=#7f7f8c guibg=#bdb76b
+ToolbarLine    xxx term=reverse ctermbg=8 guibg=#666666
+ToolbarButton  xxx term=bold,reverse cterm=bold ctermfg=0 ctermbg=7 gui=bold
+                   guifg=#333333 guibg=#ffde9b
+Terminal       xxx cleared
+MessageWindow  xxx links to Pmenu
+PopupNotification xxx links to Todo
+Todo           xxx term=bold,reverse guifg=#ff0000 guibg=#eeee00
+Underlined     xxx term=underline cterm=underline gui=underline guifg=#75a0ff
+Error          xxx term=bold,reverse cterm=reverse gui=reverse guifg=#ff0000
+                   guibg=#ffffff
+Cursor         xxx term=reverse guifg=#333333 guibg=#f0e68c
+lCursor        xxx guifg=#333333 guibg=#ff0000
+debugPC        xxx cterm=reverse gui=reverse guifg=#666666
+debugBreakpoint xxx cterm=reverse gui=reverse guifg=#ffa0a0
+Comment        xxx term=bold guifg=#6dceeb
+Identifier     xxx guifg=#89fb98
+Statement      xxx cterm=bold gui=bold guifg=#f0e68c
+Constant       xxx guifg=#ffa0a0
+PreProc        xxx guifg=#cd5c5c
+Type           xxx cterm=bold gui=bold guifg=#bdb76b
+Special        xxx guifg=#ffde9b
+Ignore         xxx cleared
+CursorIM       xxx cleared
