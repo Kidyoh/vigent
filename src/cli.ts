@@ -6,6 +6,7 @@ import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
 import { App } from "./app.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
 import { createDemoSessions } from "./demo.js";
+import { buildKeymap, KEY_MODES } from "./keys.js";
 import { DemoSession, PiSession, type Session } from "./session.js";
 import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./theme.js";
 
@@ -24,6 +25,7 @@ themes:
   vigent theme new <name> [--from <theme>]   create a theme file to customize
   vigent theme path                          show where themes and config live
   vigent config init                         write a commented config.toml
+  vigent config check                        validate config.toml (theme, options, keys)
 
 keys (NORMAL mode):
   i            prompt the focused agent        :new <name>     spawn an agent
@@ -31,7 +33,8 @@ keys (NORMAL mode):
   ctrl+d/u     half-page scroll                :colorscheme    pick a theme (live preview)
   ]s [s 1-9    switch sessions                 :hi Group ...   change a highlight group
   za zM zR     fold/unfold tool output         :set nonumber   toggle ui options
-  /pattern n N search transcript               :q              quit
+  /pattern n N search transcript               :nmap <lhs> <rhs> map keys (see :help)
+  :help        every key, including yours      :q              quit
 
 Runs in demo mode (scripted sessions, no network) when --demo is passed
 or no provider API key is found (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...).
@@ -141,6 +144,27 @@ async function main(): Promise<number | undefined> {
 		return 0;
 	}
 	if (argv[0] === "theme" || argv[0] === "themes") return themeCommand(argv.slice(1));
+	if (argv[0] === "config" && argv[1] === "check") {
+		const file = configPath();
+		if (!fs.existsSync(file)) {
+			console.log(`no config at ${file} (defaults in use). Create one with: vigent config init`);
+			return 0;
+		}
+		const { config, warnings } = loadConfig(file);
+		const keys = buildKeymap(config.leader, config.keys);
+		warnings.push(...keys.warnings);
+		try {
+			if (config.theme) loadTheme(config.theme);
+		} catch (err) {
+			warnings.push((err as Error).message);
+		}
+		const mappings = KEY_MODES.reduce((n, m) => n + keys.keymap.bindings(m).filter((b) => b.user).length, 0);
+		for (const w of warnings) console.log(`warning: ${w}`);
+		console.log(
+			`${file}: ${warnings.length === 0 ? "ok" : `${warnings.length} problem(s)`} · theme ${config.theme ?? "default"} · leader ${config.leader ?? "\\"} · ${mappings} mapping(s) · ${Object.keys(config.highlights).length} highlight override(s)`,
+		);
+		return warnings.length === 0 ? 0 : 1;
+	}
 	if (argv[0] === "config" && argv[1] === "init") {
 		const file = configPath();
 		if (fs.existsSync(file)) {
@@ -154,6 +178,8 @@ async function main(): Promise<number | undefined> {
 	}
 
 	const { config, warnings } = loadConfig();
+	const { keymap, warnings: keyWarnings } = buildKeymap(config.leader, config.keys);
+	warnings.push(...keyWarnings);
 
 	const hasKey = Boolean(
 		process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
@@ -175,7 +201,7 @@ async function main(): Promise<number | undefined> {
 
 	const terminal = new ProcessTerminal();
 	const tui = new TUI(terminal, false);
-	const app = new App(tui, terminal, new Painter(theme, config.highlights), config.ui);
+	const app = new App(tui, terminal, new Painter(theme, config.highlights), config.ui, keymap);
 	app.newSession = (name: string): Session => (demo ? new DemoSession(name, model) : new PiSession(name, model));
 
 	app.onQuit = () => {

@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
+import { KEY_MODES, type KeyMode } from "./keys.js";
 import { type Attr, configDir, normalizeGroups } from "./theme.js";
 
 export interface UiOptions {
@@ -26,13 +27,18 @@ export interface UiOptions {
 	number: boolean;
 	tilde: boolean;
 	icons: "unicode" | "ascii";
+	/** ms to wait for the rest of a multi-key mapping, like vim's 'timeoutlen' */
+	timeoutlen: number;
 }
 
 export interface Config {
 	theme?: string;
 	model?: string;
+	leader?: string;
 	ui: UiOptions;
 	highlights: Record<string, Attr>;
+	/** raw mappings per mode; validated when the keymap is built */
+	keys: Partial<Record<KeyMode, Record<string, unknown>>>;
 }
 
 export const DEFAULT_UI: UiOptions = {
@@ -41,6 +47,7 @@ export const DEFAULT_UI: UiOptions = {
 	number: true,
 	tilde: true,
 	icons: "unicode",
+	timeoutlen: 1000,
 };
 
 export function configPath(): string {
@@ -49,7 +56,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath()): { config: Config; warnings: string[] } {
-	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {} };
+	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {} };
 	const warnings: string[] = [];
 	if (!fs.existsSync(file)) return { config, warnings };
 
@@ -66,8 +73,28 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 			case "theme":
 			case "colorscheme":
 			case "model":
-				if (typeof value === "string") config[key === "colorscheme" ? "theme" : key] = value;
-				else warnings.push(`config: '${key}' should be a string`);
+			case "leader":
+			case "mapleader":
+				if (typeof value === "string") {
+					const field = key === "colorscheme" ? "theme" : key === "mapleader" ? "leader" : key;
+					config[field as "theme" | "model" | "leader"] = value;
+				} else warnings.push(`config: '${key}' should be a string`);
+				break;
+			case "keys":
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					warnings.push("config: [keys] should be a table");
+					break;
+				}
+				for (const [k, v] of Object.entries(value)) {
+					if ((KEY_MODES as string[]).includes(k) && v && typeof v === "object" && !Array.isArray(v)) {
+						config.keys[k as KeyMode] = { ...config.keys[k as KeyMode], ...(v as Record<string, unknown>) };
+					} else if ((KEY_MODES as string[]).includes(k)) {
+						warnings.push(`config: [keys.${k}] should be a table`);
+					} else {
+						// keys directly under [keys] are normal-mode mappings
+						config.keys.normal = { ...config.keys.normal, [k]: v };
+					}
+				}
 				break;
 			case "ui":
 				if (value && typeof value === "object") {
@@ -97,6 +124,8 @@ const ALIASES: Record<string, keyof UiOptions> = {
 	nu: "number",
 	tilde: "tilde",
 	icons: "icons",
+	timeoutlen: "timeoutlen",
+	tm: "timeoutlen",
 };
 
 /** Set one option from a config value. Returns an error message, or undefined on success. */
@@ -120,6 +149,12 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 			if (value !== "unicode" && value !== "ascii") return `'${name}' should be "unicode" or "ascii"`;
 			ui.icons = value;
 			return;
+		case "timeoutlen": {
+			const n = Number(value);
+			if (!Number.isInteger(n) || n < 0 || n > 10000) return `'${name}' should be milliseconds from 0 to 10000`;
+			ui.timeoutlen = n;
+			return;
+		}
 	}
 }
 
@@ -169,24 +204,66 @@ export function applySetCommand(ui: UiOptions, arg: string): { message: string; 
 	return { message: shown.join("  ") };
 }
 
-export const CONFIG_TEMPLATE = `# vigent config — https://github.com/farming-labs/vigent/blob/main/docs/themes.md
+export const CONFIG_TEMPLATE = `# vigent config: ~/.config/vigent/config.toml
+# Reference: https://github.com/farming-labs/vigent/blob/main/docs/config.md
+# Check it any time with:  vigent config check
 
-# Built-in: default, gruvbox, tokyonight, catppuccin, catppuccin-latte, nord, rose-pine, kanagawa.
-# Or any theme in ~/.config/vigent/themes (see: vigent theme import / vigent theme new).
+# --- Theme -----------------------------------------------------------------
+# Built-in: default, gruvbox, tokyonight, catppuccin, catppuccin-latte, nord,
+# rose-pine, kanagawa. Or any theme in ~/.config/vigent/themes, e.g. one made
+# with  vigent theme import  (your nvim/vim colorscheme) or  vigent theme new.
 theme = "default"
 
+# Model used for new agents.
+# model = "claude-sonnet-4-5"
+
+# --- Leader ----------------------------------------------------------------
+# What <leader> means in [keys]. Vim's default is "\\".
+leader = "<Space>"
+
+# --- Options (also live: :set nonumber, :set sidebar_width=40, ...) --------
 [ui]
 sidebar = true
 sidebar_width = 30
-number = true        # session numbers in the sidebar
-tilde = true         # ~ on empty sidebar rows
-icons = "unicode"    # "ascii" for terminals/fonts without box-drawing glyphs
+number = true          # session numbers in the sidebar
+tilde = true           # ~ on empty sidebar rows
+icons = "unicode"      # "ascii" for fonts without box-drawing characters
+timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 
-# Override any highlight group, on top of whichever theme is active.
-# Values: a table, a vim :hi string, or the name of a group to link to.
+# --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
+# Applied on top of whichever theme is active. A value is a table, a vim
+# :hi string, or the name of a group to link to.
 [highlights]
-# Normal = { bg = "NONE" }                # use the terminal's background
+# Normal = { bg = "NONE" }                 # use the terminal's background
 # CursorLine = "guibg=#2a2f3a"
-# VigentSidebar = "NormalFloat"
+# Comment = "gui=NONE"                      # no italic comments
 # VigentModeNormal = { fg = "#1a1b26", bg = "#7aa2f7", bold = true }
+
+# --- Keys (also live: :nmap, :imap, :cmap, :unmap; list them with :help) ---
+# Left side: vim notation, e.g. j  gg  <C-d>  <S-Tab>  <M-x>  <CR>  <leader>t
+# Right side:
+#   "session.next"                       an action (all of them: :help)
+#   ":colorscheme nord<CR>"              run an ex command
+#   ":new "                              open the command line with that text
+#   "gg"                                 other keys, with their built-in meaning
+#   ["fold.open_all", "scroll.bottom"]   several, in order
+#   false                                unbind a built-in key
+
+[keys.normal]
+"<leader>n" = ":new "              # type a name, then Enter
+"<leader>x" = ":kill<CR>"
+"<leader>t" = "theme.picker"
+"<leader>h" = "app.help"
+"<Tab>" = "session.next"
+"<S-Tab>" = "session.prev"
+# "J" = "scroll.half_down"
+# "K" = "scroll.half_up"
+# "q" = false                       # stop q from showing the quit hint
+
+[keys.insert]
+# "jk" = "<Esc>"                    # leave INSERT by typing jk quickly
+# "<C-s>" = "edit.submit"
+
+[keys.command]
+# "<C-p>" = "edit.clear"
 `;

@@ -20,6 +20,7 @@ import { parse as parseToml } from "smol-toml";
 import { BUILTIN_THEMES } from "./builtin-themes.js";
 import { isLight, mix, parseHex } from "./color.js";
 import { fromPalette, type Palette } from "./palette.js";
+import { didYouMean } from "./suggest.js";
 import { parseHighlightCommand, parseVimColorscheme } from "./vimcolors.js";
 
 export interface Attr {
@@ -365,7 +366,7 @@ export function loadTheme(nameOrPath: string, seen = new Set<string>()): Theme {
 	const builtin = BUILTIN_THEMES[nameOrPath];
 	if (builtin) return builtin;
 	const file = findThemeFile(nameOrPath);
-	if (!file) throw new Error(`E185: Cannot find color scheme '${nameOrPath}'`);
+	if (!file) throw new Error(`E185: Cannot find color scheme '${nameOrPath}'${didYouMean(nameOrPath, listThemes())}`);
 	const fallbackName = path.basename(file).replace(/\.(toml|json|vim)$/, "");
 	return buildTheme(readSpec(file), fallbackName, seen);
 }

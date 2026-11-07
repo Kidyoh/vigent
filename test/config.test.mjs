@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { applySetCommand, CONFIG_TEMPLATE, DEFAULT_UI, loadConfig } from "../dist/config.js";
+import { buildKeymap } from "../dist/keys.js";
 
 function withConfig(text, fn) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vigent-cfg-"));
@@ -41,8 +42,31 @@ test("bad values become warnings, not crashes", () => {
 	assert.deepEqual(loadConfig("/nonexistent/config.toml").warnings, []);
 });
 
-test("the config template is valid and warning-free", () => {
-	withConfig(CONFIG_TEMPLATE, (file) => assert.deepEqual(loadConfig(file).warnings, []));
+test("the config template is valid and warning-free, keys included", () => {
+	withConfig(CONFIG_TEMPLATE, (file) => {
+		const { config, warnings } = loadConfig(file);
+		assert.deepEqual(warnings, []);
+		assert.equal(config.leader, "<Space>");
+		const keys = buildKeymap(config.leader, config.keys);
+		assert.deepEqual(keys.warnings, []);
+		assert.ok(keys.keymap.lookup("normal", ["<Space>", "t"]).exact);
+	});
+});
+
+test("keys sections: per mode, flat [keys] means normal, bad shapes warn", () => {
+	withConfig(
+		'leader = ","\ntimeoutlen = 1\n[ui]\ntimeoutlen = 300\n[keys]\nJ = "session.next"\n[keys.insert]\njk = "<Esc>"\n',
+		(file) => {
+			const { config, warnings } = loadConfig(file);
+			assert.deepEqual(warnings, ["config: unknown key 'timeoutlen'"]);
+			assert.equal(config.leader, ",");
+			assert.equal(config.ui.timeoutlen, 300);
+			assert.deepEqual(config.keys, { normal: { J: "session.next" }, insert: { jk: "<Esc>" } });
+		},
+	);
+	withConfig('keys = "x"\n[ui]\ntimeoutlen = -5\n', (file) => {
+		assert.equal(loadConfig(file).warnings.length, 2);
+	});
 });
 
 test(":set handles vim's forms", () => {
@@ -60,4 +84,6 @@ test(":set handles vim's forms", () => {
 	assert.ok(applySetCommand(ui, "bogus").error);
 	assert.ok(applySetCommand(ui, "sidebar_width=5").error);
 	assert.match(applySetCommand(ui, "").message, /icons=ascii/);
+	applySetCommand(ui, "tm=250");
+	assert.equal(ui.timeoutlen, 250);
 });
