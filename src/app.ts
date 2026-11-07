@@ -28,7 +28,7 @@ const MODE_GROUP: Record<Mode, string> = {
 };
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const SIDEBAR_W = 24;
+const SIDEBAR_W = 30;
 
 interface PaneLine {
 	text: string; // with ANSI
@@ -461,36 +461,78 @@ export class App implements Component {
 		return out.map((l) => truncateToWidth(l, width));
 	}
 
+	/**
+	 * Neovim tree-style sidebar (neo-tree / nvim-tree look):
+	 *   winbar header, number column (session index, used by 1-9),
+	 *   tree guides, cursorline on the focused session, ~ filler rows.
+	 */
 	private renderSidebar(w: number, h: number): string[] {
 		const P = this.painter;
+		const base = P.attr("VigentSidebar");
+		const bg = base.bg ?? P.attr("Normal").bg;
+		const clBg = P.attr("CursorLine").bg ?? bg;
 		const lines: string[] = [];
-		const bg = P.s("Normal");
-		const pad = (s: string, group?: string) => {
-			const padding = Math.max(0, w - visibleWidth(s));
-			const prefix = group ? P.s(group) : bg;
-			return bg + prefix + s + " ".repeat(padding) + RESET;
-		};
-		lines.push(pad(" SESSIONS", "Title"));
-		lines.push(pad(""));
-		this.sessions.forEach((s, i) => {
-			const glyphGroup =
-				s.state === "running" ? "String" : s.state === "waiting" ? "WarningMsg" : s.state === "error" ? "ErrorMsg" : "Comment";
-			const glyph = s.state === "running" ? SPINNER[this.spinnerFrame] : STATE_GLYPH[s.state];
-			const name = truncateToWidth(s.name, w - 7);
-			const plain = ` ${i + 1} ${glyph} ${name}`;
-			const padding = Math.max(0, w - visibleWidth(plain));
-			if (i === this.focusIdx) {
-				const cl = P.s("CursorLine");
-				lines.push(cl + ` ${i + 1} ` + P.s(glyphGroup) + glyph + RESET + cl + ` ${name}` + " ".repeat(padding) + RESET);
-			} else {
-				lines.push(bg + ` ${i + 1} ` + P.s(glyphGroup) + glyph + RESET + bg + ` ${name}` + " ".repeat(padding) + RESET);
+
+		// row = list of [group, text] segments drawn on one background, padded to w
+		const row = (segs: [string, string][], rowBg = bg): string => {
+			let out = "";
+			let used = 0;
+			for (const [group, text] of segs) {
+				const t = truncateToWidth(text, Math.max(0, w - used), "…");
+				out += RESET + P.on(group, rowBg) + t;
+				used += visibleWidth(t);
 			}
+			return out + P.on("VigentSidebar", rowBg) + " ".repeat(Math.max(0, w - used)) + RESET;
+		};
+
+		// winbar
+		const running = this.sessions.filter((x) => x.state === "running").length;
+		const right = running > 0 ? `${running} running ` : `${this.sessions.length} `;
+		const title = " SESSIONS";
+		lines.push(
+			row([
+				["WinBar", title],
+				["VigentSidebar", " ".repeat(Math.max(1, w - visibleWidth(title) - visibleWidth(right)))],
+				["Comment", right],
+			]),
+		);
+
+		this.sessions.forEach((s, i) => {
+			const last = i === this.sessions.length - 1;
+			const focused = i === this.focusIdx;
+			const rowBg = focused ? clBg : bg;
+			const glyphGroup =
+				s.state === "running"
+					? "String"
+					: s.state === "waiting"
+						? "WarningMsg"
+						: s.state === "error"
+							? "ErrorMsg"
+							: "Comment";
+			const glyph = s.state === "running" ? SPINNER[this.spinnerFrame] : STATE_GLYPH[s.state];
+			lines.push(
+				row(
+					[
+						[focused ? "CursorLineNr" : "LineNr", `${String(i + 1).padStart(3)} `],
+						["VigentIndent", last ? "└╴" : "├╴"],
+						[glyphGroup, `${glyph} `],
+						[focused ? "Title" : "VigentSidebar", s.name],
+					],
+					rowBg,
+				),
+			);
+			const model = s.model.replace(/^claude-/, "");
+			const detail = s.worktree ? `⎇ ${s.worktree} · ${model}` : model;
+			lines.push(
+				row([
+					["LineNr", "    "],
+					["VigentIndent", last ? "  " : "│ "],
+					["Comment", `  ${detail}`],
+				]),
+			);
 		});
-		lines.push(pad(""));
-		lines.push(pad("   ● running", "Comment"));
-		lines.push(pad("   ◐ waiting", "Comment"));
-		lines.push(pad("   ○ idle", "Comment"));
-		while (lines.length < h) lines.push(pad(""));
+
+		while (lines.length < h) lines.push(row([["EndOfBuffer", "~"]]));
 		return lines.slice(0, h);
 	}
 
@@ -501,7 +543,10 @@ export class App implements Component {
 
 		const P = this.painter;
 		const lines: PaneLine[] = [];
-		const push = (text: string, plain?: string) => lines.push({ text, plain: plain ?? stripAnsi(text) });
+		const normal = P.s("Normal");
+		// a RESET inside a line would drop the theme background; restore it after each one
+		const push = (text: string, plain?: string) =>
+			lines.push({ text: text.split(RESET).join(RESET + normal), plain: plain ?? stripAnsi(text) });
 
 		if (!s) {
 			push("");

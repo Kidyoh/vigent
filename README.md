@@ -4,7 +4,7 @@ A vim-style, lightweight terminal app for running several coding agents at once,
 
 ![vigent with the default Neovim theme](docs/screenshots/vigent-default-theme.png)
 
-![vigent with gruvbox, INSERT mode, tool output unfolded](docs/screenshots/vigent-gruvbox-insert.png)
+![vigent with the gruvbox theme, second session focused](docs/screenshots/vigent-gruvbox.png)
 
 ## Quick start
 

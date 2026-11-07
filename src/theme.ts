@@ -73,7 +73,14 @@ const LINKS: Record<string, string> = {
 	Added: "DiffAdd",
 	Removed: "DiffDelete",
 	Changed: "DiffChange",
+	EndOfBuffer: "NonText",
+	WinBar: "Title",
+	NeoTreeNormal: "NvimTreeNormal",
+	NeoTreeIndentMarker: "NvimTreeIndentMarker",
+	NvimTreeIndentMarker: "NonText",
 	// Vigent-specific groups -> sensible vim fallbacks
+	VigentSidebar: "NeoTreeNormal",
+	VigentIndent: "NeoTreeIndentMarker",
 	VigentModeNormal: "StatusLine",
 	VigentModeInsert: "ModeMsg",
 	VigentModeVisual: "Visual",
@@ -107,6 +114,17 @@ export class Painter {
 		if (v === undefined) {
 			v = sgr(this.attr(group));
 			this.cache.set(group, v);
+		}
+		return v;
+	}
+
+	/** SGR prefix for a group drawn on an explicit background (cached). */
+	on(group: string, bg: string | undefined, extra?: Attr): string {
+		const key = `${group}|${bg ?? ""}|${extra ? JSON.stringify(extra) : ""}`;
+		let v = this.cache.get(key);
+		if (v === undefined) {
+			v = sgr({ ...this.attr(group), ...extra, bg });
+			this.cache.set(key, v);
 		}
 		return v;
 	}
@@ -158,7 +176,9 @@ export const NVIM_DEFAULT: Theme = {
 		StatusLineNC: { fg: c.lightGrey4, bg: c.darkGrey3 },
 		CursorLine: { bg: c.darkGrey3 },
 		Visual: { bg: c.darkGrey4 },
-		LineNr: { fg: c.lightGrey4, bg: c.darkGrey2 },
+		LineNr: { fg: c.darkGrey4 },
+		CursorLineNr: { fg: c.lightGrey2, bold: true },
+		WinBar: { fg: c.lightGrey2, bold: true },
 		Comment: { fg: c.lightGrey4, italic: true },
 		NonText: { fg: c.darkGrey4 },
 		Title: { fg: c.lightGrey2, bold: true },
@@ -180,6 +200,7 @@ export const NVIM_DEFAULT: Theme = {
 		Pmenu: { fg: c.lightGrey2, bg: c.darkGrey3 },
 		PmenuSel: { fg: c.darkGrey2, bg: c.lightGrey3 },
 		// Vigent mode badges (vim-airline-style blocks)
+		VigentSidebar: { fg: c.lightGrey2, bg: c.darkGrey1 },
 		VigentModeNormal: { fg: c.darkGrey1, bg: c.lightBlue, bold: true },
 		VigentModeInsert: { fg: c.darkGrey1, bg: c.lightGreen, bold: true },
 		VigentModeVisual: { fg: c.darkGrey1, bg: c.lightMagenta, bold: true },
@@ -195,10 +216,12 @@ export const NVIM_DEFAULT: Theme = {
 // Built-in: gruvbox (dark, medium) — ported from morhetz/gruvbox
 // ---------------------------------------------------------------------------
 const g = {
+	bg0h: "#1d2021",
 	bg0: "#282828",
 	bg1: "#3c3836",
 	bg2: "#504945",
 	bg3: "#665c54",
+	bg4: "#7c6f64",
 	fg0: "#fbf1c7",
 	fg1: "#ebdbb2",
 	fg3: "#bdae93",
@@ -223,7 +246,10 @@ export const GRUVBOX: Theme = {
 		StatusLineNC: { fg: g.fg3, bg: g.bg1 },
 		CursorLine: { bg: g.bg1 },
 		Visual: { bg: g.bg2 },
-		LineNr: { fg: g.bg3 },
+		LineNr: { fg: g.bg4 },
+		CursorLineNr: { fg: g.yellow, bold: true },
+		WinBar: { fg: g.fg1, bold: true },
+		VigentSidebar: { fg: g.fg1, bg: g.bg0h },
 		Comment: { fg: g.grey, italic: true },
 		NonText: { fg: g.bg2 },
 		Title: { fg: g.green, bold: true },
