@@ -198,3 +198,44 @@ test("the app: :kill keeps the agent for :attach; :attach focuses one already op
 	ex("attach nope");
 	assert.match(app.message, /no worktree 'nope'/);
 });
+
+test("a pi request that fails shows its error instead of nothing, now and after a restart", async () => {
+	const { PiSession, piError } = await import("../dist/session.js");
+	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+	const { registerFauxProvider, fauxAssistantMessage } = await import("@mariozechner/pi-ai");
+	const faux = registerFauxProvider();
+	const authStorage = AuthStorage.inMemory();
+	authStorage.setRuntimeApiKey(faux.getModel().provider, "test");
+	const wt = createWorktree(repo, "say hi");
+	const opts = { cwd: wt.path, worktree: wt, modelObject: faux.getModel(), authStorage, agentDir: path.join(tmp, "pi-err"), sessionDir: sessionDir(wt.path) };
+	const refused = '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}';
+	faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: refused })]);
+
+	const s = new PiSession("say hi", "faux", opts);
+	try {
+		await s.ready;
+		await new Promise((resolve) => {
+			const off = s.onChange(() => {
+				if (s.state === "error") (off(), resolve());
+			});
+			s.send("hello");
+		});
+		assert.deepEqual(s.items.map((i) => i.kind), ["user", "info"]);
+		assert.match(s.items[1].text, /^error: 401 .*invalid x-api-key/);
+		assert.match(s.items[1].text, /pi's API key or login was refused/, "a hint when the key was refused");
+	} finally {
+		s.dispose();
+	}
+
+	const again = new PiSession("say hi", "faux", opts);
+	try {
+		await again.ready;
+		assert.ok(again.items.some((i) => i.kind === "info" && /invalid x-api-key/.test(i.text)), "the error is still there after a restart");
+	} finally {
+		again.dispose();
+		faux.unregister();
+	}
+
+	assert.equal(piError({ role: "assistant", stopReason: "stop" }), undefined);
+	assert.equal(piError({ role: "assistant", stopReason: "error", errorMessage: "overloaded" }), "error: overloaded", "no key hint for other errors");
+});

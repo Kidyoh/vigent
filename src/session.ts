@@ -344,13 +344,17 @@ export class PiSession extends Session {
 		session.subscribe((event: any) => this.onEvent(event));
 	}
 
+	/** the run ended on a failed request (shown as an error, not as silence) */
+	private failed = false;
+
 	private onEvent(event: any) {
 		switch (event.type) {
 			case "agent_start":
+				this.failed = false;
 				this.setState("running");
 				break;
 			case "agent_end":
-				this.setState("idle");
+				this.setState(this.failed ? "error" : "idle");
 				this.refreshStat(0);
 				break;
 			case "message_start": {
@@ -377,6 +381,12 @@ export class PiSession extends Session {
 					if (usage) this.tokens += (usage.input ?? 0) + (usage.output ?? 0);
 					if (!last.text) this.items.pop(); // a turn that only called tools
 					this.emit();
+				}
+				// a failed request ends the reply with an error instead of throwing: say so
+				const err = piError(event.message);
+				if (err) {
+					this.failed = true;
+					this.pushInfo(err);
 				}
 				break;
 			}
@@ -485,12 +495,26 @@ export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; t
 				if (b.id) byCallId.set(b.id, item);
 			}
 			if (m.usage) tokens += (m.usage.input ?? 0) + (m.usage.output ?? 0);
+			const err = piError(m);
+			if (err) items.push({ kind: "info", text: err });
 		} else if (m?.role === "toolResult") {
 			const item = byCallId.get(m.toolCallId);
 			if (item?.tool) item.tool.output = extractText(m.content);
 		}
 	}
 	return { items, tokens };
+}
+
+/**
+ * The error of a reply whose request failed (pi ends it with stopReason
+ * "error" and an errorMessage), with a hint when the key or login was refused.
+ */
+export function piError(message: any): string | undefined {
+	if (message?.role !== "assistant" || message.stopReason !== "error") return undefined;
+	const text = String(message.errorMessage ?? "").trim() || "the request failed";
+	const auth = /\b(401|403)\b|auth|api[ _-]?key|unauthori[sz]ed|forbidden|credential|expired|login/i.test(text);
+	const hint = auth ? " · pi's API key or login was refused; :checkhealth shows the engines, and :new <task> --engine claude starts one on Claude Code" : "";
+	return `error: ${text}${hint}`;
 }
 
 function extractText(content: any): string {
