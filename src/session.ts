@@ -455,7 +455,11 @@ export class PiSession extends Session {
 			.then(() => this.session.agent?.waitForIdle?.())
 			.then(() => this.session.prompt(text))
 			.catch((err: any) => {
-				this.pushInfo(`error: ${err?.message ?? err}`);
+				const text = String(err?.message ?? err);
+				// pi's own advice (/login, its docs paths) is for pi's TUI, not vigent: keep its first line
+				const key = /api key|login|auth/i.test(text);
+				this.pushInfo(`error: ${key ? text.split("\n")[0] : text}`);
+				if (key) this.pushInfo(PI_KEY_HINT);
 				this.setState("error");
 			});
 	}
@@ -505,6 +509,10 @@ export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; t
 	return { items, tokens };
 }
 
+/** What to do when pi can't get through: this agent stays on pi, so start one elsewhere. */
+export const PI_KEY_HINT =
+	"this agent runs on pi, and pi has no working API key. Agents keep the engine they started on: :new <task> starts one on the default engine (:engine picks it, e.g. Claude Code or Codex with your existing login), and :kill removes this one.";
+
 /**
  * The error of a reply whose request failed (pi ends it with stopReason
  * "error" and an errorMessage), with a hint when the key or login was refused.
@@ -513,8 +521,7 @@ export function piError(message: any): string | undefined {
 	if (message?.role !== "assistant" || message.stopReason !== "error") return undefined;
 	const text = String(message.errorMessage ?? "").trim() || "the request failed";
 	const auth = /\b(401|403)\b|auth|api[ _-]?key|unauthori[sz]ed|forbidden|credential|expired|login/i.test(text);
-	const hint = auth ? " · pi's API key or login was refused; :checkhealth shows the engines, and :new <task> --engine claude starts one on Claude Code" : "";
-	return `error: ${text}${hint}`;
+	return auth ? `error: ${text}\n${PI_KEY_HINT}` : `error: ${text}`;
 }
 
 function extractText(content: any): string {

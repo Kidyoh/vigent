@@ -222,7 +222,7 @@ test("a pi request that fails shows its error instead of nothing, now and after 
 		});
 		assert.deepEqual(s.items.map((i) => i.kind), ["user", "info"]);
 		assert.match(s.items[1].text, /^error: 401 .*invalid x-api-key/);
-		assert.match(s.items[1].text, /pi's API key or login was refused/, "a hint when the key was refused");
+		assert.match(s.items[1].text, /this agent runs on pi, and pi has no working API key.*:new <task>.*:engine/, "a hint when the key was refused");
 	} finally {
 		s.dispose();
 	}
@@ -238,4 +238,27 @@ test("a pi request that fails shows its error instead of nothing, now and after 
 
 	assert.equal(piError({ role: "assistant", stopReason: "stop" }), undefined);
 	assert.equal(piError({ role: "assistant", stopReason: "error", errorMessage: "overloaded" }), "error: overloaded", "no key hint for other errors");
+});
+
+test("a pi agent with no API key says what to do, without pi's own /login advice", async () => {
+	const { PiSession } = await import("../dist/session.js");
+	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+	const { registerFauxProvider } = await import("@mariozechner/pi-ai");
+	const faux = registerFauxProvider();
+	const wt = createWorktree(repo, "no key");
+	const s = new PiSession("no key", "faux", { cwd: wt.path, worktree: wt, modelObject: faux.getModel(), authStorage: AuthStorage.inMemory(), agentDir: path.join(tmp, "pi-nokey") });
+	try {
+		await s.ready;
+		await new Promise((resolve) => {
+			const off = s.onChange(() => s.state === "error" && (off(), resolve()));
+			s.send("hello");
+		});
+		const info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
+		assert.match(info[0], /^error: No API key found/);
+		assert.doesNotMatch(info.join("\n"), /\/login|providers\.md/, "pi's TUI advice is left out");
+		assert.match(info[1], /this agent runs on pi.*:new <task>.*:engine.*:kill/);
+	} finally {
+		s.dispose();
+		faux.unregister();
+	}
 });
