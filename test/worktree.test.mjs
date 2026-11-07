@@ -17,6 +17,9 @@ import {
 	slugify,
 } from "../dist/worktree.js";
 
+// these tests cover plain git worktrees; riftri has its own (riftri.test.mjs)
+process.env.RIFTRI_BINARY = path.join(os.tmpdir(), "vigent-no-riftri");
+
 const GIT_ENV = {
 	GIT_AUTHOR_NAME: "Test",
 	GIT_AUTHOR_EMAIL: "test@example.com",

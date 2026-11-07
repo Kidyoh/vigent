@@ -8,6 +8,9 @@ import { agentStateDir, loadAgentMeta, restorableAgents, saveAgentMeta, sessionD
 import { itemsFromMessages } from "../dist/session.js";
 import { createWorktree, DEFAULT_WORKTREE, removeWorktree } from "../dist/worktree.js";
 
+// these tests cover plain git worktrees; riftri has its own (riftri.test.mjs)
+process.env.RIFTRI_BINARY = path.join(os.tmpdir(), "vigent-no-riftri");
+
 const GIT_ENV = { GIT_AUTHOR_NAME: "T", GIT_AUTHOR_EMAIL: "t@e.com", GIT_COMMITTER_NAME: "T", GIT_COMMITTER_EMAIL: "t@e.com" };
 let tmp;
 let repo;

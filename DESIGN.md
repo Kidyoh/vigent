@@ -199,6 +199,11 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
   continues its conversation by id after a restart. The sidebar's ENGINES
   block and `:checkhealth` show what is installed and signed in, and how to
   connect the rest.
+- **M8 — lightweight worktrees.** ✅ With riftri (riftri.dev, installed with
+  vigent) each agent's worktree shares copy-on-write storage with the rest:
+  `riftri worktree add / remove / inspect / repair / gc`, driven through its
+  JSON reports and receipts. Plain git is used only when riftri declines and
+  changes nothing. `:checkhealth` and `:worktrees` show the disk saved.
 - **Later.** Server/remote mode (phone follows a session), pi extensions
   passthrough, partial-hunk accept, session templates.
 

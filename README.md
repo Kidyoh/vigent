@@ -90,6 +90,18 @@ Every agent gets its own git worktree and branch, so agents never touch your che
 
 Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `refactor/…`) and are taken from the task you type. The sidebar and statusline show each agent's branch with live `+added −removed` counts. Removing a worktree goes through git's own safety checks, so uncommitted or unmerged work is never thrown away. Folder, branch pattern and base branch are set in `[worktree]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#worktree)).
 
+### Lightweight worktrees with riftri
+
+A worktree is normally a full copy of your checkout, so ten agents on a big repo cost ten checkouts of disk. vigent installs [riftri](https://riftri.dev) with it (an optional dependency; `riftri` on your PATH works too). When riftri can, it makes each agent's worktree a real git linked worktree whose unchanged files share copy-on-write storage. Each new agent then costs almost no disk, and only the files it changes take space of their own. riftri uses APFS clones on macOS, Btrfs or reflink-enabled XFS (or OverlayFS) on Linux, and ReFS block clones on Windows.
+
+- `:new` says `· riftri reflink` (or `apfs-clone`, `overlay-fs`, …) when riftri made the worktree. When it falls back to a plain git copy, it says so, and `:checkhealth` shows riftri's reason and its fix.
+- `:checkhealth` and `:worktrees` show what the worktrees cost: for example, *4 worktrees: 58.0 MB of files in 11.7 MB on disk*.
+- Removing (`:kill!`, `:worktree remove`) goes through `riftri worktree remove`, which refuses uncommitted changes like git does and journals the removal. After that, `riftri gc` frees storage that no agent uses any more.
+- On restart, vigent inspects riftri's worktrees before reopening their agents. If an OverlayFS view lost its mount (after a reboot), vigent repairs it first.
+- vigent falls back to git only when riftri declines with a receipt saying nothing was changed (unsupported volume, checkout or environment). Any other riftri failure is shown, never papered over. `[worktree] backend = "riftri"` requires riftri, and `"git"` turns it off.
+
+![:worktrees with every agent on riftri](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/riftri-worktrees.png)
+
 ![agents in their own worktrees](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/worktrees-sidebar.png)
 
 ![:diff](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/worktrees-diff.png)
@@ -207,6 +219,8 @@ src/
   session.ts         Session model; PiSession (real engine) and DemoSession
   engines.ts         which engines are installed and signed in (:checkhealth)
   cli-engines.ts     Claude Code / Codex / OpenCode adapters and CliSession
+  worktree.ts        a git worktree per agent: branch names, create, remove, diff
+  riftri.ts          copy-on-write worktrees through riftri's JSON contract
   demo.ts            scripted demo sessions
 test/                node:test suites (npm test)
 ```

@@ -11,6 +11,7 @@ import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, o
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
+import { formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
 import { DemoSession, PiSession, type Session } from "./session.js";
 import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./theme.js";
 import {
@@ -47,6 +48,7 @@ themes:
   vigent worktree list                       agent worktrees in this repo
   vigent worktree remove <branch> [--force]  delete one (safe unless --force)
   vigent worktree prune                      forget worktrees whose folder is gone
+  vigent worktree gc                         free riftri storage no worktree uses
   vigent config init                         write a commented config.toml
   vigent config check                        validate config.toml (theme, options, keys)
 
@@ -177,7 +179,11 @@ function worktreeCommand(argv: string[]): number {
 	if (sub === "list" || sub === undefined) {
 		const all = listWorktrees(root, config.worktree);
 		if (all.length === 0) console.log(`no agent worktrees (they go in ${worktreesDir(root, config.worktree)})`);
-		for (const w of all) console.log(`${(w.branch ?? `(detached ${w.head})`).padEnd(36)} ${w.path}`);
+		const backends = riftriBackends(root, all.map((w) => w.path));
+		for (const w of all) {
+			const b = backends.get(w.path);
+			console.log(`${(w.branch ?? `(detached ${w.head})`).padEnd(36)} ${(b ? `riftri ${b}` : "git").padEnd(16)} ${w.path}`);
+		}
 		return 0;
 	}
 	if (sub === "remove" || sub === "rm") {
@@ -199,7 +205,20 @@ function worktreeCommand(argv: string[]): number {
 		execFileSync("git", ["worktree", "prune", "-v"], { cwd: root, stdio: "inherit" });
 		return 0;
 	}
-	console.error("usage: vigent worktree list | remove <branch> [--force] | prune");
+	if (sub === "gc") {
+		if (!riftriStateDir(root)) {
+			console.log("no riftri storage in this repository");
+			return 0;
+		}
+		const r = riftriGc(root);
+		if (!r.ok) {
+			console.error(`vigent: riftri gc failed: ${r.message}`);
+			return 1;
+		}
+		console.log(`freed ${formatBytes(r.report?.removed_allocated_bytes ?? 0)}`);
+		return 0;
+	}
+	console.error("usage: vigent worktree list | remove <branch> [--force] | prune | gc");
 	return 1;
 }
 
@@ -279,6 +298,16 @@ async function main(): Promise<number | undefined> {
 		root,
 		config: config.worktree,
 	});
+	// can agent worktrees be copy-on-write here? (riftri; runs in the background)
+	app.checkStorage = () => riftriHealth(root, root ? worktreesDir(root, config.worktree) : undefined, config.worktree.backend);
+	if (!demo && root && config.worktree.enabled) {
+		app
+			.checkStorage()
+			.then((h) => {
+				app.storage = h;
+			})
+			.catch(() => {});
+	}
 	app.defaultEngine = () => chosenEngine ?? defaultEngine(app.engines);
 	app.detectEngines = () => detectEngines();
 	// installed? signed in? Checked in the background: the CLIs take a moment to answer
@@ -337,8 +366,10 @@ async function main(): Promise<number | undefined> {
 			model,
 			createdAt: new Date().toISOString(),
 		};
+		const view = root ? prepareViews(root, [wt.path]).get(wt.path) : undefined;
+		if (view && !view.ready) throw new Error(`can't reopen ${wt.branch}: ${view.reason}`);
 		saveAgentMeta(wt.path, { ...meta, detached: undefined }); // reopened at the next start again
-		return reopen(meta, { ...wt, base: wt.base ?? meta.base });
+		return reopen(meta, { ...wt, base: wt.base ?? meta.base, riftri: view?.backend });
 	};
 
 	app.onQuit = () => {
@@ -356,9 +387,17 @@ async function main(): Promise<number | undefined> {
 		app.focusIdx = 0;
 	} else if (root && config.worktree.enabled) {
 		// reopen the agents that were running when vigent last quit
-		for (const { meta, worktree } of restorableAgents(root, config.worktree)) {
+		const agents = restorableAgents(root, config.worktree);
+		// riftri views on OverlayFS lose their mount on reboot: repair them before an agent runs there
+		const views = prepareViews(root, agents.map((a) => a.worktree.path!));
+		for (const { meta, worktree } of agents) {
+			const view = views.get(worktree.path!);
+			if (view && !view.ready) {
+				warnings.push(`couldn't reopen '${meta.name}': ${view.reason}`);
+				continue;
+			}
 			try {
-				app.addSession(reopen(meta, worktree), false);
+				app.addSession(reopen(meta, { ...worktree, riftri: view?.backend }), false);
 			} catch (err) {
 				warnings.push(`couldn't reopen '${meta.name}': ${(err as Error).message}`);
 			}

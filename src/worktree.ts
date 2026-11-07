@@ -6,14 +6,19 @@
  * repo (../<repo>-worktrees/fix-flaky-checkout-test), and runs the agent
  * there. Agents never touch your checkout or each other's files.
  *
- * Removing is always git's safe path: `git worktree remove` refuses when there
- * are uncommitted changes, and `git branch -d` keeps branches that aren't
- * merged, unless you ask for --force.
+ * With riftri installed (https://riftri.dev, see riftri.ts) the worktree's
+ * unchanged files share copy-on-write storage with the other agents', so a
+ * new agent costs almost no disk. It's still a real git worktree.
+ *
+ * Removing is always the safe path: `git worktree remove` (or `riftri
+ * worktree remove`) refuses when there are uncommitted changes, and
+ * `git branch -d` keeps branches that aren't merged, unless you ask for --force.
  */
 import { execFile, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { describeFailure, riftriAdd, riftriBinary, riftriGc, riftriOwnership, riftriRemove, RIFTRI_INSTALL, type WorktreeBackend } from "./riftri.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +35,10 @@ export interface WorktreeInfo {
 	/** the branch or commit the worktree was created from */
 	base?: string;
 	stat?: DiffStat;
+	/** riftri's storage backend when riftri made it (reflink, apfs-clone, overlay-fs, ...) */
+	riftri?: string;
+	/** why riftri didn't make this one (backend "auto" fell back to git) */
+	riftriSkipped?: string;
 }
 
 export interface WorktreeConfig {
@@ -40,12 +49,15 @@ export interface WorktreeConfig {
 	branch: string;
 	/** branch to start from; default: the branch currently checked out */
 	base?: string;
+	/** "auto": riftri when installed (copy-on-write), else git · "riftri": always · "git": never */
+	backend: WorktreeBackend;
 }
 
 export const DEFAULT_WORKTREE: WorktreeConfig = {
 	enabled: true,
 	dir: "../{repo}-worktrees",
 	branch: "{type}/{name}",
+	backend: "auto",
 };
 
 function git(args: string[], cwd: string): string {
@@ -179,12 +191,25 @@ export function createWorktree(root: string, agentName: string, config: Worktree
 
 	fs.mkdirSync(dir, { recursive: true });
 	excludeIfInside(root, dir);
+	const info: WorktreeInfo = { branch, path: folder, base, stat: { files: 0, added: 0, removed: 0 } };
+	const backend = config.backend ?? "auto";
+	if (backend !== "git") {
+		if (!riftriBinary()) {
+			if (backend === "riftri") throw new Error(`[worktree] backend is "riftri", but riftri isn't installed: ${RIFTRI_INSTALL}`);
+		} else {
+			const r = riftriAdd(root, folder, branch, base);
+			if (r.ok) return { ...info, riftri: r.report?.backend ?? "riftri" };
+			// riftri declined (unsupported volume, checkout or environment) and changed nothing: git is safe
+			if (!r.declined || backend === "riftri") throw new Error(`riftri worktree add failed: ${describeFailure(r)}`);
+			info.riftriSkipped = r.message;
+		}
+	}
 	try {
 		git(["worktree", "add", "-b", branch, folder, base], root);
 	} catch (err) {
 		throw new Error(`git worktree add failed: ${gitError(err)}`);
 	}
-	return { branch, path: folder, base, stat: { files: 0, added: 0, removed: 0 } };
+	return info;
 }
 
 /** A worktrees folder inside the repo goes in .git/info/exclude (local, never committed) so `git status` stays clean. */
@@ -215,16 +240,25 @@ export function removeWorktree(
 	wt: { path: string; branch?: string; base?: string },
 	force = false,
 ): RemoveResult {
-	try {
-		git(["worktree", "remove", ...(force ? ["--force"] : []), wt.path], root);
-	} catch (err) {
-		const reason = gitError(err);
-		const dirty = /modified or untracked|contains modified/.test(reason);
-		return {
-			removed: false,
-			branchDeleted: false,
-			message: dirty ? `${wt.path} has uncommitted changes; use force to remove it anyway` : reason,
-		};
+	const dirtyMessage = `${wt.path} has uncommitted changes; use force to remove it anyway`;
+	const owner = riftriOwnership(root, wt.path);
+	if (owner.error) return { removed: false, branchDeleted: false, message: `riftri: ${owner.error}` };
+	if (owner.managed) {
+		// riftri's removal is journaled; a forced one snapshots the view first
+		const r = riftriRemove(root, wt.path, force);
+		if (!r.ok) {
+			const dirty = /has changes|uncommitted|dirty/i.test(r.message);
+			return { removed: false, branchDeleted: false, message: dirty ? dirtyMessage : `riftri worktree remove failed: ${describeFailure(r)}` };
+		}
+		riftriGc(root); // free the shared base once no agent uses it
+	} else {
+		try {
+			git(["worktree", "remove", ...(force ? ["--force"] : []), wt.path], root);
+		} catch (err) {
+			const reason = gitError(err);
+			const dirty = /modified or untracked|contains modified/.test(reason);
+			return { removed: false, branchDeleted: false, message: dirty ? dirtyMessage : reason };
+		}
 	}
 	if (!wt.branch) return { removed: true, branchDeleted: false, message: `removed ${wt.path}` };
 	try {

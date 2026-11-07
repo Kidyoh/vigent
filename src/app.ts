@@ -33,6 +33,7 @@ import {
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
+import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
 import { ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
 import { splitView, unifiedView } from "./diffview.js";
@@ -186,6 +187,10 @@ export class App implements Component {
 	engines?: EngineInfo[];
 	/** checks the engines again (:checkhealth) */
 	detectEngines?: () => Promise<EngineInfo[]>;
+	/** can agent worktrees be copy-on-write here (riftri)? undefined until checked */
+	storage?: RiftriHealth;
+	/** checks riftri again (:checkhealth) */
+	checkStorage?: () => Promise<RiftriHealth>;
 	/** the engine :new uses without --engine */
 	defaultEngine: () => EngineId = () => "pi";
 
@@ -712,9 +717,14 @@ export class App implements Component {
 					});
 					this.addSession(s);
 					const wt = s.worktree;
+					if (wt?.riftri) this.refreshStorage();
 					const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
 					if (wt?.path) {
-						this.setMessage(`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}`, "ModeMsg");
+						const how = wt.riftri ? ` · riftri ${wt.riftri}` : wt.riftriSkipped ? " · full copy (riftri declined: :checkhealth)" : "";
+						this.setMessage(
+							`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}${how}`,
+							wt.riftriSkipped ? "WarningMsg" : "ModeMsg",
+						);
 					} else if (wt) {
 						this.setMessage(`'${name}'${by} on ${wt.branch}`, "ModeMsg");
 					} else {
@@ -981,14 +991,19 @@ export class App implements Component {
 			}
 			lines.push([]);
 			lines.push([["Comment", "Connect in another terminal, then :checkhealth again."]]);
+			lines.push(...this.storageHealthLines());
 			this.openFloat("checkhealth", lines, 84);
 		};
-		if (!this.detectEngines) return show();
+		if (!this.detectEngines && !this.checkStorage) return show();
 		this.setMessage("checking engines…", "Comment");
 		this.tui.requestRender();
-		this.detectEngines()
-			.then((engines) => {
+		Promise.all([
+			this.detectEngines?.() ?? Promise.resolve(this.engines),
+			this.checkStorage?.().catch(() => this.storage) ?? Promise.resolve(this.storage),
+		])
+			.then(([engines, storage]) => {
 				this.engines = engines;
+				this.storage = storage;
 				this.message = "";
 				show();
 			})
@@ -996,6 +1011,47 @@ export class App implements Component {
 				this.setMessage(`checkhealth: ${(err as Error).message}`, "ErrorMsg");
 				this.tui.requestRender();
 			});
+	}
+
+	/** Recount what riftri's worktrees cost, in the background. */
+	private refreshStorage() {
+		this.checkStorage?.()
+			.then((h) => {
+				this.storage = h;
+				this.tui.requestRender();
+			})
+			.catch(() => {});
+	}
+
+	/** The worktrees part of :checkhealth: riftri, and what agent worktrees cost on disk. */
+	private storageHealthLines(): FloatLine[] {
+		const h = this.storage;
+		if (!h) return [];
+		const I = this.icons;
+		const lines: FloatLine[] = [[], [["Title", "vigent: agent worktrees"]], []];
+		const glyph = h.ready ? I.ok : h.installed ? I.warn : I.off;
+		const group = h.ready ? "String" : h.installed ? "WarningMsg" : "Comment";
+		lines.push([
+			[group, `${glyph} `],
+			["Title", "riftri"],
+			["Comment", h.version ? `  ${h.version}` : ""],
+			["Comment", "  lightweight git worktrees · riftri.dev"],
+		]);
+		lines.push([["NormalFloat", "    "], [h.ready ? "NormalFloat" : group, `${h.ready ? "OK " : h.installed ? "WARNING " : ""}${h.detail}`]]);
+		for (const b of h.blockers) {
+			wrapTextWithAnsi(b, 74).forEach((l, i) => lines.push([["NormalFloat", "    "], ["WarningMsg", i === 0 ? "- " : "  "], ["NormalFloat", l]]));
+		}
+		if (h.next) lines.push([["Comment", "    try: "], ["Special", h.next]]);
+		if (!h.installed) lines.push([["Comment", "    install: "], ["Special", RIFTRI_INSTALL]]);
+		if (h.views && h.logicalBytes !== undefined && h.allocatedBytes !== undefined) {
+			const saved = Math.max(0, h.logicalBytes - h.allocatedBytes);
+			lines.push([
+				["NormalFloat", "    "],
+				["NormalFloat", `${h.views} worktree${h.views === 1 ? "" : "s"}: ${formatBytes(h.logicalBytes)} of files in ${formatBytes(h.allocatedBytes)} on disk`],
+				["String", saved > 0 ? ` (saves ${formatBytes(saved)})` : ""],
+			]);
+		}
+		return lines;
 	}
 
 	/** `:dash`: every agent at a glance; Enter jumps to one. */
@@ -1113,6 +1169,7 @@ export class App implements Component {
 			return;
 		}
 		const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch, base: wt.base });
+		if (r.removed && wt.riftri) this.refreshStorage();
 		this.setMessage(`killed '${s.name}' · ${r.message}`, r.removed ? "WarningMsg" : "ErrorMsg");
 	}
 
@@ -1166,6 +1223,7 @@ export class App implements Component {
 				return;
 			}
 			const r = removeWorktree(root, w, m[2] === "!");
+			if (r.removed) this.refreshStorage();
 			this.setMessage(r.message, r.removed ? "WarningMsg" : "ErrorMsg");
 			return;
 		}
@@ -1184,18 +1242,29 @@ export class App implements Component {
 			this.setMessage("no agent worktrees yet (:new <task> creates one)", "Comment");
 			return;
 		}
+		const backends = riftriBackends(root, all.map((w) => w.path));
 		const lines: FloatLine[] = all.map((w) => {
 			const owner = this.sessions.find((s) => s.worktree?.path === w.path);
+			const backend = backends.get(w.path);
 			return [
 				[owner ? "String" : "Comment", owner ? "● " : "  "],
 				["Title", `${(w.branch ?? `(detached ${w.head})`).padEnd(30)} `],
 				["NormalFloat", `${truncateToWidth(owner?.name ?? "", 20, "…").padEnd(20)} `],
+				// the storage column only when riftri made some of them
+				[backend ? "String" : "Comment", backends.size ? `${(backend ? `riftri ${backend}` : "git").padEnd(16)} ` : ""],
 				["Comment", this.shortPath(w.path)],
 			];
 		});
+		const st = this.storage;
+		if (st?.views && st.logicalBytes !== undefined && st.allocatedBytes !== undefined) {
+			lines.push([]);
+			lines.push([
+				["Comment", `riftri: ${formatBytes(st.logicalBytes)} of files in ${formatBytes(st.allocatedBytes)} on disk (${backendName(st.backend)})`],
+			]);
+		}
 		lines.push([]);
 		lines.push([["Comment", "● = an agent is working in it · :attach <branch> reopens one · :worktree remove <branch> deletes it"]]);
-		this.openFloat("Worktrees", lines, 96);
+		this.openFloat("Worktrees", lines, 112);
 	}
 
 	/** `:diff`: what the focused agent changed since its worktree was created. */
@@ -1573,7 +1642,7 @@ export class App implements Component {
 		const s = this.focusedSession;
 		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
 		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}` : "";
-		const where = s?.worktree?.path ? this.shortPath(s.worktree.path) : s ? "this checkout" : "";
+		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? " · riftri" : ""}` : s ? "this checkout" : "";
 		const right = where ? `${where} ` : "";
 		const room = Math.max(0, w - visibleWidth(left) - visibleWidth(model) - visibleWidth(right));
 		const status = s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "";

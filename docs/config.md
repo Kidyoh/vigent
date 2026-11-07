@@ -104,6 +104,9 @@ Each agent works in its own git worktree, on its own branch, so agents never tou
 | `dir` | `"../{repo}-worktrees"` | where worktrees go, relative to the repo root; `{repo}` is the repo's folder name. A folder inside the repo is added to `.git/info/exclude` so `git status` stays clean |
 | `branch` | `"{type}/{name}"` | branch name pattern; must contain `{name}` |
 | `base` | the checked-out branch | branch to start new worktrees from |
+| `backend` | `"auto"` | how worktrees are made. `"auto"`: with [riftri](https://riftri.dev) when it's installed and can make copy-on-write worktrees here, else plain `git worktree`. `"riftri"`: always riftri (an error if it can't). `"git"`: never riftri |
+
+**riftri** (installed with vigent as an optional dependency, or found on your PATH, or set with `$RIFTRI_BINARY`) makes each agent's worktree a real git linked worktree whose unchanged files share copy-on-write storage with the others. It uses APFS clones, Btrfs/XFS reflinks, OverlayFS or ReFS block clones. With `"auto"`, vigent falls back to git only when riftri declines with a receipt saying nothing was changed. Any other riftri failure stops `:new` with riftri's message and its suggested command. `:checkhealth` shows whether riftri is ready for your worktrees folder, what's blocking it, and how much disk the worktrees use. riftri refuses to run while `GIT_CONFIG_COUNT` or `GIT_CONFIG_PARAMETERS` is set, because they inject git config into its internal git commands. `:checkhealth` reports that too.
 
 **Branch names** are built from the task you type:
 
@@ -117,7 +120,7 @@ Each agent works in its own git worktree, on its own branch, so agents never tou
 
 A first or last word of `feat`, `fix` (also `bugfix`, `hotfix`, `bug`), `docs`, `refactor`, `test`, `chore`, `perf`, `ci`, `build` or `style` becomes the type. Otherwise the type is `feat`. Names are lowercase ASCII with hyphens, at most 48 characters. Reusing a name gives `-2`, `-3`, … instead of failing. Other patterns: `"agent/{name}"`, or `"yourname/{type}/{name}"`.
 
-**Removing** always goes through git's safety checks. `git worktree remove` refuses a worktree with uncommitted changes, and the branch is deleted only if it's merged. Otherwise it's kept, so finished work is never lost by accident:
+**Removing** always goes through git's safety checks. `git worktree remove` (or `riftri worktree remove` for riftri's worktrees, followed by `riftri gc` to free unused storage) refuses a worktree with uncommitted changes, and the branch is deleted only if it's merged. Otherwise it's kept, so finished work is never lost by accident:
 
 ```vim
 :kill                       " stop the agent, keep its worktree and branch
@@ -132,11 +135,11 @@ A first or last word of `feat`, `fix` (also `bugfix`, `hotfix`, `bug`), `docs`, 
 :pr                         " push the branch and open a pull request
 ```
 
-**Restarting:** vigent saves each agent's name, model and conversation inside git's own record of its worktree (`.git/worktrees/<name>/vigent/`). When you start vigent again in the repo, every agent you didn't `:kill` comes back where it left off. `:kill` keeps the worktree but doesn't reopen it; `:attach <branch>` does. Removing the worktree removes the record too.
+**Restarting:** vigent saves each agent's name, model and conversation inside git's own record of its worktree (`.git/worktrees/<name>/vigent/`). riftri worktrees are inspected first, and an OverlayFS view that lost its mount in a reboot is repaired before its agent reopens. When you start vigent again in the repo, every agent you didn't `:kill` comes back where it left off. `:kill` keeps the worktree but doesn't reopen it; `:attach <branch>` does. Removing the worktree removes the record too.
 
 `:merge` and `:pr` first commit anything the agent left uncommitted, using a message built from the branch (`fix/flaky-checkout-test` → `fix: flaky checkout test`). `:merge` only runs when your checkout is on the base branch with no uncommitted changes, and a conflict is rolled back so your checkout is left as it was. A squash merge makes a new commit, so git doesn't count the branch as merged. vigent checks the content instead, so `:kill!` afterwards deletes the branch too. `:pr` uses `gh` when it's installed and signed in; otherwise it pushes and prints the GitHub compare URL.
 
-From the shell: `vigent worktree list`, `vigent worktree remove <branch> [--force]`, `vigent worktree prune`.
+From the shell: `vigent worktree list` (with each worktree's backend), `vigent worktree remove <branch> [--force]`, `vigent worktree prune`, `vigent worktree gc` (free riftri storage that no worktree uses).
 
 ## `[engines]`
 

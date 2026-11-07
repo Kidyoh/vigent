@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { type EngineId, isEngineId } from "./engines.js";
+import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
 import { KEY_MODES, type KeyMode } from "./keys.js";
 import { type Attr, configDir, normalizeGroups } from "./theme.js";
 import { DEFAULT_WORKTREE, type WorktreeConfig } from "./worktree.js";
@@ -180,6 +181,10 @@ function setWorktreeOption(wt: WorktreeConfig, name: string, value: unknown): st
 			if (typeof value !== "string") return `'${name}' should be a string`;
 			if (name === "dir" && !value.trim()) return "'dir' can't be empty";
 			wt[name] = value;
+			return;
+		case "backend":
+			if (typeof value !== "string" || !(WORKTREE_BACKENDS as string[]).includes(value)) return "'backend' should be \"auto\", \"riftri\" or \"git\"";
+			wt.backend = value as WorktreeBackend;
 			return;
 		case "branch":
 			if (typeof value !== "string") return "'branch' should be a string";
@@ -345,6 +350,10 @@ enabled = true
 dir = "../{repo}-worktrees"     # relative to the repo root
 branch = "{type}/{name}"        # {type} = feat, fix, docs, refactor, ... from the agent's name
 # base = "main"                 # default: the branch you have checked out
+# With riftri installed (https://riftri.dev), unchanged files in agent
+# worktrees share copy-on-write storage, so each new agent costs almost no
+# disk. "auto" uses riftri when it can and git otherwise; "git" turns it off.
+backend = "auto"
 
 # --- Keys (also live: :nmap, :imap, :cmap, :unmap; list them with :help) ---
 # Left side: vim notation, e.g. j  gg  <C-d>  <S-Tab>  <M-x>  <CR>  <leader>t
