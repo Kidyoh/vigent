@@ -232,6 +232,12 @@ export class App implements Component {
 			run: (binding, keys) => this.runBinding(binding, keys),
 			timeoutlen: () => this.ui.timeoutlen,
 			changed: () => this.tui.requestRender(),
+			hint: () => {
+				if (!this.ui.whichkey) return false;
+				this.tui.requestRender();
+				return true;
+			},
+			hintDelay: () => 300,
 		});
 	}
 
@@ -346,6 +352,10 @@ export class App implements Component {
 			this.confirm = undefined;
 			this.message = "";
 			if (data === "y" || data === "Y") onYes();
+			this.tui.requestRender();
+			return;
+		}
+		if (this.dashboardKey(data)) {
 			this.tui.requestRender();
 			return;
 		}
@@ -1148,6 +1158,13 @@ export class App implements Component {
 			},
 			{
 				section: "Keys",
+				label: "which-key popup",
+				value: () => onOff(ui.whichkey),
+				change: () => (ui.whichkey = !ui.whichkey),
+				hint: "after <leader> (or any key that starts mappings), show what each next key does",
+			},
+			{
+				section: "Keys",
 				label: "Leader key",
 				value: () => formatKeys(parseKeys(this.keymap.leader)),
 				bind: (keys) => {
@@ -1227,7 +1244,7 @@ export class App implements Component {
 			set(undefined, "theme", this.painter.theme.name);
 			set(undefined, "engine", this.preferredEngine);
 			set(undefined, "leader", this.keymap.leader);
-			for (const k of ["sidebar", "sidebar_width", "number", "tilde", "icons", "termguicolors", "transparent"] as const) set("ui", k, ui[k]);
+			for (const k of ["sidebar", "sidebar_width", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey"] as const) set("ui", k, ui[k]);
 			set("worktree", "enabled", this.workspace.config.enabled);
 			set("worktree", "backend", this.workspace.config.backend ?? "auto");
 			for (const [lhs, rhs] of this.keyChanges) set("keys.normal", lhs, rhs);
@@ -1988,9 +2005,101 @@ export class App implements Component {
 			const pad = Math.max(0, paneW + 2 - 1 - visibleWidth(line?.plain ?? ""));
 			out.push(left + bg + " " + text + bg + " ".repeat(pad) + RESET);
 		}
+		if (this.seq.waiting) {
+			// which-key: what can follow the keys typed so far, over the bottom of the screen
+			const panel = this.whichKeyPanel(width, Math.max(3, Math.floor(sideH / 2)));
+			out.splice(out.length - panel.length, panel.length, ...panel);
+		}
 		out.push(this.renderStatusline(width));
 		out.push(this.renderCmdline(width));
 		return out.map((l) => truncateToWidth(l, width));
+	}
+
+	/** The dashboard's one-key actions, while no agent is open (like LazyVim's start screen). */
+	private dashboardKey(data: string): boolean {
+		if (this.sessions.length > 0 || this.mode !== "NORMAL" || this.seq.pendingKeys.length > 0) return false;
+		switch (keyFromInput(data)) {
+			case "n":
+				this.mode = "COMMAND";
+				this.cmdBuf = "new ";
+				return true;
+			case "t":
+				this.openThemePicker();
+				return true;
+			case "s":
+				this.openSettings();
+				return true;
+			case "m":
+				this.openModelPicker();
+				return true;
+			case "e":
+				this.openEffortPicker();
+				return true;
+			case "c":
+				this.openHealth();
+				return true;
+			case "?":
+				this.openHelp();
+				return true;
+			case "q":
+				this.exec("q");
+				return true;
+			default:
+				return false; // i and everything else work as usual
+		}
+	}
+
+	/** which-key.nvim's panel: every key that can follow the pending ones, and what it does. */
+	private whichKeyPanel(width: number, maxRows: number): string[] {
+		const P = this.painter;
+		const I = PICKER_ICONS[this.ui.icons];
+		const typed = this.seq.pendingKeys;
+		const mode = this.keyMode();
+		const next = new Map<string, { label: string; group: boolean }>();
+		for (const b of this.keymap.bindings(mode)) {
+			if (b.keys.length <= typed.length || !typed.every((k, i) => b.keys[i] === k)) continue;
+			if (b.rhs.length === 1 && b.rhs[0].kind === "nop") continue;
+			const key = b.keys[typed.length];
+			if (b.keys.length === typed.length + 1) next.set(key, { label: whichKeyLabel(b.rhs), group: false });
+			else if (!next.has(key)) next.set(key, { label: "", group: true });
+		}
+		for (const [key, v] of next) {
+			if (!v.group) continue;
+			const n = this.keymap.bindings(mode).filter((b) => b.keys.length > typed.length + 1 && b.keys[typed.length] === key && typed.every((k, i) => b.keys[i] === k)).length;
+			v.label = `+${n} more`;
+		}
+		const items = [...next.entries()].sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()) || (a < b ? 1 : -1));
+		const bg = P.attr("NormalFloat").bg;
+		const inner = width - 2;
+		const border = (s: string) => P.on("FloatBorder", bg) + s + RESET;
+		const keyW = Math.max(1, ...items.map(([k]) => visibleWidth(formatKeys([k]))));
+		const colW = Math.min(46, Math.max(24, ...items.map(([k, v]) => visibleWidth(formatKeys([k])) + 3 + visibleWidth(v.label) + 3)));
+		const cols = Math.max(1, Math.floor((inner - 2) / colW));
+		const rowsNeeded = Math.ceil(items.length / cols);
+		const rows = Math.min(rowsNeeded, Math.max(1, maxRows - 2));
+		const lines: string[] = [];
+		const title = ` ${formatKeys(typed)} `;
+		lines.push(border(I.tl + I.h) + P.on("FloatTitle", bg) + title + RESET + border(I.h.repeat(Math.max(0, inner - 1 - visibleWidth(title))) + I.tr));
+		for (let r = 0; r < rows; r++) {
+			let content = P.on("NormalFloat", bg) + " ";
+			let used = 1;
+			for (let c = 0; c < cols; c++) {
+				const item = items[c * rows + r];
+				if (!item) break;
+				const [k, v] = item;
+				const keyText = formatKeys([k]);
+				const label = truncateToWidth(v.label, colW - keyW - 4, "…");
+				const cell = `${keyText.padStart(keyW)} → ${label}`;
+				content +=
+					P.on("Special", bg) + keyText.padStart(keyW) + P.on("Comment", bg) + " → " + P.on(v.group ? "Keyword" : "NormalFloat", bg) + label + P.on("NormalFloat", bg) + " ".repeat(Math.max(0, colW - visibleWidth(cell)));
+				used += colW;
+			}
+			lines.push(border(I.v) + content + " ".repeat(Math.max(0, inner - used)) + RESET + border(I.v));
+		}
+		const more = items.length > rows * cols ? ` ${items.length - rows * cols} more: widen the terminal ` : "";
+		const foot = ` Esc cancels${more ? ` ·${more}` : " "}`;
+		lines.push(border(I.bl) + P.on("Comment", bg) + foot + RESET + border(I.h.repeat(Math.max(0, inner - visibleWidth(foot))) + I.br));
+		return lines.map((l) => truncateToWidth(l, width));
 	}
 
 	/** Neovim-style 'winbar' over the transcript: which agent, its model, where it works. */
@@ -2029,24 +2138,25 @@ export class App implements Component {
 		const center = (plain: string) => " ".repeat(Math.max(0, Math.floor((paneW - visibleWidth(plain)) / 2)));
 		const rows: { text: string; plain: string }[] = [];
 		const add = (text: string, plain: string, indent = center(plain)) => rows.push({ text: indent + text, plain: indent + plain });
-		const title = `VIGENT v${VERSION_TEXT}`;
-		add(P.p("Title", title), title);
+		// LazyVim's dashboard: a big logo, then one key per action
+		const logo = this.ui.icons === "unicode" && paneW >= LOGO[0].length + 2 && paneH >= 22;
+		if (logo) {
+			const groups = ["Function", "Function", "Special", "Special", "Keyword", "Keyword"];
+			LOGO.forEach((l, i) => add(P.p(groups[i] ?? "Title", l), l));
+		} else {
+			const title = "VIGENT";
+			add(P.p("Title", title), title);
+		}
+		const tagline = "coding agents, the vim way · each one in its own git worktree";
+		add(P.p("Comment", tagline), tagline);
 		add("", "");
-		for (const l of ["vim-native coding-agent orchestrator", "built on pi · every agent in its own git worktree"]) add(P.p("Comment", l), l);
-		add("", "");
-		const tips: [string, string][] = [
-			["i", "type a task, Enter: an agent starts on it"],
-			[":new fix flaky test<Enter>", "start an agent by name"],
-			[":colorscheme<Enter>", "pick a theme"],
-			[":help<Enter>", "every key, yours included"],
-			[":q<Enter>", "to exit"],
-		];
-		const cmdW = Math.max(...tips.map(([c]) => c.length));
-		const blockW = 5 + cmdW + 2 + Math.max(...tips.map(([, d]) => d.length));
+		const actions = DASHBOARD.map(([key, icon, label]) => [key, this.ui.icons === "unicode" ? icon : "", label] as const);
+		const labelW = Math.max(...actions.map(([, , l]) => l.length));
+		const blockW = 2 + labelW + 6;
 		const indent = center("x".repeat(blockW));
-		for (const [c, d] of tips) {
-			const plain = `type  ${c.padEnd(cmdW)}  ${d}`;
-			add(P.p("Comment", "type  ") + P.p("Special", c.padEnd(cmdW)) + P.p("Comment", `  ${d}`), plain, indent);
+		for (const [key, icon, label] of actions) {
+			const plain = `${icon ? `${icon} ` : "  "}${label.padEnd(labelW)}    ${key}`;
+			add(P.p("Special", icon ? `${icon} ` : "  ") + P.p("Normal", label.padEnd(labelW)) + "    " + P.p("Title", key), plain, indent);
 		}
 		if (this.engines) {
 			add("", "");
@@ -2060,8 +2170,9 @@ export class App implements Component {
 				text += (i ? "   " : "") + P.p(group, parts[i].slice(0, parts[i].indexOf(" ") + 1)) + P.p(e.id === def ? "Title" : "Comment", e.name);
 			});
 			add(text, plain, indentE);
-			const hint = ":checkhealth  to connect engines";
-			add(P.p("Comment", hint), hint);
+			const ready = this.engines.filter((e) => e.connected).length;
+			const foot = `${this.ui.icons === "unicode" ? "⚡ " : ""}vigent ${VERSION_TEXT} · ${listThemes().length} themes · ${ready} of ${this.engines.length} engines ready`;
+			add(P.p("Comment", foot), foot);
 		}
 		if (!this.workspace.root) {
 			add("", "");
@@ -2372,6 +2483,12 @@ function groupKeyIsDigits(keys: string[]): boolean {
 	return keys.every((k) => /^\d$/.test(k));
 }
 
+/** A key's job, short, for the which-key panel: "Start an agent in its own worktree". */
+function whichKeyLabel(rhs: Rhs[]): string {
+	const label = settingsLabel(rhs).replace(/ \(:[^)]*\)$/, "");
+	return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /** A key's job, for :settings: what an ex command does (from :help), else the action's description. */
 function settingsLabel(rhs: Rhs[]): string {
 	const r = rhs[0];
@@ -2479,3 +2596,26 @@ export function agentNameFrom(prompt: string): string {
 	const name = words.slice(0, 5).join(" ");
 	return name || "agent";
 }
+
+/** The dashboard's logo (ANSI Shadow, like LazyVim's). */
+const LOGO = [
+	"██╗   ██╗██╗ ██████╗ ███████╗███╗   ██╗████████╗",
+	"██║   ██║██║██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝",
+	"██║   ██║██║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ",
+	"╚██╗ ██╔╝██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ",
+	" ╚████╔╝ ██║╚██████╔╝███████╗██║ ╚████║   ██║   ",
+	"  ╚═══╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ",
+];
+
+/** The dashboard's keys (active while no agent is open): key, icon, label. */
+const DASHBOARD: [string, string, string][] = [
+	["i", "✎", "New agent: type a task, Enter"],
+	["n", "+", "New agent by name"],
+	["t", "◐", "Theme"],
+	["s", "⚙", "Settings"],
+	["m", "◆", "Model"],
+	["e", "↯", "Effort"],
+	["c", "✓", "Check engines"],
+	["?", "⌘", "Keys"],
+	["q", "×", "Quit"],
+];

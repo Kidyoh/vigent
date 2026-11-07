@@ -21,7 +21,15 @@ vigent --demo             # scripted agents, nothing needed
 vigent --help
 ```
 
-`vigent --version` shows which vigent runs (with the commit, when it runs from a clone). An older build may be missing a theme or command from these docs, for example `E185: Cannot find color scheme 'lazyvim'`. Update it with `git pull && npm install && npm run build` in your clone, or `npm install -g vigent@latest`.
+`vigent --version` shows which vigent runs (with the commit, when it runs from a clone). An older build may be missing a theme or command from these docs, for example `E185: Cannot find color scheme 'lazyvim'`. In a clone, `git pull && npm install` updates and rebuilds it, and vigent warns at startup when its build is older than its source. From npm, run `npm install -g vigent@latest`.
+
+### Start screen and which-key
+
+Like LazyVim, vigent opens on a dashboard. Press `i` and type a task, `n` to name a new agent, `t` for themes, `s` for settings, `m` / `e` for model and effort, `c` to check engines, `?` for every key, or `q` to quit. Press `Space` (the leader) and pause, and a which-key panel lists every key that can follow and what it does. `Esc` closes it, and `:set nowhichkey` turns it off.
+
+![the dashboard, with the lazyvim theme over a translucent terminal](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/dashboard-lazyvim.png)
+
+![which-key after Space](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/which-key.png)
 
 ### First agent
 

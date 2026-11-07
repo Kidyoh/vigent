@@ -500,11 +500,21 @@ export interface SequencerHost {
 	timeoutlen(): number;
 	/** pending keys changed (for showcmd) */
 	changed(): void;
+	/**
+	 * which-key: after a short pause on keys that only start mappings, show
+	 * what can follow. Return true to keep waiting for the next key (no timeout).
+	 */
+	hint?(keys: string[]): boolean;
+	/** ms before hint() (default 300) */
+	hintDelay?(): number;
 }
 
 export class KeySequencer {
 	private pending: string[] = [];
 	private timer?: ReturnType<typeof setTimeout>;
+	private hintTimer?: ReturnType<typeof setTimeout>;
+	/** a which-key hint is showing: wait for the next key, however long */
+	private holding = false;
 
 	constructor(
 		private keymap: Keymap,
@@ -517,10 +527,27 @@ export class KeySequencer {
 
 	feed(key: string) {
 		this.cancelTimer();
+		// Esc while waiting on a prefix: drop it, like which-key
+		if (key === "<Esc>" && this.pending.length > 0 && !this.keymap.lookup(this.host.mode(), this.pending).exact) {
+			this.pending = [];
+			this.host.changed();
+			return;
+		}
 		this.pending.push(key);
 		const r = this.keymap.lookup(this.host.mode(), this.pending);
 		if (r.prefix) {
 			this.timer = setTimeout(() => this.timeout(), this.host.timeoutlen());
+			if (!r.exact && this.host.hint) {
+				const delay = Math.min(this.host.hintDelay?.() ?? 300, Math.max(0, this.host.timeoutlen() - 50));
+				this.hintTimer = setTimeout(() => {
+					this.hintTimer = undefined;
+					if (this.pending.length > 0 && this.host.hint?.(this.pending)) {
+						this.holding = true;
+						if (this.timer) clearTimeout(this.timer);
+						this.timer = undefined;
+					}
+				}, delay);
+			}
 			this.host.changed();
 			return;
 		}
@@ -575,6 +602,14 @@ export class KeySequencer {
 	private cancelTimer() {
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = undefined;
+		if (this.hintTimer) clearTimeout(this.hintTimer);
+		this.hintTimer = undefined;
+		this.holding = false;
+	}
+
+	/** a which-key hint is up, waiting for the next key */
+	get waiting(): boolean {
+		return this.holding && this.pending.length > 0;
 	}
 }
 

@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
 import { type AgentMeta, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
-import { VERSION_TEXT } from "./version.js";
+import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
 import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
@@ -199,6 +199,8 @@ async function main(): Promise<number | undefined> {
 
 	if (argv.includes("--version") || argv.includes("-v") || argv[0] === "version") {
 		console.log(`vigent ${VERSION_TEXT}`);
+		const stale = staleBuild();
+		if (stale) console.log(`warning: ${stale}`);
 		return 0;
 	}
 	if (argv.includes("--help") || argv.includes("-h")) {
@@ -241,6 +243,8 @@ async function main(): Promise<number | undefined> {
 	}
 
 	const { config, warnings } = loadConfig();
+	const stale = staleBuild();
+	if (stale) warnings.push(stale);
 	const { keymap, warnings: keyWarnings } = buildKeymap(config.leader, config.keys);
 	warnings.push(...keyWarnings);
 

@@ -81,11 +81,12 @@ test("vigent --version and theme list (the commands to check an install)", { ski
 test("first run: i, a task, Enter starts an agent on Claude Code in its own worktree; it works, follows up, and comes back after a restart", { skip, timeout: 120000 }, async () => {
 	const t = new Tty([], { cwd: repo, env });
 	try {
-		await t.waitFor(/VIGENT v\d+\.\d+\.\d+/);
+		await t.waitFor(/vigent \d+\.\d+\.\d+.* themes/);
 		await t.waitFor(/● Claude Code +default/);
 
 		// the intro tells you what to do
-		assert.match(t.screen(), /type {2}i +type a task, Enter: an agent starts on it/);
+		assert.match(t.screen(), /New agent: type a task, Enter +i/);
+		assert.match(t.screen(), /██╗   ██╗██╗ ██████╗/, "LazyVim-style logo");
 
 		await t.type("i");
 		await t.waitFor("Enter starts an agent on Claude Code");

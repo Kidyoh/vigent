@@ -36,7 +36,7 @@ function makeApp() {
 
 test("with no agent yet, i + a prompt + Enter starts one on the default engine and sends the prompt", () => {
 	const { app, made, type } = makeApp();
-	assert.match(plain(app.render(120)), /type {2}i +type a task, Enter: an agent starts on it/, "the intro says how");
+	assert.match(plain(app.render(120)), /New agent: type a task, Enter +i/, "the dashboard says how");
 
 	app.handleInput("i");
 	assert.equal(app.mode, "INSERT");

@@ -37,6 +37,8 @@ export interface UiOptions {
 	termguicolors: boolean;
 	/** use the terminal's background: true, false, or "auto" (what the theme says) */
 	transparent: boolean | "auto";
+	/** after <leader> (or any key that starts mappings), show what can follow, like which-key.nvim */
+	whichkey: boolean;
 }
 
 /** [engines.claude] / [engines.codex] / [engines.opencode] */
@@ -73,6 +75,7 @@ export const DEFAULT_UI: UiOptions = {
 	// macOS Terminal.app can't show 24-bit color
 	termguicolors: process.env.TERM_PROGRAM !== "Apple_Terminal",
 	transparent: "auto",
+	whichkey: true,
 };
 
 export function configPath(): string {
@@ -220,6 +223,8 @@ const ALIASES: Record<string, keyof UiOptions> = {
 	tgc: "termguicolors",
 	transparent: "transparent",
 	transp: "transparent",
+	whichkey: "whichkey",
+	wk: "whichkey",
 };
 
 /** Set one option from a config value. Returns an error message, or undefined on success. */
@@ -231,6 +236,7 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 		case "number":
 		case "tilde":
 		case "termguicolors":
+		case "whichkey":
 			if (typeof value !== "boolean") return `'${name}' should be true or false`;
 			ui[key] = value;
 			return;
@@ -364,6 +370,7 @@ icons = "unicode"      # "ascii" for fonts without box-drawing characters
 timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 # termguicolors = false  # for terminals without 24-bit color: use the nearest of 256
 # transparent = true    # use the terminal's background with any theme ("auto": the theme decides)
+whichkey = true          # after <leader>, show what each next key does (like which-key.nvim)
 
 # --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
 # Applied on top of whichever theme is active. A value is a table, a vim

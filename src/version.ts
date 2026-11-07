@@ -25,3 +25,21 @@ export const COMMIT: string | undefined = (() => {
 
 /** "0.2.0 (ed9418d)" from a clone, "0.2.0" from npm. */
 export const VERSION_TEXT = COMMIT ? `${VERSION} (${COMMIT})` : VERSION;
+
+/**
+ * In a clone: is the compiled code older than the source? (`git pull` without
+ * `npm install` / `npm run build` leaves dist/ behind, and the new themes and
+ * commands seem missing.) Returns the warning to show, or undefined.
+ */
+export function staleBuild(dir = root): string | undefined {
+	const src = `${dir}/src`;
+	const built = `${dir}/dist/cli.js`;
+	if (!fs.existsSync(`${dir}/.git`) || !fs.existsSync(src) || !fs.existsSync(built)) return undefined;
+	try {
+		const builtAt = fs.statSync(built).mtimeMs;
+		const newer = fs.readdirSync(src).some((f) => f.endsWith(".ts") && fs.statSync(`${src}/${f}`).mtimeMs > builtAt + 1000);
+		return newer ? `this vigent was built before its source last changed: run  npm install  (or  npm run build ) in ${dir.replace(/\/$/, "")}` : undefined;
+	} catch {
+		return undefined;
+	}
+}

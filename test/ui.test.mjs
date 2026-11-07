@@ -79,8 +79,9 @@ function sessionWithReply() {
 test("intro screen when no agent is running", () => {
 	const { screen } = makeApp();
 	const out = screen();
-	assert.match(out, /VIGENT v\d+\.\d+\.\d+/);
-	assert.match(out, /type {2}:new fix flaky test<Enter> {2}start an agent/);
+	assert.match(out, /VIGENT|██╗/, "the logo, or its name on a small screen");
+	assert.match(out, /New agent: type a task, Enter +i/);
+	assert.match(out, /New agent by name +n/);
 	assert.match(out, /not a git repository/);
 	assert.match(out, /▸ \[no agent\]/, "winbar");
 });
