@@ -102,28 +102,27 @@ Alternate full-screen views (like vim "windows" you toggle into):
 
 ```
 ~/.config/vigent/
-├── config.toml        # options: theme, leader, default model, worktree dir…
-├── keymaps.toml       # mode-scoped remaps, chords, leader sequences
-└── themes/            # user colorschemes (TOML), merged with built-ins
+├── config.toml        # theme, leader, model, [ui] options, [highlights], [keys]
+└── themes/            # imported or hand-written colorschemes (TOML / JSON / .vim)
 ```
 
-Built-in themes at launch: **gruvbox**, **catppuccin** (mocha/latte),
-**tokyonight**, **nord**, **kanagawa**, **rose-pine**, plus a 16-color
-fallback that inherits the terminal palette. A theme is just a TOML map of
-semantic slots (`bg`, `fg`, `accent`, `diff.add`, `mode.insert`, …) → truecolor
-hex, so porting any vim colorscheme is a 10-minute job.
+One file, vim-shaped: themes use Neovim highlight group names, keys use vim
+notation and `:map` semantics, options work with `:set`. The full reference is
+[docs/config.md](docs/config.md); themes are covered in [docs/themes.md](docs/themes.md).
 
 ```toml
-# config.toml
-theme = "gruvbox"
-leader = " "
-default_model = "claude-sonnet-5-5"
-worktrees_dir = "../vigent-worktrees"
+theme = "tokyonight"
+leader = "<Space>"
 
-# keymaps.toml
-[normal]
-"<leader>g" = ":diff<CR>"
-"]s"        = "session.next"
+[ui]
+sidebar_width = 32
+
+[keys.normal]
+"<leader>t" = "theme.picker"
+"<Tab>"     = "session.next"
+
+[keys.insert]
+"jk" = "<Esc>"
 ```
 
 ## 5. Architecture
@@ -178,7 +177,7 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
   composer; NORMAL/INSERT; one session; one hardcoded theme.
 - **M2 — orchestration.** Multiple concurrent sessions, worktree manager,
   `:new/:kill`, session switching keys, prompt queue.
-- **M3 — vim depth.** COMMAND/SEARCH/VISUAL modes, folds, keymaps.toml,
+- **M3 — vim depth.** COMMAND/SEARCH/VISUAL modes, folds, `[keys]` in config.toml,
   theme engine + the 6 built-in colorschemes.
 - **M4 — review flow.** Diff view with hunk navigation, `:merge`, `:pr`,
   dashboard view.

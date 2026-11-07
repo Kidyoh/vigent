@@ -1,0 +1,216 @@
+# Configuration
+
+vigent reads one file: `~/.config/vigent/config.toml` (or `$XDG_CONFIG_HOME/vigent/config.toml`). Everything in it is optional. Without the file, vigent uses Neovim's default look and the keys listed under [Built-in keys](#built-in-keys).
+
+```bash
+vigent config init     # write a commented starter file
+vigent config check    # validate it: bad keys, unknown actions, missing themes
+```
+
+A mistake in the file never stops vigent from starting. It shows as a warning on the command line, and `vigent config check` lists every problem, with a suggestion when a name looks like a typo.
+
+## A complete example
+
+```toml
+# ~/.config/vigent/config.toml
+
+theme = "tokyonight"            # built-in, imported (vigent theme import), or your own
+model = "claude-sonnet-4-5"     # model for new agents
+leader = "<Space>"              # what <leader> means below (vim's default is "\")
+
+[ui]
+sidebar = true
+sidebar_width = 32
+number = true                   # session numbers in the sidebar
+tilde = true                    # ~ on empty sidebar rows
+icons = "unicode"               # or "ascii"
+timeoutlen = 500                # ms to wait for the rest of a multi-key mapping
+
+[highlights]                    # on top of whichever theme is active
+Normal = { bg = "NONE" }        # transparent background
+Comment = "gui=NONE"            # no italic comments
+CursorLine = "guibg=#2a2f3a"
+
+[keys.normal]
+"<leader>n" = ":new "           # opens ":new " so you can type a name
+"<leader>x" = ":kill<CR>"
+"<leader>t" = "theme.picker"
+"<leader>h" = "app.help"
+"<leader>d" = ":colorscheme default<CR>"
+"<Tab>" = "session.next"
+"<S-Tab>" = "session.prev"
+"J" = "scroll.half_down"
+"K" = "scroll.half_up"
+"<C-j>" = ["fold.open_all", "scroll.bottom"]
+"H" = "gg"                      # H does what gg does
+"q" = false                     # unbind a built-in key
+
+[keys.insert]
+"jk" = "<Esc>"
+"<C-s>" = "edit.submit"
+
+[keys.command]
+"<C-k>" = "edit.clear"
+```
+
+## Top-level settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| `theme` | `"default"` | Colorscheme at startup. `colorscheme` is accepted as an alias. See [themes.md](themes.md). |
+| `model` | `"claude-sonnet-4-5"` | Model for new agents. `--model` on the command line wins. |
+| `leader` | `"\"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader`. `mapleader` is accepted as an alias. |
+
+## `[ui]`
+
+Each option can also be changed while vigent runs, with vim's `:set` syntax: `:set nonumber`, `:set number!`, `:set sidebar_width=40`, `:set tm=300`. `:set` alone lists them all.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `sidebar` | `true` | show the session sidebar (hidden anyway on narrow terminals) |
+| `sidebar_width` | `30` | sidebar width in columns, 16–80 |
+| `number` | `true` | session numbers in the sidebar (they match the `1`–`9` keys) |
+| `tilde` | `true` | `~` on empty sidebar rows |
+| `icons` | `"unicode"` | `"ascii"` swaps every glyph for plain ASCII |
+| `timeoutlen` | `1000` | ms to wait for the next key of a mapping (vim's `'timeoutlen'`, alias `tm`) |
+
+## `[highlights]`
+
+Overrides for any highlight group, applied on top of whichever theme is active, including after `:colorscheme`. A value can be a table, a vim `:hi` string, or the name of a group to link to:
+
+```toml
+[highlights]
+Normal = { fg = "#c0caf5", bg = "NONE", bold = false }
+Comment = "guifg=#565f89 gui=italic"
+VigentSidebar = "NormalFloat"
+```
+
+The full list of groups, and how to write whole themes, is in [themes.md](themes.md).
+
+## `[keys]`
+
+One table per mode: `[keys.normal]`, `[keys.insert]` and `[keys.command]` (the `:` and `/` command line). Entries placed directly under `[keys]` count as normal mode.
+
+Each entry maps a key sequence (left) to what it does (right). Your mappings replace built-in ones with the same keys and leave every other built-in key alone.
+
+### Writing keys
+
+Keys use vim's notation, so mappings can be copied from a vimrc:
+
+| Write | Key |
+|---|---|
+| `j`, `G`, `]s`, `gg` | the characters themselves; sequences are typed in order |
+| `<C-d>` | Ctrl-d (case doesn't matter: `<c-D>` is the same) |
+| `<M-x>` or `<A-x>` | Alt-x |
+| `<S-Tab>`, `<C-S-p>` | with Shift (`<S-a>` is just `A`) |
+| `<CR>` `<Esc>` `<Tab>` `<BS>` `<Space>` `<Del>` | Enter, Escape, Tab, Backspace, Space, Delete |
+| `<Up>` `<Down>` `<Left>` `<Right>` `<Home>` `<End>` `<PageUp>` `<PageDown>` | movement keys |
+| `<F1>` … `<F12>` | function keys |
+| `<leader>` | the `leader` setting |
+| `<lt>`, `<Bar>`, `<Bslash>` | `<`, `\|`, `\` |
+
+### What a key can do
+
+| Right-hand side | Example | Effect |
+|---|---|---|
+| an action | `"session.next"`, `"session.goto 3"` | runs a built-in action (list below) |
+| an ex command ending in `<CR>` | `":colorscheme nord<CR>"` | runs the command |
+| an ex command without `<CR>` | `":new "` | opens the command line with that text, so you can finish typing |
+| `<Cmd>…<CR>` | `"<Cmd>kill<CR>"` | runs the command (Neovim style) |
+| other keys | `"gg"`, `"<Esc>"`, `"ihello"` | presses those keys with their **built-in** meaning |
+| a list | `["fold.open_all", "G"]` | each in order |
+| `false` or `"<Nop>"` | `q = false` | the key does nothing |
+
+When the right-hand side is other keys, they always get their built-in meaning, the way vim's `noremap` works. That makes swaps like `j = "k"` and `k = "j"` safe: neither one loops back to your own mappings.
+
+### Multi-key mappings and `timeoutlen`
+
+When a key could start a longer mapping, vigent waits `timeoutlen` ms for the next one, exactly as vim does. What you've typed so far shows near the bottom right, like vim's `showcmd`.
+- `jk` in insert mode: typing `j` waits briefly. `k` finishes the mapping. Any other key, or the timeout, types the `j` normally.
+- If you map both `g` and the built-in `gg` exists, `gg` still works. A lone `g` fires after the timeout, or as soon as you press a key that isn't `g`.
+
+Pasted text always goes in as text, never as keys, so pasting `jk` into a prompt doesn't leave insert mode.
+
+### Changing keys while vigent runs
+
+The same mappings work as commands, with vim's names:
+
+```vim
+:nmap <leader>t theme.picker        " normal mode (also :map, :noremap, :nnoremap)
+:imap jk <Esc>                       " insert mode (also :inoremap)
+:cmap <C-k> edit.clear               " command line (also :cnoremap)
+:nunmap q                            " remove a mapping (:unmap, :iunmap, :cunmap)
+:nmap J                              " show what J does
+:map                                 " list your mappings
+:let mapleader = ","                 " change the leader for mappings made after this
+:help                                " every active key, yours marked with *
+```
+
+Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. Changes made with these commands last until you quit. Put them in `config.toml` to keep them.
+
+### Actions
+
+| Action | Does |
+|---|---|
+| `mode.normal` | back to NORMAL mode |
+| `mode.insert` | write a prompt to the focused agent (INSERT) |
+| `mode.command` | open the `:` command line |
+| `mode.search` | search the transcript |
+| `scroll.down`, `scroll.up` | scroll one line |
+| `scroll.half_down`, `scroll.half_up` | scroll half a page |
+| `scroll.page_down`, `scroll.page_up` | scroll a page |
+| `scroll.top`, `scroll.bottom` | jump to the top / bottom of the transcript |
+| `session.next`, `session.prev` | next / previous session |
+| `session.alternate` | the session you were on before |
+| `session.goto N` | session N, e.g. `"session.goto 3"` |
+| `session.new` | spawn a new agent |
+| `session.kill` | kill the focused agent |
+| `session.abort` | stop the focused agent's current run |
+| `fold.toggle` | fold / unfold tool output |
+| `fold.open_all`, `fold.close_all` | unfold / fold all tool output |
+| `search.next`, `search.prev` | next / previous match |
+| `search.clear` | clear search highlighting |
+| `edit.submit` | send the prompt, or run the command line |
+| `edit.backspace` | delete the character before the cursor |
+| `edit.delete_word` | delete the word before the cursor |
+| `edit.clear` | clear the prompt or command line |
+| `theme.picker` | pick a colorscheme (live preview) |
+| `app.help` | show every key |
+| `app.redraw` | redraw the screen |
+| `app.quit` | quit vigent |
+| `app.quit_hint` | explain how to quit |
+| `noop` | do nothing |
+
+### Built-in keys
+
+**Normal mode**
+
+| Keys | Action |
+|---|---|
+| `i` `a` `o` | `mode.insert` |
+| `:` | `mode.command` |
+| `/` | `mode.search` |
+| `j` `<Down>` / `k` `<Up>` | `scroll.down` / `scroll.up` |
+| `<C-d>` / `<C-u>` | `scroll.half_down` / `scroll.half_up` |
+| `<C-f>` `<PageDown>` / `<C-b>` `<PageUp>` | `scroll.page_down` / `scroll.page_up` |
+| `gg` / `G` | `scroll.top` / `scroll.bottom` |
+| `]s` / `[s` | `session.next` / `session.prev` |
+| `<C-^>` | `session.alternate` |
+| `1` … `9` | `session.goto 1` … `session.goto 9` |
+| `za` / `zR` / `zM` | `fold.toggle` / `fold.open_all` / `fold.close_all` |
+| `n` / `N` | `search.next` / `search.prev` |
+| `<Esc>` | `search.clear` |
+| `<C-c>` | `session.abort` |
+| `<C-l>` | `app.redraw` |
+| `ZZ` `ZQ` | `app.quit` |
+| `q` | `app.quit_hint` |
+
+**Insert mode and the command line**
+
+| Keys | Action |
+|---|---|
+| `<Esc>` `<C-c>` | `mode.normal` (in INSERT, the prompt you were typing is kept) |
+| `<CR>` | `edit.submit` |
+| `<BS>` `<C-h>` | `edit.backspace` (on an empty command line, leaves it) |
+| `<C-w>` | `edit.delete_word` |
+| `<C-u>` | `edit.clear` |

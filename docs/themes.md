@@ -65,7 +65,7 @@ Groups a theme doesn't define fall back the way Neovim's do, so a partial theme 
 
 ## config.toml
 
-`vigent config init` writes a commented starter file.
+`vigent config init` writes a commented starter file. Keys, leader and every other setting are covered in [config.md](config.md).
 
 ```toml
 theme = "tokyonight"

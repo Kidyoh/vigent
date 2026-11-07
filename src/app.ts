@@ -8,7 +8,6 @@
  */
 import {
 	type Component,
-	parseKey,
 	type Terminal,
 	truncateToWidth,
 	type TUI,
@@ -16,6 +15,21 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { applySetCommand, DEFAULT_UI, type UiOptions } from "./config.js";
+import { type FloatLine, TextFloat } from "./float.js";
+import {
+	ACTIONS,
+	type Binding,
+	formatKeys,
+	KEY_MODES,
+	type KeyMode,
+	KeySequencer,
+	Keymap,
+	keyFromInput,
+	parseKeys,
+	type Rhs,
+	replayKeys,
+	tokenText,
+} from "./keys.js";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, listThemes, loadTheme, type Painter, RESET, sgr, type Theme } from "./theme.js";
@@ -88,7 +102,6 @@ export class App implements Component {
 	private inputBuf = "";
 	private message = "";
 	private messageGroup = "Comment";
-	private pendingKey = "";
 	private scrollOffset = 0; // lines from bottom
 	private searchQuery = "";
 	private matches: number[] = [];
@@ -103,12 +116,22 @@ export class App implements Component {
 		throw new Error("newSession factory not set");
 	};
 
+	private seq: KeySequencer;
+
 	constructor(
 		private tui: TUI,
 		private terminal: Terminal,
 		public painter: Painter,
 		public ui: UiOptions = { ...DEFAULT_UI },
-	) {}
+		public keymap: Keymap = new Keymap(),
+	) {
+		this.seq = new KeySequencer(keymap, {
+			mode: () => this.keyMode(),
+			run: (binding, keys) => this.runBinding(binding, keys),
+			timeoutlen: () => this.ui.timeoutlen,
+			changed: () => this.tui.requestRender(),
+		});
+	}
 
 	private get icons(): Icons {
 		return ICONS[this.ui.icons];
@@ -186,165 +209,204 @@ export class App implements Component {
 
 	// ------------------------------------------------------------------ input
 
+	private keyMode(): KeyMode {
+		return this.mode === "NORMAL" ? "normal" : this.mode === "INSERT" ? "insert" : "command";
+	}
+
 	handleInput(data: string): void {
-		const key = parseKey(data);
-		switch (this.mode) {
-			case "NORMAL":
-				this.handleNormal(key ?? "", data);
-				break;
-			case "INSERT":
-				this.handleTextEntry(key ?? "", data, "INSERT");
-				break;
-			case "COMMAND":
-			case "SEARCH":
-				this.handleTextEntry(key ?? "", data, this.mode);
-				break;
+		if (data.startsWith("\x1b[200~")) {
+			// bracketed paste: insert as text, never as mappings
+			this.typeText(data.slice(6).replace(/\x1b\[201~$/, "").replace(/\r?\n/g, " "));
+			this.tui.requestRender();
+			return;
 		}
+		const key = keyFromInput(data);
+		if (!key) return;
+		if (this.mode === "NORMAL" && this.seq.pendingKeys.length === 0) this.message = "";
+		this.seq.feed(key);
 		this.tui.requestRender();
 	}
 
-	private handleNormal(key: string, data: string) {
-		this.message = "";
+	private typeText(text: string) {
+		if (this.mode === "INSERT") this.inputBuf += text;
+		else if (this.mode === "COMMAND" || this.mode === "SEARCH") this.cmdBuf += text;
+	}
 
-		// two-key sequences: g_, z_, ]_, [_
-		if (this.pendingKey) {
-			const pending = this.pendingKey;
-			this.pendingKey = "";
-			if (pending === "g" && key === "g") return this.scrollTop();
-			if (pending === "z") {
-				const s = this.focusedSession;
-				if (!s) return;
-				if (key === "a") return s.toggleFolds();
-				if (key === "M" || key === "shift+m") return this.setAllFolds(true);
-				if (key === "R" || key === "shift+r") return this.setAllFolds(false);
-				return;
+	private runBinding(binding: Binding | undefined, keys: string[]) {
+		if (!binding) {
+			for (const k of keys) {
+				const text = tokenText(k);
+				if (text !== undefined) this.typeText(text);
 			}
-			if (pending === "]" && key === "s") return this.focusSession((this.focusIdx + 1) % this.sessions.length);
-			if (pending === "[" && key === "s")
-				return this.focusSession((this.focusIdx - 1 + this.sessions.length) % this.sessions.length);
 			return;
 		}
+		for (const rhs of binding.rhs) this.runRhs(rhs);
+	}
 
-		if (key === "g" || key === "z" || key === "]" || key === "[") {
-			this.pendingKey = key;
-			return;
-		}
-
-		switch (key) {
-			case "i":
-			case "a":
-			case "o":
-				this.mode = "INSERT";
+	private runRhs(rhs: Rhs) {
+		switch (rhs.kind) {
+			case "action":
+				this.runAction(rhs.name, rhs.arg);
 				return;
-			case ":":
-			case "shift+;":
-				this.mode = "COMMAND";
-				this.cmdBuf = "";
+			case "ex":
+				if (rhs.execute) {
+					this.exec(rhs.cmd);
+				} else {
+					this.mode = "COMMAND";
+					this.cmdBuf = rhs.cmd;
+				}
 				return;
-			case "/":
-				this.mode = "SEARCH";
-				this.cmdBuf = "";
+			case "keys":
+				replayKeys(this.keymap, { mode: () => this.keyMode(), run: (b, k) => this.runBinding(b, k) }, rhs.keys);
 				return;
-			case "j":
-			case "down":
-				this.scrollBy(-1);
+			case "nop":
 				return;
-			case "k":
-			case "up":
-				this.scrollBy(1);
-				return;
-			case "ctrl+d":
-				this.scrollBy(-Math.floor(this.contentHeight() / 2));
-				return;
-			case "ctrl+u":
-				this.scrollBy(Math.floor(this.contentHeight() / 2));
-				return;
-			case "G":
-			case "shift+g":
-				this.scrollOffset = 0;
-				return;
-			case "n":
-				this.gotoMatch(1);
-				return;
-			case "N":
-			case "shift+n":
-				this.gotoMatch(-1);
-				return;
-			case "ctrl+6":
-			case "ctrl+shift+6":
-			case "ctrl+^":
-				this.focusSession(this.altIdx);
-				return;
-			case "escape":
-				this.clearSearch();
-				return;
-			case "q":
-				this.setMessage("Type  :q  and press <Enter> to exit vigent", "Comment");
-				return;
-		}
-
-		// digits 1-9 jump to session N
-		if (/^[1-9]$/.test(data)) {
-			this.focusSession(Number(data) - 1);
-			return;
 		}
 	}
 
-	private handleTextEntry(key: string, data: string, mode: Mode) {
-		if (key === "escape") {
-			this.mode = "NORMAL";
-			this.cmdBuf = "";
-			return;
-		}
-		if (key === "enter" || key === "return") {
-			if (mode === "INSERT") {
-				const text = this.inputBuf.trim();
-				this.inputBuf = "";
+	/** Every built-in behavior, by the name used in keymaps. */
+	runAction(name: string, arg?: string) {
+		const half = Math.floor(this.contentHeight() / 2);
+		const page = Math.max(1, this.contentHeight() - 2);
+		const count = this.sessions.length;
+		switch (name) {
+			case "mode.normal":
+				if (this.mode === "COMMAND" || this.mode === "SEARCH") this.cmdBuf = "";
 				this.mode = "NORMAL";
-				if (text && this.focusedSession) {
-					this.focusedSession.send(text);
-					this.scrollOffset = 0;
-				}
-			} else if (mode === "COMMAND") {
-				const cmd = this.cmdBuf;
+				return;
+			case "mode.insert":
+				this.mode = "INSERT";
+				return;
+			case "mode.command":
+				this.mode = "COMMAND";
 				this.cmdBuf = "";
-				this.mode = "NORMAL";
-				this.exec(cmd);
-			} else {
-				this.searchQuery = this.cmdBuf;
+				return;
+			case "mode.search":
+				this.mode = "SEARCH";
 				this.cmdBuf = "";
-				this.mode = "NORMAL";
-				this.runSearch();
-			}
-			return;
-		}
-		if (key === "backspace") {
-			const buf = mode === "INSERT" ? this.inputBuf : this.cmdBuf;
-			if (buf.length === 0 && mode !== "INSERT") {
-				this.mode = "NORMAL"; // vim: backspace on empty cmdline exits
+				return;
+			case "scroll.down":
+				return this.scrollBy(-1);
+			case "scroll.up":
+				return this.scrollBy(1);
+			case "scroll.half_down":
+				return this.scrollBy(-half);
+			case "scroll.half_up":
+				return this.scrollBy(half);
+			case "scroll.page_down":
+				return this.scrollBy(-page);
+			case "scroll.page_up":
+				return this.scrollBy(page);
+			case "scroll.top":
+				return this.scrollTop();
+			case "scroll.bottom":
+				this.scrollOffset = 0;
+				return;
+			case "session.next":
+				if (count > 0) this.focusSession((this.focusIdx + 1) % count);
+				return;
+			case "session.prev":
+				if (count > 0) this.focusSession((this.focusIdx - 1 + count) % count);
+				return;
+			case "session.alternate":
+				return this.focusSession(this.altIdx);
+			case "session.goto": {
+				const n = Number(arg);
+				if (!Number.isInteger(n) || n < 1) this.setMessage(`session.goto needs a number, got '${arg ?? ""}'`, "ErrorMsg");
+				else this.focusSession(n - 1);
 				return;
 			}
-			if (mode === "INSERT") this.inputBuf = this.inputBuf.slice(0, -1);
-			else this.cmdBuf = this.cmdBuf.slice(0, -1);
-			return;
+			case "session.new":
+				return this.exec("new");
+			case "session.kill":
+				return this.exec("kill");
+			case "session.abort": {
+				const s = this.focusedSession;
+				if (s?.state === "running") {
+					s.abort();
+					this.setMessage(`stopped '${s.name}'`, "WarningMsg");
+				}
+				return;
+			}
+			case "fold.toggle":
+				return this.focusedSession?.toggleFolds();
+			case "fold.open_all":
+				return this.setAllFolds(false);
+			case "fold.close_all":
+				return this.setAllFolds(true);
+			case "search.next":
+				return this.gotoMatch(1);
+			case "search.prev":
+				return this.gotoMatch(-1);
+			case "search.clear":
+				return this.clearSearch();
+			case "edit.submit":
+				return this.submit();
+			case "edit.backspace":
+				if (this.mode === "INSERT") {
+					this.inputBuf = this.inputBuf.slice(0, -1);
+				} else if (this.cmdBuf.length === 0) {
+					this.mode = "NORMAL"; // vim: backspace on an empty command line leaves it
+				} else {
+					this.cmdBuf = this.cmdBuf.slice(0, -1);
+				}
+				return;
+			case "edit.delete_word":
+				if (this.mode === "INSERT") this.inputBuf = this.inputBuf.replace(/\S*\s*$/, "");
+				else this.cmdBuf = this.cmdBuf.replace(/\S*\s*$/, "");
+				return;
+			case "edit.clear":
+				if (this.mode === "INSERT") this.inputBuf = "";
+				else this.cmdBuf = "";
+				return;
+			case "theme.picker":
+				return this.openThemePicker();
+			case "app.help":
+				return this.openHelp();
+			case "app.redraw":
+				return this.repaint();
+			case "app.quit":
+				return this.onQuit();
+			case "app.quit_hint":
+				this.setMessage("Type  :q  and press <Enter> to exit vigent", "Comment");
+				return;
+			case "noop":
+				return;
+			default:
+				this.setMessage(`unknown action '${name}'`, "ErrorMsg");
 		}
-		if (key === "ctrl+u") {
-			if (mode === "INSERT") this.inputBuf = "";
-			else this.cmdBuf = "";
-			return;
-		}
-		// printable text (filter control chars / escape sequences)
-		if (data.length >= 1 && !data.startsWith("\x1b") && data >= " ") {
-			if (mode === "INSERT") this.inputBuf += data;
-			else this.cmdBuf += data;
+	}
+
+	private submit() {
+		if (this.mode === "INSERT") {
+			const text = this.inputBuf.trim();
+			this.inputBuf = "";
+			this.mode = "NORMAL";
+			if (text && this.focusedSession) {
+				this.focusedSession.send(text);
+				this.scrollOffset = 0;
+			}
+		} else if (this.mode === "COMMAND") {
+			const cmd = this.cmdBuf;
+			this.cmdBuf = "";
+			this.mode = "NORMAL";
+			this.exec(cmd);
+		} else if (this.mode === "SEARCH") {
+			this.searchQuery = this.cmdBuf;
+			this.cmdBuf = "";
+			this.mode = "NORMAL";
+			this.runSearch();
 		}
 	}
 
 	// ------------------------------------------------------------------ ex commands
 
 	private exec(input: string) {
-		const [cmd, ...rest] = input.trim().split(/\s+/);
-		const arg = rest.join(" ");
+		const parsed = /^\s*(\S*)\s*([\s\S]*)$/.exec(input) ?? ["", "", ""];
+		const cmd = parsed[1];
+		// mappings keep trailing whitespace (":nmap x :new " opens ":new "), like vim
+		const rawArg = parsed[2];
+		const arg = rawArg.trim();
 		switch (cmd) {
 			case "":
 				return;
@@ -411,19 +473,162 @@ export class App implements Component {
 			}
 			case "help":
 			case "h":
-				this.setMessage(
-					"i prompt · j/k gg G scroll · ]s [s 1-9 sessions · za zM zR folds · /search · :new :kill :colorscheme :hi :set :q",
-					"Comment",
-				);
+				this.openHelp();
 				return;
-			default:
+			case "let":
+				this.execLet(arg);
+				return;
+			default: {
+				const map = /^([nic]?)(?:nore)?map$/.exec(cmd);
+				if (map) return this.execMap(map[1], rawArg);
+				const unmap = /^([nic]?)unmap$/.exec(cmd);
+				if (unmap) return this.execUnmap(unmap[1], arg);
 				this.setMessage(`E492: Not an editor command: ${cmd}`, "ErrorMsg");
+			}
 		}
 	}
 
 	private setMessage(text: string, group: string) {
 		this.message = text;
 		this.messageGroup = group;
+	}
+
+	/** `:map`, `:nmap`, `:inoremap`, ... (all mappings are non-recursive, like noremap). */
+	private execMap(letter: string, arg: string) {
+		const modes = mapModes(letter);
+		const m = /^(\S+)(?:\s+([\s\S]*\S[\s\S]*))?\s*$/.exec(arg.trimStart());
+		if (!m) {
+			this.openMappings(modes);
+			return;
+		}
+		const [, lhs, rhs] = m;
+		if (rhs === undefined) {
+			const found = modes.flatMap((mode) => {
+				try {
+					const b = this.keymap.lookup(mode, parseKeys(lhs, this.keymap.leader)).exact;
+					return b ? [`${MODE_LETTER[mode]}  ${formatKeys(b.keys)}  ${b.rhsText}`] : [];
+				} catch {
+					return [];
+				}
+			});
+			this.setMessage(found.length > 0 ? found.join("   ") : "No mapping found", found.length > 0 ? "Normal" : "Comment");
+			return;
+		}
+		try {
+			for (const mode of modes) this.keymap.set(mode, lhs, rhs);
+			this.message = "";
+		} catch (err) {
+			this.setMessage(`E474: ${(err as Error).message}`, "ErrorMsg");
+		}
+	}
+
+	private execUnmap(letter: string, arg: string) {
+		const lhs = arg.trim();
+		if (!lhs) {
+			this.setMessage("E474: Invalid argument", "ErrorMsg");
+			return;
+		}
+		try {
+			const removed = mapModes(letter).map((mode) => this.keymap.unset(mode, lhs)).some(Boolean);
+			if (!removed) this.setMessage("E31: No such mapping", "ErrorMsg");
+		} catch (err) {
+			this.setMessage(`E474: ${(err as Error).message}`, "ErrorMsg");
+		}
+	}
+
+	/** `:let mapleader = ","` (affects mappings defined after it, like vim). */
+	private execLet(arg: string) {
+		const m = /^(?:g:)?mapleader\s*=\s*(["'])(.*)\1$/.exec(arg.trim());
+		if (!m) {
+			this.setMessage("only  :let mapleader = \"<key>\"  is supported", "Comment");
+			return;
+		}
+		try {
+			parseKeys(m[2]);
+			this.keymap.leader = m[2];
+		} catch {
+			this.setMessage(`E474: leader '${m[2]}' is not a key`, "ErrorMsg");
+		}
+	}
+
+	private openFloat(title: string, lines: FloatLine[], width: number) {
+		this.seq.reset();
+		let handle: { hide(): void } | undefined;
+		const float = new TextFloat(
+			this.painter,
+			PICKER_ICONS[this.ui.icons],
+			title,
+			lines,
+			() => this.terminal.rows - 4,
+			() => {
+				handle?.hide();
+				this.repaint();
+			},
+			() => this.tui.requestRender(),
+		);
+		handle = this.tui.showOverlay(float, { width: Math.min(width, this.terminal.columns - 4), anchor: "center" });
+		this.tui.requestRender();
+	}
+
+	/** `:map` with no arguments: list your mappings, vim-style. */
+	private openMappings(modes: KeyMode[]) {
+		const lines: FloatLine[] = [];
+		for (const mode of modes) {
+			for (const b of this.keymap.bindings(mode).filter((x) => x.user)) {
+				lines.push([
+					["Comment", `${MODE_LETTER[mode]}  `],
+					["Title", formatKeys(b.keys).padEnd(14)],
+					["NormalFloat", ` ${b.rhsText}`],
+				]);
+			}
+		}
+		if (lines.length === 0) {
+			this.setMessage("No mapping found", "Comment");
+			return;
+		}
+		this.openFloat("Mappings", lines, 72);
+	}
+
+	/** `:help`: every active key, generated from the keymap so it shows your mappings. */
+	openHelp() {
+		const lines: FloatLine[] = [];
+		const labels: Record<KeyMode, string> = { normal: "NORMAL", insert: "INSERT", command: "COMMAND LINE" };
+		for (const mode of KEY_MODES) {
+			if (lines.length > 0) lines.push([]);
+			lines.push([["Title", labels[mode]]]);
+			const groups = new Map<string, { keys: { text: string; user: boolean }[]; desc: string; user: boolean }>();
+			for (const b of this.keymap.bindings(mode)) {
+				const first = b.rhs[0];
+				const single = b.rhs.length === 1 && first.kind === "action";
+				const groupKey = single && first.name === "session.goto" ? "session.goto" : b.rhsText;
+				const desc = single && first.name === "session.goto" ? "jump to session N" : describeRhs(b.rhs);
+				const g = groups.get(groupKey) ?? { keys: [], desc, user: false };
+				g.keys.push({ text: formatKeys(b.keys), user: b.user });
+				g.user ||= b.user;
+				groups.set(groupKey, g);
+			}
+			// your mappings first
+			const ordered = [...groups.values()].sort((a, b) => Number(b.user) - Number(a.user));
+			for (const g of ordered) {
+				const texts = g.keys.map((k) => k.text);
+				const keySegs: [string, string][] =
+					g.keys.length > 4 && groupKeyIsDigits(texts)
+						? [["Identifier", `${texts[0]}-${texts[texts.length - 1]}`]]
+						: g.keys.map((k, i) => [k.user ? "String" : "Identifier", (i > 0 ? " " : "") + k.text]);
+				const width = keySegs.reduce((n, [, t]) => n + visibleWidth(t), 0);
+				lines.push([
+					[g.user ? "String" : "Comment", g.user ? "* " : "  "],
+					...keySegs,
+					["NormalFloat", " ".repeat(Math.max(1, 17 - width)) + g.desc],
+				]);
+			}
+		}
+		lines.push([]);
+		lines.push([["Title", "COMMANDS"]]);
+		for (const [c, d] of EX_HELP) lines.push([["Comment", "  "], ["Identifier", c.padEnd(29)], ["NormalFloat", d]]);
+		lines.push([]);
+		lines.push([["Comment", `* = your mapping · leader = ${this.keymap.leader === " " ? "<Space>" : this.keymap.leader}`]]);
+		this.openFloat("Keys", lines, 76);
 	}
 
 	private execHighlight(arg: string) {
@@ -456,6 +661,7 @@ export class App implements Component {
 
 	/** `:colorscheme` with no argument: floating picker with live preview. */
 	openThemePicker() {
+		this.seq.reset();
 		const original = this.painter.theme;
 		const themes = listThemes();
 		const preview = (name: string) => {
@@ -782,16 +988,24 @@ export class App implements Component {
 				break;
 			case "INSERT":
 				content =
-					P.p("ModeMsg", "-- INSERT --") + P.s("Normal") + `  ${this.icons.prompt}` + this.inputBuf + P.p("PmenuSel", " ");
+					P.p("ModeMsg", "-- INSERT --") +
+					P.s("Normal") +
+					`  ${this.icons.prompt}` +
+					this.inputBuf +
+					P.p("Comment", formatKeys(this.seq.pendingKeys).replace(/<Space>/g, " ")) +
+					P.p("PmenuSel", " ");
 				break;
 			default: {
 				if (this.message) content = P.p(this.messageGroup, this.message);
-				else if (this.pendingKey) content = P.p("Comment", this.pendingKey);
 				else content = P.p("NonText", `:help for keys`);
 			}
 		}
-		const pad = Math.max(0, width - visibleWidth(stripAnsi(content)));
-		return bg + content + bg + " ".repeat(pad) + RESET;
+		// vim's 'showcmd': keys typed so far for a pending mapping, near the right edge
+		const showcmd = this.mode === "INSERT" ? "" : formatKeys(this.seq.pendingKeys);
+		const showWidth = showcmd ? Math.max(10, visibleWidth(showcmd) + 1) : 0;
+		const pad = Math.max(0, width - visibleWidth(stripAnsi(content)) - showWidth);
+		const right = showcmd ? P.s("Normal") + showcmd.padEnd(showWidth) : "";
+		return bg + content + bg + " ".repeat(pad) + right + RESET;
 	}
 }
 
@@ -799,6 +1013,47 @@ function stripAnsi(s: string): string {
 	// biome-ignore lint: control chars intended
 	return s.replace(/\x1b\[[0-9;]*m|\x1b_pi:c\x07/g, "");
 }
+
+const MODE_LETTER: Record<KeyMode, string> = { normal: "n", insert: "i", command: "c" };
+
+function mapModes(letter: string): KeyMode[] {
+	return letter === "i" ? ["insert"] : letter === "c" ? ["command"] : ["normal"];
+}
+
+function groupKeyIsDigits(keys: string[]): boolean {
+	return keys.every((k) => /^\d$/.test(k));
+}
+
+function describeRhs(rhs: Rhs[]): string {
+	return rhs
+		.map((r) => {
+			switch (r.kind) {
+				case "action":
+					return ACTIONS[r.name] + (r.arg ? ` (${r.arg})` : "");
+				case "ex":
+					return `:${r.cmd.trimEnd()}${r.execute ? "" : " …"}`;
+				case "keys":
+					return `same as ${formatKeys(r.keys)}`;
+				case "nop":
+					return "disabled";
+			}
+		})
+		.join(", then ");
+}
+
+const EX_HELP: [string, string][] = [
+	[":new [name]", "spawn an agent"],
+	[":kill", "kill the focused agent"],
+	[":colorscheme [name]", "switch theme (no name: picker)"],
+	[":hi Group guifg=.. guibg=..", "change a highlight group"],
+	[":hi link A B  /  :hi clear", "link groups / undo :hi"],
+	[":set option / nooption", "change options (:set lists them)"],
+	[":map lhs rhs", "map keys (:nmap :imap :cmap, :unmap)"],
+	[":map", "list your mappings"],
+	[":let mapleader = \",\"", "change the leader key"],
+	[":model id", "switch the focused agent's model"],
+	[":q", "quit"],
+];
 
 function describeAttr(a: Attr): string {
 	const parts: string[] = [];

@@ -28,7 +28,38 @@ With a provider key set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
 | NORMAL | `/pattern` `n` `N` | Search the transcript |
 | INSERT | `Enter` / `Esc` | Send the prompt / back to NORMAL |
 
-Ex commands: `:new <name>`, `:kill`, `:colorscheme [name]`, `:hi`, `:set`, `:model <id>`, `:help`, `:q`.
+`:help` lists every active key, including yours. Ex commands: `:new <name>`, `:kill`, `:colorscheme [name]`, `:hi`, `:set`, `:map`, `:model <id>`, `:help`, `:q`.
+
+## Configuration
+
+Everything lives in `~/.config/vigent/config.toml`. `vigent config init` writes a commented starter file, and `vigent config check` validates it. Keys use vim notation, and the right-hand side can be an action, an ex command or other keys:
+
+```toml
+theme = "tokyonight"
+leader = "<Space>"
+
+[ui]
+sidebar_width = 32
+timeoutlen = 500
+
+[highlights]
+Normal = { bg = "NONE" }
+
+[keys.normal]
+"<leader>t" = "theme.picker"          # an action
+"<leader>n" = ":new "                 # open the command line, ready to type
+"<leader>d" = ":colorscheme default<CR>"
+"<Tab>" = "session.next"
+"H" = "gg"                            # other keys, with their built-in meaning
+"q" = false                           # unbind
+
+[keys.insert]
+"jk" = "<Esc>"
+```
+
+You can also change keys while vigent runs, with `:nmap`, `:imap`, `:cmap`, `:unmap` and `:let mapleader`. **[docs/config.md](docs/config.md)** has every option, action and built-in key.
+
+![:help lists every key, yours first](docs/screenshots/keys-help.png)
 
 ## Themes
 
