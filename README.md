@@ -30,6 +30,24 @@ With a provider key set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
 
 `:help` lists every active key, including yours. Ex commands: `:new <name>`, `:kill`, `:colorscheme [name]`, `:hi`, `:set`, `:map`, `:model <id>`, `:help`, `:q`.
 
+## Worktrees
+
+Every agent gets its own git worktree and branch, so agents never touch your checkout or each other's files:
+
+```vim
+:new fix flaky checkout test     " branch fix/flaky-checkout-test in ../<repo>-worktrees/fix-flaky-checkout-test
+:new auth-refactor               " branch refactor/auth
+:diff                            " what the focused agent changed, new files included
+:worktrees                       " list them
+:kill                            " stop the agent, keep its work  (:kill! also removes the worktree, safely)
+```
+
+Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `refactor/…`) and are taken from the task you type. The sidebar and statusline show each agent's branch with live `+added −removed` counts. Removing a worktree goes through git's own safety checks, so uncommitted or unmerged work is never thrown away. Folder, branch pattern and base branch are set in `[worktree]` ([docs/config.md](docs/config.md#worktree)).
+
+![agents in their own worktrees](docs/screenshots/worktrees-sidebar.png)
+
+![:diff](docs/screenshots/worktrees-diff.png)
+
 ## Configuration
 
 Everything lives in `~/.config/vigent/config.toml`. `vigent config init` writes a commented starter file, and `vigent config check` validates it. Keys use vim notation, and the right-hand side can be an action, an ex command or other keys:

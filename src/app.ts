@@ -30,10 +30,26 @@ import {
 	replayKeys,
 	tokenText,
 } from "./keys.js";
+import * as path from "node:path";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, listThemes, loadTheme, type Painter, RESET, sgr, type Theme } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
+import {
+	DEFAULT_WORKTREE,
+	type DiffStat,
+	diffText,
+	findWorktree,
+	listWorktrees,
+	removeWorktree,
+	type WorktreeConfig,
+} from "./worktree.js";
+
+/** Where agents' worktrees live; root is undefined outside a git repo. */
+export interface Workspace {
+	root?: string;
+	config: WorktreeConfig;
+}
 
 export type Mode = "NORMAL" | "INSERT" | "COMMAND" | "SEARCH";
 
@@ -56,6 +72,7 @@ interface Icons {
 	folded: string;
 	open: string;
 	cursor: string;
+	minus: string;
 }
 
 const ICONS: Record<UiOptions["icons"], Icons> = {
@@ -71,6 +88,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		folded: "▸",
 		open: "▾",
 		cursor: "▍",
+		minus: "−",
 	},
 	ascii: {
 		spinner: ["|", "/", "-", "\\"],
@@ -84,6 +102,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		folded: "+",
 		open: "-",
 		cursor: "_",
+		minus: "-",
 	},
 };
 
@@ -108,11 +127,13 @@ export class App implements Component {
 	private matchIdx = -1;
 	private spinnerFrame = 0;
 	private spinnerTimer?: ReturnType<typeof setInterval>;
+	private statTimer?: ReturnType<typeof setInterval>;
 
 	private paneCache: { lines: PaneLine[]; key: string } = { lines: [], key: "" };
 
 	onQuit: () => void = () => {};
-	newSession: (name: string) => Session = () => {
+	/** create an agent; `worktree: false` runs it in the current checkout */
+	newSession: (name: string, opts: { worktree: boolean }) => Session = () => {
 		throw new Error("newSession factory not set");
 	};
 
@@ -124,6 +145,7 @@ export class App implements Component {
 		public painter: Painter,
 		public ui: UiOptions = { ...DEFAULT_UI },
 		public keymap: Keymap = new Keymap(),
+		public workspace: Workspace = { config: DEFAULT_WORKTREE },
 	) {
 		this.seq = new KeySequencer(keymap, {
 			mode: () => this.keyMode(),
@@ -158,6 +180,13 @@ export class App implements Component {
 			this.altIdx = this.focusIdx;
 			this.focusIdx = this.sessions.length - 1;
 		}
+		if (s.worktree?.path && !this.statTimer) {
+			// edits made outside the agent (you, your editor) show up too
+			this.statTimer = setInterval(() => {
+				for (const x of this.sessions) x.refreshStat(0);
+			}, 5000);
+			this.statTimer.unref?.();
+		}
 		this.syncSpinner();
 		this.tui.requestRender();
 	}
@@ -168,6 +197,7 @@ export class App implements Component {
 		this.focusIdx = idx;
 		this.scrollOffset = 0;
 		this.clearSearch();
+		this.focusedSession?.refreshStat(0);
 	}
 
 	private syncSpinner() {
@@ -201,6 +231,7 @@ export class App implements Component {
 
 	stopTimers() {
 		if (this.spinnerTimer) clearInterval(this.spinnerTimer);
+		if (this.statTimer) clearInterval(this.statTimer);
 	}
 
 	invalidate(): void {
@@ -417,25 +448,38 @@ export class App implements Component {
 			case "quit":
 				this.onQuit();
 				return;
-			case "new": {
+			case "new":
+			case "new!": {
 				const name = arg || `agent-${this.sessions.length + 1}`;
 				try {
-					this.addSession(this.newSession(name));
-					this.setMessage(`spawned session '${name}'`, "ModeMsg");
+					const s = this.newSession(name, { worktree: cmd === "new" && this.workspace.config.enabled });
+					this.addSession(s);
+					const wt = s.worktree;
+					if (wt?.path) {
+						this.setMessage(`'${name}' on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}`, "ModeMsg");
+					} else if (wt) {
+						this.setMessage(`'${name}' on ${wt.branch}`, "ModeMsg");
+					} else {
+						const why = cmd === "new!" || !this.workspace.config.enabled ? "" : " (not a git repo, so no worktree)";
+						this.setMessage(`'${name}' in this checkout${why}`, "ModeMsg");
+					}
 				} catch (err: any) {
 					this.setMessage(String(err?.message ?? err), "ErrorMsg");
 				}
 				return;
 			}
-			case "kill": {
-				const s = this.focusedSession;
-				if (!s) return;
-				s.abort();
-				this.sessions.splice(this.focusIdx, 1);
-				this.focusIdx = Math.max(0, Math.min(this.focusIdx, this.sessions.length - 1));
-				this.setMessage(`killed session '${s.name}'`, "WarningMsg");
+			case "kill":
+			case "kill!":
+				this.killFocused(cmd === "kill!");
 				return;
-			}
+			case "diff":
+				this.openDiff();
+				return;
+			case "worktrees":
+			case "worktree":
+			case "wt":
+				this.execWorktree(arg);
+				return;
 			case "colorscheme":
 			case "colo":
 			case "theme": {
@@ -491,6 +535,108 @@ export class App implements Component {
 	private setMessage(text: string, group: string) {
 		this.message = text;
 		this.messageGroup = group;
+	}
+
+	private shortPath(p: string): string {
+		const rel = path.relative(process.cwd(), p);
+		return rel && !rel.startsWith(`..${path.sep}..`) ? rel : p;
+	}
+
+	/** `:kill` stops the agent and keeps its worktree; `:kill!` also removes it (git's safe remove). */
+	private killFocused(removeTree: boolean) {
+		const s = this.focusedSession;
+		if (!s) return;
+		s.abort();
+		s.dispose();
+		this.sessions.splice(this.focusIdx, 1);
+		this.focusIdx = Math.max(0, Math.min(this.focusIdx, this.sessions.length - 1));
+		const wt = s.worktree;
+		if (!wt?.path || !this.workspace.root) {
+			this.setMessage(`killed '${s.name}'`, "WarningMsg");
+			return;
+		}
+		if (!removeTree) {
+			this.setMessage(`killed '${s.name}' · kept ${wt.branch} (remove it with :worktree remove ${wt.branch})`, "WarningMsg");
+			return;
+		}
+		const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch });
+		this.setMessage(`killed '${s.name}' · ${r.message}`, r.removed ? "WarningMsg" : "ErrorMsg");
+	}
+
+	/** `:worktrees` lists them; `:worktree remove[!] <branch>` deletes one. */
+	private execWorktree(arg: string) {
+		const root = this.workspace.root;
+		if (!root) {
+			this.setMessage("not in a git repository", "ErrorMsg");
+			return;
+		}
+		const m = /^(remove|rm)(!?)\s+(\S+)$/.exec(arg);
+		if (m) {
+			const w = findWorktree(root, m[3], this.workspace.config);
+			if (!w) {
+				this.setMessage(`no worktree '${m[3]}' (see :worktrees)`, "ErrorMsg");
+				return;
+			}
+			const owner = this.sessions.find((s) => s.worktree?.path === w.path);
+			if (owner) {
+				this.setMessage(`'${owner.name}' is working in ${w.branch}; stop it first (:kill or :kill!)`, "ErrorMsg");
+				return;
+			}
+			const r = removeWorktree(root, w, m[2] === "!");
+			this.setMessage(r.message, r.removed ? "WarningMsg" : "ErrorMsg");
+			return;
+		}
+		if (arg) {
+			this.setMessage("usage: :worktrees  |  :worktree remove[!] <branch>", "Comment");
+			return;
+		}
+		let all: ReturnType<typeof listWorktrees>;
+		try {
+			all = listWorktrees(root, this.workspace.config);
+		} catch (err) {
+			this.setMessage((err as Error).message, "ErrorMsg");
+			return;
+		}
+		if (all.length === 0) {
+			this.setMessage("no agent worktrees yet (:new <task> creates one)", "Comment");
+			return;
+		}
+		const lines: FloatLine[] = all.map((w) => {
+			const owner = this.sessions.find((s) => s.worktree?.path === w.path);
+			return [
+				[owner ? "String" : "Comment", owner ? "● " : "  "],
+				["Title", `${(w.branch ?? `(detached ${w.head})`).padEnd(30)} `],
+				["NormalFloat", `${truncateToWidth(owner?.name ?? "", 20, "…").padEnd(20)} `],
+				["Comment", this.shortPath(w.path)],
+			];
+		});
+		lines.push([]);
+		lines.push([["Comment", "● = an agent is working in it · :worktree remove <branch> deletes one"]]);
+		this.openFloat("Worktrees", lines, 96);
+	}
+
+	/** `:diff`: what the focused agent changed since its worktree was created. */
+	private openDiff() {
+		const s = this.focusedSession;
+		const wt = s?.worktree;
+		if (!s || !wt?.path) {
+			this.setMessage(s ? `'${s.name}' has no worktree to diff` : "no agent", "ErrorMsg");
+			return;
+		}
+		diffText(wt)
+			.then((text) => {
+				if (!text.trim()) {
+					this.setMessage(`no changes on ${wt.branch} yet`, "Comment");
+					this.tui.requestRender();
+					return;
+				}
+				const lines: FloatLine[] = text.replace(/\n$/, "").split("\n").map((l) => [[diffGroup(l), l]]);
+				this.openFloat(`${wt.branch} vs ${wt.base ?? "base"}`, lines, this.terminal.columns - 4);
+			})
+			.catch((err) => {
+				this.setMessage(`git diff failed: ${(err as Error).message.split("\n")[0]}`, "ErrorMsg");
+				this.tui.requestRender();
+			});
 	}
 
 	/** `:map`, `:nmap`, `:inoremap`, ... (all mappings are non-recursive, like noremap). */
@@ -872,18 +1018,33 @@ export class App implements Component {
 				),
 			);
 			const model = s.model.replace(/^claude-/, "");
-			const detail = s.worktree ? `${I.worktree}${s.worktree} · ${model}` : model;
-			lines.push(
-				row([
-					["LineNr", " ".repeat(num.length)],
-					["VigentIndent", last ? "  " : I.pipe],
-					["Comment", `  ${detail}`],
-				]),
-			);
+			const indent: [string, string][] = [
+				["LineNr", " ".repeat(num.length)],
+				["VigentIndent", last ? "  " : I.pipe],
+			];
+			if (s.worktree) {
+				// the +/- counts matter more than the end of a long branch name
+				const stat = this.statSegments(s.worktree.stat);
+				const statWidth = stat.reduce((n, [, t]) => n + visibleWidth(t), 0);
+				const room = w - num.length - 2 - 2 - visibleWidth(I.worktree) - statWidth;
+				const branch = truncateToWidth(s.worktree.branch, Math.max(4, room), "…");
+				lines.push(row([...indent, ["Comment", `  ${I.worktree}${branch}`], ...stat]));
+			} else {
+				lines.push(row([...indent, ["Comment", `  ${model}`]]));
+			}
 		});
 
 		while (lines.length < h) lines.push(row([["EndOfBuffer", this.ui.tilde ? "~" : ""]]));
 		return lines.slice(0, h);
+	}
+
+	/** " +41 −18" in the diff colors; nothing when there are no changes yet. */
+	private statSegments(stat: DiffStat | undefined): [string, string][] {
+		if (!stat || (stat.added === 0 && stat.removed === 0)) return [];
+		return [
+			["Added", ` +${stat.added}`],
+			["Removed", ` ${this.icons.minus}${stat.removed}`],
+		];
 	}
 
 	private buildPaneLines(paneW: number): PaneLine[] {
@@ -902,7 +1063,7 @@ export class App implements Component {
 		if (!s) {
 			push("");
 			push(P.p("Title", "VIGENT") + P.p("Comment", " — vim-native agent orchestrator"));
-			push(P.p("Comment", "type :new <name> to spawn an agent"));
+			push(P.p("Comment", "type  :new fix flaky checkout test  to start an agent in its own worktree"));
 		} else {
 			for (const item of s.items) {
 				switch (item.kind) {
@@ -956,7 +1117,9 @@ export class App implements Component {
 		const modeBadge = P.p(MODE_GROUP[this.mode], ` ${this.mode} `);
 		const running = this.sessions.filter((x) => x.state === "running").length;
 		const leftText = s ? ` ${s.name} ` : " [no session] ";
-		const worktree = s?.worktree ? `${this.icons.worktree}${s.worktree} ` : "";
+		const st = s?.worktree?.stat;
+		const changes = st && (st.added || st.removed) ? ` +${st.added} ${this.icons.minus}${st.removed}` : "";
+		const worktree = s?.worktree ? `${this.icons.worktree}${s.worktree.branch}${changes} ` : "";
 		const right = s
 			? ` ${s.model}  ${formatTokens(s.tokens)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
 			: "";
@@ -1016,6 +1179,15 @@ function stripAnsi(s: string): string {
 
 const MODE_LETTER: Record<KeyMode, string> = { normal: "n", insert: "i", command: "c" };
 
+function diffGroup(line: string): string {
+	if (line.startsWith("+++") || line.startsWith("---")) return "Title";
+	if (line.startsWith("+")) return "Added";
+	if (line.startsWith("-")) return "Removed";
+	if (line.startsWith("@@")) return "Special";
+	if (/^(diff --git|index |new file|deleted file|similarity|rename )/.test(line)) return "Comment";
+	return "NormalFloat";
+}
+
 function mapModes(letter: string): KeyMode[] {
 	return letter === "i" ? ["insert"] : letter === "c" ? ["command"] : ["normal"];
 }
@@ -1042,8 +1214,12 @@ function describeRhs(rhs: Rhs[]): string {
 }
 
 const EX_HELP: [string, string][] = [
-	[":new [name]", "spawn an agent"],
-	[":kill", "kill the focused agent"],
+	[":new [task]", "start an agent in its own worktree"],
+	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
+	[":new! [name]", "agent in this checkout, no worktree"],
+	[":diff", "what the focused agent changed"],
+	[":worktrees", "list agent worktrees"],
+	[":worktree remove <branch>", "delete a worktree (safe; ! forces)"],
 	[":colorscheme [name]", "switch theme (no name: picker)"],
 	[":hi Group guifg=.. guibg=..", "change a highlight group"],
 	[":hi link A B  /  :hi clear", "link groups / undo :hi"],

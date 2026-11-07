@@ -87,7 +87,7 @@ Alternate full-screen views (like vim "windows" you toggle into):
 ### Ex commands
 
 ```
-:new [name] [--model m] [--worktree]   spawn an agent (worktree by default)
+:new <task>                             spawn an agent in its own worktree (:new! = no worktree)
 :kill [name]      :pause     :resume
 :diff [name]      :merge [name] [--squash]     :pr [name]
 :queue <prompt>                         enqueue follow-up for focused agent
@@ -153,9 +153,11 @@ inherit pi's session trees, auto-compaction, AGENTS.md handling, skills, and
 extensions for free. (RPC mode stays an option if we later want crash
 isolation per agent.)
 
-**Worktree isolation (the T3 trick):** every `:new --worktree` runs
-`git worktree add` on a fresh branch; the agent's cwd is the worktree, so N
-agents never collide. `:merge` rebases/squashes back; `:pr` hands off to `gh`.
+**Worktree isolation (the T3 trick):** every `:new <task>` runs
+`git worktree add` on a fresh, conventionally named branch
+(`:new fix flaky checkout test` → `fix/flaky-checkout-test`); the agent's
+tools run in that worktree, so N agents never collide (implemented, see the
+README). Next: `:merge` squashes back; `:pr` hands off to `gh`.
 
 **One process, N agents:** agents are just concurrent pi sessions emitting
 events onto the bus; the UI renders whichever is focused and keeps badges/

@@ -1,0 +1,345 @@
+/**
+ * One git worktree per agent.
+ *
+ * `:new fix flaky checkout test` creates the branch `fix/flaky-checkout-test`
+ * from the branch you're on, checks it out in its own worktree next to the
+ * repo (../<repo>-worktrees/fix-flaky-checkout-test), and runs the agent
+ * there. Agents never touch your checkout or each other's files.
+ *
+ * Removing is always git's safe path: `git worktree remove` refuses when there
+ * are uncommitted changes, and `git branch -d` keeps branches that aren't
+ * merged, unless you ask for --force.
+ */
+import { execFile, execFileSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+export interface DiffStat {
+	files: number;
+	added: number;
+	removed: number;
+}
+
+export interface WorktreeInfo {
+	branch: string;
+	/** absolute path; absent for demo sessions */
+	path?: string;
+	/** the branch or commit the worktree was created from */
+	base?: string;
+	stat?: DiffStat;
+}
+
+export interface WorktreeConfig {
+	enabled: boolean;
+	/** where worktrees go; relative paths are resolved from the repo root. {repo} = repo folder name */
+	dir: string;
+	/** branch name pattern: {type} (feat, fix, docs, ...) and {name} */
+	branch: string;
+	/** branch to start from; default: the branch currently checked out */
+	base?: string;
+}
+
+export const DEFAULT_WORKTREE: WorktreeConfig = {
+	enabled: true,
+	dir: "../{repo}-worktrees",
+	branch: "{type}/{name}",
+};
+
+function git(args: string[], cwd: string): string {
+	return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function gitOk(args: string[], cwd: string): boolean {
+	try {
+		git(args, cwd);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Readable message from a failed git command. */
+function gitError(err: unknown): string {
+	const e = err as { stderr?: string | Buffer; message?: string };
+	const text = (e.stderr ? String(e.stderr) : e.message ?? String(err)).trim();
+	return text.replace(/^(fatal|error): /gm, "").split("\n")[0];
+}
+
+/** The repository's top-level folder, or undefined outside a git repo. */
+export function repoRoot(cwd: string): string | undefined {
+	try {
+		return git(["rev-parse", "--show-toplevel"], cwd);
+	} catch {
+		return undefined;
+	}
+}
+
+export function currentBranch(cwd: string): string {
+	try {
+		return git(["symbolic-ref", "--short", "-q", "HEAD"], cwd);
+	} catch {
+		return git(["rev-parse", "--short", "HEAD"], cwd);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Branch names
+// ---------------------------------------------------------------------------
+
+/** Words that name the kind of change, mapped to the conventional branch type. */
+const TYPES: Record<string, string> = {
+	feat: "feat",
+	feature: "feat",
+	fix: "fix",
+	bugfix: "fix",
+	hotfix: "fix",
+	bug: "fix",
+	docs: "docs",
+	doc: "docs",
+	refactor: "refactor",
+	test: "test",
+	tests: "test",
+	chore: "chore",
+	perf: "perf",
+	ci: "ci",
+	build: "build",
+	style: "style",
+};
+
+/** lowercase, ascii, hyphen-separated, at most `max` characters (cut on a word boundary). */
+export function slugify(text: string, max = 48): string {
+	const slug = text
+		.normalize("NFKD")
+		.replace(/[̀-ͯ]/g, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	if (slug.length <= max) return slug;
+	const cut = slug.slice(0, max + 1);
+	const boundary = cut.lastIndexOf("-");
+	return (boundary > 8 ? cut.slice(0, boundary) : slug.slice(0, max)).replace(/-+$/, "");
+}
+
+/**
+ * A conventional branch name for an agent:
+ *   "fix flaky checkout test" -> fix/flaky-checkout-test
+ *   "auth-refactor"           -> refactor/auth
+ *   "docs: readme flags"      -> docs/readme-flags
+ *   "add dark mode"           -> feat/add-dark-mode
+ *   "release/v2-notes"        -> release/v2-notes   (a name with "/" is used as written)
+ */
+export function branchName(agentName: string, template = DEFAULT_WORKTREE.branch): string {
+	if (agentName.includes("/")) {
+		const parts = agentName.split("/").map((p) => slugify(p)).filter(Boolean);
+		if (parts.length > 0) return parts.join("/");
+	}
+	const words = slugify(agentName, 200).split("-").filter(Boolean);
+	let type = "feat";
+	if (words.length > 1 && TYPES[words[0]]) {
+		type = TYPES[words.shift() as string];
+	} else if (words.length > 1 && TYPES[words[words.length - 1]]) {
+		type = TYPES[words.pop() as string];
+	}
+	const name = slugify(words.join("-")) || "agent";
+	return template.replace(/\{type\}/g, type).replace(/\{name\}/g, name);
+}
+
+function isValidBranch(name: string, cwd: string): boolean {
+	return gitOk(["check-ref-format", "--branch", name], cwd);
+}
+
+function branchExists(name: string, cwd: string): boolean {
+	return gitOk(["show-ref", "--verify", "--quiet", `refs/heads/${name}`], cwd);
+}
+
+export function worktreesDir(root: string, config: WorktreeConfig = DEFAULT_WORKTREE): string {
+	const dir = config.dir.replace(/\{repo\}/g, path.basename(root));
+	return path.resolve(root, dir);
+}
+
+// ---------------------------------------------------------------------------
+// Create / remove / list
+// ---------------------------------------------------------------------------
+
+export function createWorktree(root: string, agentName: string, config: WorktreeConfig = DEFAULT_WORKTREE): WorktreeInfo {
+	const base = config.base || currentBranch(root);
+	const wanted = branchName(agentName, config.branch);
+	if (!isValidBranch(wanted, root)) throw new Error(`'${wanted}' is not a valid branch name (check [worktree] branch)`);
+
+	const dir = worktreesDir(root, config);
+	let branch = wanted;
+	let folder = path.join(dir, wanted.replace(/\//g, "-"));
+	for (let n = 2; branchExists(branch, root) || fs.existsSync(folder); n++) {
+		branch = `${wanted}-${n}`;
+		folder = path.join(dir, branch.replace(/\//g, "-"));
+	}
+
+	fs.mkdirSync(dir, { recursive: true });
+	excludeIfInside(root, dir);
+	try {
+		git(["worktree", "add", "-b", branch, folder, base], root);
+	} catch (err) {
+		throw new Error(`git worktree add failed: ${gitError(err)}`);
+	}
+	return { branch, path: folder, base, stat: { files: 0, added: 0, removed: 0 } };
+}
+
+/** A worktrees folder inside the repo goes in .git/info/exclude (local, never committed) so `git status` stays clean. */
+function excludeIfInside(root: string, dir: string) {
+	const rel = path.relative(root, dir);
+	if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return;
+	const file = path.resolve(root, git(["rev-parse", "--git-path", "info/exclude"], root));
+	const entry = `/${rel.split(path.sep).join("/")}/`;
+	const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+	if (current.split("\n").includes(entry)) return;
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.appendFileSync(file, `${current && !current.endsWith("\n") ? "\n" : ""}${entry}\n`);
+}
+
+export interface RemoveResult {
+	removed: boolean;
+	branchDeleted: boolean;
+	message: string;
+}
+
+/**
+ * Remove a worktree, then delete its branch if it's merged. Without `force`,
+ * git refuses to remove a worktree with uncommitted changes and keeps an
+ * unmerged branch, so no work is lost by accident.
+ */
+export function removeWorktree(root: string, wt: { path: string; branch?: string }, force = false): RemoveResult {
+	try {
+		git(["worktree", "remove", ...(force ? ["--force"] : []), wt.path], root);
+	} catch (err) {
+		const reason = gitError(err);
+		const dirty = /modified or untracked|contains modified/.test(reason);
+		return {
+			removed: false,
+			branchDeleted: false,
+			message: dirty ? `${wt.path} has uncommitted changes; use force to remove it anyway` : reason,
+		};
+	}
+	if (!wt.branch) return { removed: true, branchDeleted: false, message: `removed ${wt.path}` };
+	try {
+		git(["branch", force ? "-D" : "-d", wt.branch], root);
+		return { removed: true, branchDeleted: true, message: `removed ${wt.path} and branch ${wt.branch}` };
+	} catch {
+		return {
+			removed: true,
+			branchDeleted: false,
+			message: `removed ${wt.path}; kept branch ${wt.branch} (it has commits that aren't merged)`,
+		};
+	}
+}
+
+export interface ListedWorktree {
+	path: string;
+	branch?: string;
+	head: string;
+}
+
+/** Worktrees vigent manages (the ones inside the worktrees folder). */
+export function listWorktrees(root: string, config: WorktreeConfig = DEFAULT_WORKTREE): ListedWorktree[] {
+	const dir = worktreesDir(root, config);
+	const out: ListedWorktree[] = [];
+	let current: Partial<ListedWorktree> = {};
+	const flush = () => {
+		if (current.path && (current.path === dir || current.path.startsWith(dir + path.sep))) {
+			out.push({ path: current.path, branch: current.branch, head: current.head ?? "" });
+		}
+		current = {};
+	};
+	for (const line of git(["worktree", "list", "--porcelain"], root).split("\n")) {
+		if (line.startsWith("worktree ")) {
+			flush();
+			current.path = line.slice(9);
+		} else if (line.startsWith("HEAD ")) current.head = line.slice(5, 12);
+		else if (line.startsWith("branch ")) current.branch = line.slice(7).replace(/^refs\/heads\//, "");
+	}
+	flush();
+	return out;
+}
+
+/** Find a managed worktree by branch, folder name, or path. */
+export function findWorktree(root: string, query: string, config: WorktreeConfig = DEFAULT_WORKTREE): ListedWorktree | undefined {
+	const all = listWorktrees(root, config);
+	const abs = path.resolve(query);
+	return (
+		all.find((w) => w.branch === query) ??
+		all.find((w) => path.basename(w.path) === query) ??
+		all.find((w) => w.path === abs) ??
+		all.find((w) => w.branch === branchName(query, config.branch))
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Changes
+// ---------------------------------------------------------------------------
+
+async function gitAsync(args: string[], cwd: string): Promise<string> {
+	try {
+		const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 32 * 1024 * 1024 });
+		return stdout;
+	} catch (err) {
+		// `git diff --no-index` exits 1 when files differ; its stdout is still the diff
+		const e = err as { code?: number; stdout?: string };
+		if (e.code === 1 && typeof e.stdout === "string") return e.stdout;
+		throw err;
+	}
+}
+
+/** The commit the worktree branched from, so later commits on the base don't show as changes. */
+async function forkPoint(wt: WorktreeInfo): Promise<string> {
+	if (!wt.path) throw new Error("no worktree");
+	if (!wt.base) return "HEAD";
+	try {
+		return (await gitAsync(["merge-base", wt.base, "HEAD"], wt.path)).trim();
+	} catch {
+		return wt.base;
+	}
+}
+
+async function untrackedFiles(cwd: string): Promise<string[]> {
+	const out = await gitAsync(["ls-files", "--others", "--exclude-standard", "-z"], cwd);
+	return out.split("\0").filter(Boolean);
+}
+
+/** Everything the agent changed since the fork point: commits, uncommitted edits, and new files. */
+export async function diffStat(wt: WorktreeInfo): Promise<DiffStat> {
+	if (!wt.path) return wt.stat ?? { files: 0, added: 0, removed: 0 };
+	const from = await forkPoint(wt);
+	const stat: DiffStat = { files: 0, added: 0, removed: 0 };
+	for (const line of (await gitAsync(["diff", "--numstat", from], wt.path)).split("\n")) {
+		const m = /^(\d+|-)\t(\d+|-)\t/.exec(line);
+		if (!m) continue;
+		stat.files++;
+		stat.added += m[1] === "-" ? 0 : Number(m[1]);
+		stat.removed += m[2] === "-" ? 0 : Number(m[2]);
+	}
+	for (const file of await untrackedFiles(wt.path)) {
+		stat.files++;
+		try {
+			const buf = fs.readFileSync(path.join(wt.path, file));
+			const text = buf.includes(0) ? "" : buf.toString("utf8"); // skip binary files
+			if (text) stat.added += text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+		} catch {
+			// unreadable: count the file, not its lines
+		}
+	}
+	return stat;
+}
+
+/** Unified diff of everything the agent changed, new files included. */
+export async function diffText(wt: WorktreeInfo, maxLines = 4000): Promise<string> {
+	if (!wt.path) return "";
+	const from = await forkPoint(wt);
+	let text = await gitAsync(["diff", "--no-color", from], wt.path);
+	for (const file of await untrackedFiles(wt.path)) {
+		text += await gitAsync(["diff", "--no-color", "--no-index", "--", "/dev/null", file], wt.path);
+	}
+	const lines = text.split("\n");
+	return lines.length > maxLines ? `${lines.slice(0, maxLines).join("\n")}\n… ${lines.length - maxLines} more lines` : text;
+}

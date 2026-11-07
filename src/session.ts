@@ -1,10 +1,12 @@
 /**
  * Session layer: one Session per agent.
  *
- * - PiSession drives a real pi Agent (@mariozechner/pi-agent-core) in-process.
+ * - PiSession runs a real pi coding agent in-process, with its read / write /
+ *   edit / bash tools rooted in the agent's own git worktree.
  * - DemoSession replays a scripted transcript so the UI can be explored
  *   without API keys.
  */
+import { diffStat, type WorktreeInfo } from "./worktree.js";
 
 export type SessionState = "running" | "waiting" | "idle" | "error";
 
@@ -39,11 +41,39 @@ export abstract class Session {
 	version = 0; // bumped on every change, used for render caching
 	private listeners = new Set<() => void>();
 
+	private statTimer?: ReturnType<typeof setTimeout>;
+	private statRunning = false;
+
 	constructor(
 		public name: string,
 		public model: string,
-		public worktree?: string,
+		public worktree?: WorktreeInfo,
 	) {}
+
+	/** Recount the worktree's changes (throttled; runs git in the background). */
+	refreshStat(delayMs = 300) {
+		const wt = this.worktree;
+		if (!wt?.path || this.statTimer) return;
+		this.statTimer = setTimeout(async () => {
+			this.statTimer = undefined;
+			if (this.statRunning) return this.refreshStat(delayMs);
+			this.statRunning = true;
+			try {
+				wt.stat = await diffStat(wt);
+				this.emit();
+			} catch {
+				// the worktree may have been removed; keep the last numbers
+			} finally {
+				this.statRunning = false;
+			}
+		}, delayMs);
+	}
+
+	/** Stop background work (stat refresh). Subclasses also stop the agent. */
+	dispose() {
+		if (this.statTimer) clearTimeout(this.statTimer);
+		this.statTimer = undefined;
+	}
 
 	onChange(cb: () => void): () => void {
 		this.listeners.add(cb);
@@ -176,36 +206,52 @@ export class DemoSession extends Session {
 }
 
 // ---------------------------------------------------------------------------
-// Pi session — real engine, in-process
+// Pi session: real engine, in-process, working inside the agent's worktree
 // ---------------------------------------------------------------------------
 
-export class PiSession extends Session {
-	private agent: any;
-	private ready: Promise<void>;
+export interface PiSessionOptions {
+	/** where the agent's tools run: its worktree, or your checkout without one */
+	cwd: string;
+	worktree?: WorktreeInfo;
+	/** a pi-ai Model object; overrides the model id (used by tests) */
+	modelObject?: unknown;
+	/** pi AuthStorage; default: pi's own (~/.pi/agent/auth.json and env keys) */
+	authStorage?: unknown;
+	/** pi's config dir; default ~/.pi/agent */
+	agentDir?: string;
+}
 
-	constructor(name: string, model: string, worktree?: string) {
-		super(name, model, worktree);
+export class PiSession extends Session {
+	private session: any;
+	readonly ready: Promise<void>;
+	readonly cwd: string;
+
+	constructor(name: string, model: string, private opts: PiSessionOptions) {
+		super(name, model, opts.worktree);
+		this.cwd = opts.cwd;
 		this.ready = this.init();
 	}
 
 	private async init() {
-		const { Agent } = await import("@mariozechner/pi-agent-core");
-		const ai = await import("@mariozechner/pi-ai");
-		ai.registerBuiltInApiProviders();
-		let model: any;
-		try {
-			model = (ai as any).getModel("anthropic", this.model);
-		} catch {
-			model = undefined;
+		const sdk = await import("@mariozechner/pi-coding-agent");
+		let model = this.opts.modelObject;
+		if (!model) {
+			const ai = await import("@mariozechner/pi-ai");
+			try {
+				model = (ai as any).getModel("anthropic", this.model);
+			} catch {
+				model = undefined; // let pi pick its default
+			}
 		}
-		this.agent = new Agent({
-			initialState: {
-				systemPrompt:
-					"You are a coding agent running inside vigent, a vim-style terminal orchestrator. Be concise.",
-				...(model ? { model } : {}),
-			} as any,
+		const { session } = await sdk.createAgentSession({
+			cwd: this.cwd,
+			model: model as any,
+			sessionManager: sdk.SessionManager.inMemory(),
+			...(this.opts.authStorage ? { authStorage: this.opts.authStorage as any } : {}),
+			...(this.opts.agentDir ? { agentDir: this.opts.agentDir } : {}),
 		});
-		this.agent.subscribe((event: any) => this.onEvent(event));
+		this.session = session;
+		session.subscribe((event: any) => this.onEvent(event));
 	}
 
 	private onEvent(event: any) {
@@ -215,6 +261,7 @@ export class PiSession extends Session {
 				break;
 			case "agent_end":
 				this.setState("idle");
+				this.refreshStat(0);
 				break;
 			case "message_start": {
 				if (event.message?.role === "assistant") {
@@ -238,6 +285,7 @@ export class PiSession extends Session {
 					last.streaming = false;
 					const usage = event.message?.usage;
 					if (usage) this.tokens += (usage.input ?? 0) + (usage.output ?? 0);
+					if (!last.text) this.items.pop(); // a turn that only called tools
 					this.emit();
 				}
 				break;
@@ -246,12 +294,7 @@ export class PiSession extends Session {
 				this.items.push({
 					kind: "tool",
 					text: "",
-					tool: {
-						name: event.toolName,
-						summary: summarizeArgs(event.args),
-						output: "",
-						folded: true,
-					},
+					tool: { name: event.toolName, summary: summarizeArgs(event.args), output: "", folded: true },
 				});
 				this.emit();
 				break;
@@ -262,6 +305,7 @@ export class PiSession extends Session {
 					item.tool.output = extractText(event.result?.content ?? []) || JSON.stringify(event.result ?? "");
 					this.emit();
 				}
+				this.refreshStat();
 				break;
 			}
 		}
@@ -271,7 +315,7 @@ export class PiSession extends Session {
 		this.pushUser(text);
 		this.setState("running");
 		this.ready
-			.then(() => this.agent.prompt(text))
+			.then(() => this.session.prompt(text))
 			.catch((err: any) => {
 				this.pushInfo(`error: ${err?.message ?? err}`);
 				this.setState("error");
@@ -279,8 +323,13 @@ export class PiSession extends Session {
 	}
 
 	abort(): void {
-		this.agent?.abort?.();
+		this.session?.abort?.();
 		this.setState("idle");
+	}
+
+	dispose() {
+		super.dispose();
+		this.session?.dispose?.();
 	}
 }
 

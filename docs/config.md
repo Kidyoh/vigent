@@ -31,6 +31,11 @@ Normal = { bg = "NONE" }        # transparent background
 Comment = "gui=NONE"            # no italic comments
 CursorLine = "guibg=#2a2f3a"
 
+[worktree]
+enabled = true
+dir = "../{repo}-worktrees"
+branch = "{type}/{name}"        # "fix flaky test" -> fix/flaky-test
+
 [keys.normal]
 "<leader>n" = ":new "           # opens ":new " so you can type a name
 "<leader>x" = ":kill<CR>"
@@ -86,6 +91,41 @@ VigentSidebar = "NormalFloat"
 ```
 
 The full list of groups, and how to write whole themes, is in [themes.md](themes.md).
+
+## `[worktree]`
+
+Each agent works in its own git worktree, on its own branch, so agents never touch your checkout or each other's files. `:new fix flaky checkout test` creates the branch `fix/flaky-checkout-test` from the branch you have checked out, in `../<repo>-worktrees/fix-flaky-checkout-test`, and starts the agent there.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | give each new agent a worktree (`:new!` skips it for one agent) |
+| `dir` | `"../{repo}-worktrees"` | where worktrees go, relative to the repo root; `{repo}` is the repo's folder name. A folder inside the repo is added to `.git/info/exclude` so `git status` stays clean |
+| `branch` | `"{type}/{name}"` | branch name pattern; must contain `{name}` |
+| `base` | the checked-out branch | branch to start new worktrees from |
+
+**Branch names** are built from the task you type:
+
+| You type | Branch |
+|---|---|
+| `fix flaky checkout test` | `fix/flaky-checkout-test` |
+| `auth-refactor` | `refactor/auth` |
+| `docs: refresh README flags` | `docs/refresh-readme-flags` |
+| `add dark mode` | `feat/add-dark-mode` |
+| `release/v2 notes` | `release/v2-notes` (a name with `/` is used as written) |
+
+A first or last word of `feat`, `fix` (also `bugfix`, `hotfix`, `bug`), `docs`, `refactor`, `test`, `chore`, `perf`, `ci`, `build` or `style` becomes the type. Otherwise the type is `feat`. Names are lowercase ASCII with hyphens, at most 48 characters. Reusing a name gives `-2`, `-3`, … instead of failing. Other patterns: `"agent/{name}"`, or `"yourname/{type}/{name}"`.
+
+**Removing** always goes through git's safety checks. `git worktree remove` refuses a worktree with uncommitted changes, and the branch is deleted only if it's merged. Otherwise it's kept, so finished work is never lost by accident:
+
+```vim
+:kill                       " stop the agent, keep its worktree and branch
+:kill!                      " stop it and remove the worktree (refused if it has uncommitted changes)
+:worktree remove <branch>   " remove a worktree no agent is using (:worktree remove! forces it)
+:worktrees                  " list them; ● marks the ones an agent is working in
+:diff                       " everything the focused agent changed, new files included
+```
+
+From the shell: `vigent worktree list`, `vigent worktree remove <branch> [--force]`, `vigent worktree prune`.
 
 ## `[keys]`
 

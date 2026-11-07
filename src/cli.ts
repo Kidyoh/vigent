@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /** vigent — vim-native agent orchestrator on the pi engine. */
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
@@ -9,6 +10,15 @@ import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
 import { DemoSession, PiSession, type Session } from "./session.js";
 import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./theme.js";
+import {
+	branchName,
+	createWorktree,
+	findWorktree,
+	listWorktrees,
+	removeWorktree,
+	repoRoot,
+	worktreesDir,
+} from "./worktree.js";
 
 const HELP = `vigent — vim-native agent orchestrator (pi engine)
 
@@ -24,16 +34,20 @@ themes:
       --clean             skip your editor config
   vigent theme new <name> [--from <theme>]   create a theme file to customize
   vigent theme path                          show where themes and config live
+  vigent worktree list                       agent worktrees in this repo
+  vigent worktree remove <branch> [--force]  delete one (safe unless --force)
+  vigent worktree prune                      forget worktrees whose folder is gone
   vigent config init                         write a commented config.toml
   vigent config check                        validate config.toml (theme, options, keys)
 
 keys (NORMAL mode):
-  i            prompt the focused agent        :new <name>     spawn an agent
-  j/k gg G     scroll transcript               :kill           kill focused agent
+  i            prompt the focused agent        :new <task>     agent in its own worktree
+  j/k gg G     scroll transcript               :kill[!]        stop it (! removes worktree)
   ctrl+d/u     half-page scroll                :colorscheme    pick a theme (live preview)
   ]s [s 1-9    switch sessions                 :hi Group ...   change a highlight group
   za zM zR     fold/unfold tool output         :set nonumber   toggle ui options
-  /pattern n N search transcript               :nmap <lhs> <rhs> map keys (see :help)
+  /pattern n N search transcript               :diff           what the agent changed
+  :worktrees   list agent worktrees            :nmap <lhs> <rhs> map keys (see :help)
   :help        every key, including yours      :q              quit
 
 Runs in demo mode (scripted sessions, no network) when --demo is passed
@@ -136,6 +150,43 @@ async function themeCommand(argv: string[]): Promise<number> {
 	return 1;
 }
 
+function worktreeCommand(argv: string[]): number {
+	const root = repoRoot(process.cwd());
+	if (!root) {
+		console.error("vigent: not inside a git repository");
+		return 1;
+	}
+	const { config } = loadConfig();
+	const sub = argv[0];
+	if (sub === "list" || sub === undefined) {
+		const all = listWorktrees(root, config.worktree);
+		if (all.length === 0) console.log(`no agent worktrees (they go in ${worktreesDir(root, config.worktree)})`);
+		for (const w of all) console.log(`${(w.branch ?? `(detached ${w.head})`).padEnd(36)} ${w.path}`);
+		return 0;
+	}
+	if (sub === "remove" || sub === "rm") {
+		const query = argv[1];
+		if (!query) {
+			console.error("usage: vigent worktree remove <branch> [--force]");
+			return 1;
+		}
+		const w = findWorktree(root, query, config.worktree);
+		if (!w) {
+			console.error(`vigent: no agent worktree '${query}' (see: vigent worktree list)`);
+			return 1;
+		}
+		const r = removeWorktree(root, w, argv.includes("--force"));
+		console.log(r.message);
+		return r.removed ? 0 : 1;
+	}
+	if (sub === "prune") {
+		execFileSync("git", ["worktree", "prune", "-v"], { cwd: root, stdio: "inherit" });
+		return 0;
+	}
+	console.error("usage: vigent worktree list | remove <branch> [--force] | prune");
+	return 1;
+}
+
 async function main(): Promise<number | undefined> {
 	const argv = process.argv.slice(2);
 
@@ -144,6 +195,7 @@ async function main(): Promise<number | undefined> {
 		return 0;
 	}
 	if (argv[0] === "theme" || argv[0] === "themes") return themeCommand(argv.slice(1));
+	if (argv[0] === "worktree" || argv[0] === "worktrees" || argv[0] === "wt") return worktreeCommand(argv.slice(1));
 	if (argv[0] === "config" && argv[1] === "check") {
 		const file = configPath();
 		if (!fs.existsSync(file)) {
@@ -201,12 +253,27 @@ async function main(): Promise<number | undefined> {
 
 	const terminal = new ProcessTerminal();
 	const tui = new TUI(terminal, false);
-	const app = new App(tui, terminal, new Painter(theme, config.highlights), config.ui, keymap);
-	app.newSession = (name: string): Session => (demo ? new DemoSession(name, model) : new PiSession(name, model));
+	const root = repoRoot(process.cwd());
+	const app = new App(tui, terminal, new Painter(theme, config.highlights), config.ui, keymap, {
+		root,
+		config: config.worktree,
+	});
+	app.newSession = (name, { worktree }): Session => {
+		if (demo) {
+			// demo mode never touches your repo: the worktree is only shown, not created
+			const shown = worktree ? { branch: branchName(name, config.worktree.branch) } : undefined;
+			return new DemoSession(name, model, shown);
+		}
+		const wt = worktree && root ? createWorktree(root, name, config.worktree) : undefined;
+		return new PiSession(name, model, { cwd: wt?.path ?? process.cwd(), worktree: wt });
+	};
 
 	app.onQuit = () => {
 		app.stopTimers();
-		for (const s of app.sessions) s.abort();
+		for (const s of app.sessions) {
+			s.abort();
+			s.dispose();
+		}
 		tui.stop();
 		process.exit(0);
 	};
@@ -214,8 +281,6 @@ async function main(): Promise<number | undefined> {
 	if (demo) {
 		for (const s of createDemoSessions()) app.addSession(s, false);
 		app.focusIdx = 0;
-	} else {
-		app.addSession(app.newSession("main"));
 	}
 
 	tui.addChild(app);

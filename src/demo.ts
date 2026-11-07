@@ -1,8 +1,12 @@
 /** Scripted demo content so the UI can be explored without API keys. */
 import { DemoSession } from "./session.js";
+import { branchName } from "./worktree.js";
 
 export function createDemoSessions(): DemoSession[] {
-	const auth = new DemoSession("auth-refactor", "claude-sonnet-5-5", "wt-auth");
+	const auth = new DemoSession("auth-refactor", "claude-sonnet-5-5", {
+		branch: branchName("auth-refactor"),
+		stat: { files: 2, added: 41, removed: 18 },
+	});
 	auth.pushUser("Refactor the session middleware to use the new token store.");
 	auth.play([
 		{ delay: 300, kind: "state", state: "running" },
@@ -44,7 +48,10 @@ export function createDemoSessions(): DemoSession[] {
 		{ delay: 300, kind: "state", state: "waiting" },
 	]);
 
-	const flaky = new DemoSession("fix-flaky-test", "claude-haiku-5-5", "wt-flaky");
+	const flaky = new DemoSession("fix-flaky-test", "claude-haiku-5-5", {
+		branch: branchName("fix-flaky-test"),
+		stat: { files: 1, added: 6, removed: 2 },
+	});
 	flaky.pushUser("The checkout e2e test fails ~1 in 5 runs. Find the race and fix it.");
 	flaky.play([
 		{ delay: 1200, kind: "state", state: "running" },

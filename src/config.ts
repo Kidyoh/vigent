@@ -20,6 +20,7 @@ import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { KEY_MODES, type KeyMode } from "./keys.js";
 import { type Attr, configDir, normalizeGroups } from "./theme.js";
+import { DEFAULT_WORKTREE, type WorktreeConfig } from "./worktree.js";
 
 export interface UiOptions {
 	sidebar: boolean;
@@ -39,6 +40,7 @@ export interface Config {
 	highlights: Record<string, Attr>;
 	/** raw mappings per mode; validated when the keymap is built */
 	keys: Partial<Record<KeyMode, Record<string, unknown>>>;
+	worktree: WorktreeConfig;
 }
 
 export const DEFAULT_UI: UiOptions = {
@@ -56,7 +58,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath()): { config: Config; warnings: string[] } {
-	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {} };
+	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE } };
 	const warnings: string[] = [];
 	if (!fs.existsSync(file)) return { config, warnings };
 
@@ -107,11 +109,43 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 			case "highlights":
 				config.highlights = normalizeGroups(value as Record<string, unknown>);
 				break;
+			case "worktree":
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					warnings.push("config: [worktree] should be a table");
+					break;
+				}
+				for (const [opt, v] of Object.entries(value)) {
+					const msg = setWorktreeOption(config.worktree, opt, v);
+					if (msg) warnings.push(`config [worktree]: ${msg}`);
+				}
+				break;
 			default:
 				warnings.push(`config: unknown key '${key}'`);
 		}
 	}
 	return { config, warnings };
+}
+
+function setWorktreeOption(wt: WorktreeConfig, name: string, value: unknown): string | undefined {
+	switch (name) {
+		case "enabled":
+			if (typeof value !== "boolean") return "'enabled' should be true or false";
+			wt.enabled = value;
+			return;
+		case "dir":
+		case "base":
+			if (typeof value !== "string") return `'${name}' should be a string`;
+			if (name === "dir" && !value.trim()) return "'dir' can't be empty";
+			wt[name] = value;
+			return;
+		case "branch":
+			if (typeof value !== "string") return "'branch' should be a string";
+			if (!value.includes("{name}")) return "'branch' should contain {name}, e.g. \"{type}/{name}\" or \"agent/{name}\"";
+			wt.branch = value;
+			return;
+		default:
+			return `unknown option '${name}'`;
+	}
 }
 
 const ALIASES: Record<string, keyof UiOptions> = {
@@ -238,6 +272,16 @@ timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 # CursorLine = "guibg=#2a2f3a"
 # Comment = "gui=NONE"                      # no italic comments
 # VigentModeNormal = { fg = "#1a1b26", bg = "#7aa2f7", bold = true }
+
+# --- Worktrees --------------------------------------------------------------
+# Each agent gets its own git worktree and branch, so agents never touch your
+# checkout or each other. ":new fix flaky checkout test" creates the branch
+# fix/flaky-checkout-test in ../<repo>-worktrees/fix-flaky-checkout-test.
+[worktree]
+enabled = true
+dir = "../{repo}-worktrees"     # relative to the repo root
+branch = "{type}/{name}"        # {type} = feat, fix, docs, refactor, ... from the agent's name
+# base = "main"                 # default: the branch you have checked out
 
 # --- Keys (also live: :nmap, :imap, :cmap, :unmap; list them with :help) ---
 # Left side: vim notation, e.g. j  gg  <C-d>  <S-Tab>  <M-x>  <CR>  <leader>t
