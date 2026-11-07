@@ -45,6 +45,7 @@ import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
 import { ChoicePicker, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { EFFORTS, effortChoicesFor, modelChoices } from "./choices.js";
+import { ICON_SETS, NERD, toolIcon } from "./icons.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
@@ -119,6 +120,27 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		ok: "●",
 		warn: "◐",
 		off: "○",
+	},
+	nerd: {
+		spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+		state: { waiting: NERD.hourglass, idle: NERD.circleO, paused: NERD.pause, error: NERD.times },
+		tee: "├╴",
+		last: "└╴",
+		pipe: "│ ",
+		sep: "│",
+		worktree: `${NERD.branch} `,
+		prompt: "❯ ",
+		folded: NERD.caretRight,
+		open: NERD.caretDown,
+		cursor: "▍",
+		minus: "−",
+		bullet: "•",
+		queued: NERD.clock,
+		open_agent: "▸",
+		here: NERD.circle,
+		ok: NERD.check,
+		warn: NERD.warning,
+		off: NERD.circleO,
 	},
 	ascii: {
 		spinner: ["|", "/", "-", "\\"],
@@ -1114,7 +1136,13 @@ export class App implements Component {
 				},
 				hint: "the terminal's own background shows through (its blur, opacity or wallpaper)",
 			},
-			{ section: "Look", label: "Icons", value: () => ui.icons, change: () => ((ui.icons = ui.icons === "unicode" ? "ascii" : "unicode"), refresh()), hint: "ascii for fonts without box-drawing characters" },
+			{
+				section: "Look",
+				label: "Icons",
+				value: () => ui.icons,
+				change: () => ((ui.icons = ICON_SETS[(ICON_SETS.indexOf(ui.icons) + 1) % ICON_SETS.length]), refresh()),
+				hint: "nerd: Nerd Font icons (needs a Nerd Font) · ascii: fonts without box-drawing characters",
+			},
 			{ section: "Look", label: "24-bit color", value: () => onOff(ui.termguicolors), change: () => ((ui.termguicolors = !ui.termguicolors), refresh()), hint: "off: the nearest of the 256 standard colors (vim's 'termguicolors')" },
 			{ section: "Layout", label: "Sidebar", value: () => onOff(ui.sidebar), change: () => ((ui.sidebar = !ui.sidebar), refresh()) },
 			{
@@ -1657,7 +1685,7 @@ export class App implements Component {
 				}
 				const width = this.terminal.columns - 4;
 				const unified = unifiedView(text);
-				const side = splitView(text, width - 3);
+				const side = splitView(text, width - 3, this.ui.icons === "nerd");
 				const n = unified.jumps.length;
 				const title = (layout: string) =>
 					`${wt.branch} vs ${wt.base ?? "base"} · ${n} hunk${n === 1 ? "" : "s"} · ]c [c jump · s ${layout}`;
@@ -2149,7 +2177,7 @@ export class App implements Component {
 		const rows: { text: string; plain: string }[] = [];
 		const add = (text: string, plain: string, indent = center(plain)) => rows.push({ text: indent + text, plain: indent + plain });
 		// LazyVim's dashboard: a big logo, then one key per action
-		const logo = this.ui.icons === "unicode" && paneW >= LOGO[0].length + 2 && paneH >= 22;
+		const logo = this.ui.icons !== "ascii" && paneW >= LOGO[0].length + 2 && paneH >= 22;
 		if (logo) {
 			const groups = ["Function", "Function", "Special", "Special", "Keyword", "Keyword"];
 			LOGO.forEach((l, i) => add(P.p(groups[i] ?? "Title", l), l));
@@ -2160,7 +2188,7 @@ export class App implements Component {
 		const tagline = "coding agents, the vim way · each one in its own git worktree";
 		add(P.p("Comment", tagline), tagline);
 		add("", "");
-		const actions = DASHBOARD.map(([key, icon, label]) => [key, this.ui.icons === "unicode" ? icon : "", label] as const);
+		const actions = DASHBOARD.map(([key, icon, label, nerd]) => [key, this.ui.icons === "nerd" ? nerd : this.ui.icons === "unicode" ? icon : "", label] as const);
 		const labelW = Math.max(...actions.map(([, , l]) => l.length));
 		const blockW = 2 + labelW + 6;
 		const indent = center("x".repeat(blockW));
@@ -2181,7 +2209,7 @@ export class App implements Component {
 			});
 			add(text, plain, indentE);
 			const ready = this.engines.filter((e) => e.connected).length;
-			const foot = `${this.ui.icons === "unicode" ? "⚡ " : ""}vigent ${VERSION_TEXT} · ${listThemes().length} themes · ${ready} of ${this.engines.length} engines ready`;
+			const foot = `${this.ui.icons === "nerd" ? `${NERD.bolt} ` : this.ui.icons === "unicode" ? "⚡ " : ""}vigent ${VERSION_TEXT} · ${listThemes().length} themes · ${ready} of ${this.engines.length} engines ready`;
 			add(P.p("Comment", foot), foot);
 		}
 		if (!this.workspace.root) {
@@ -2371,9 +2399,10 @@ export class App implements Component {
 				case "tool": {
 					const t = item.tool!;
 					const fold = t.folded ? I.folded : I.open;
+					const icon = this.ui.icons === "nerd" ? `${toolIcon(t.name)} ` : "";
 					push(
-						P.p("NonText", ` ${fold} `) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
-						` ${fold} ${t.name} ${t.summary}`,
+						P.p("NonText", ` ${fold} `) + P.p("Special", icon) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
+						` ${fold} ${icon}${t.name} ${t.summary}`,
 						{ item: n },
 					);
 					if (!t.folded && t.output) {
@@ -2618,14 +2647,15 @@ const LOGO = [
 ];
 
 /** The dashboard's keys (active while no agent is open): key, icon, label. */
-const DASHBOARD: [string, string, string][] = [
-	["i", "✎", "New agent: type a task, Enter"],
-	["n", "+", "New agent by name"],
-	["t", "◐", "Theme"],
-	["s", "⚙", "Settings"],
-	["m", "◆", "Model"],
-	["e", "↯", "Effort"],
-	["c", "✓", "Check engines"],
-	["?", "⌘", "Keys"],
-	["q", "×", "Quit"],
+/** key, unicode icon, label, Nerd Font icon */
+const DASHBOARD: [string, string, string, string][] = [
+	["i", "✎", "New agent: type a task, Enter", NERD.pencil],
+	["n", "+", "New agent by name", NERD.plus],
+	["t", "◐", "Theme", NERD.palette],
+	["s", "⚙", "Settings", NERD.gear],
+	["m", "◆", "Model", NERD.chip],
+	["e", "↯", "Effort", NERD.bolt],
+	["c", "✓", "Check engines", NERD.check],
+	["?", "⌘", "Keys", NERD.keyboard],
+	["q", "×", "Quit", NERD.power],
 ];

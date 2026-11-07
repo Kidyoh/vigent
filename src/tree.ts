@@ -37,8 +37,9 @@ export interface TreeGlyphs {
 	blank: string;
 }
 
-export const TREE_GLYPHS: Record<"unicode" | "ascii", TreeGlyphs> = {
+export const TREE_GLYPHS: Record<"unicode" | "ascii" | "nerd", TreeGlyphs> = {
 	unicode: { tee: "├─ ", last: "└─ ", pipe: "│  ", blank: "   " },
+	nerd: { tee: "├─ ", last: "└─ ", pipe: "│  ", blank: "   " },
 	ascii: { tee: "|- ", last: "`- ", pipe: "|  ", blank: "   " },
 };
 

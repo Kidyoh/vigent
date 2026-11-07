@@ -213,13 +213,15 @@ theme = "tokyonight"
 
 [ui]
 sidebar_width = 34
-icons = "unicode"      # or "ascii"
+icons = "unicode"      # or "nerd" (Nerd Font icons), "ascii"
 transparent = true     # the terminal's background, with any theme
 
 [highlights]           # applied on top of any theme
 Normal = { bg = "NONE" }
 CursorLine = "guibg=#2a2f3a"
 ```
+
+**Icons and fonts:** `icons = "nerd"` (or `:settings`, Icons) uses Nerd Font icons like AstroNvim and LazyVim: a git branch icon, status and engine icons, an icon per tool call (terminal, pencil, file, search…) and file-type icons in the diff view, colored from your theme. vigent draws in your terminal's font, the same as Neovim in a terminal, so for these icons set your terminal's font to a [Nerd Font](https://www.nerdfonts.com) (for example JetBrainsMono Nerd Font).
 
 25 built in, including `lazyvim` (LazyVim's look, transparent), the tokyonight, catppuccin and rose-pine families, `dracula`, `onedark`, `everforest`, `nightfox`, `gruvbox`, `kanagawa`, `nord`, `monokai-pro`, `ayu-mirage`, and GitHub and solarized in dark and light. The picker shows each one's colors:
 

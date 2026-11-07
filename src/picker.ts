@@ -27,8 +27,9 @@ export interface PickerIcons {
 	prompt: string;
 }
 
-export const PICKER_ICONS: Record<"unicode" | "ascii", PickerIcons> = {
+export const PICKER_ICONS: Record<"unicode" | "ascii" | "nerd", PickerIcons> = {
 	unicode: { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│", lt: "├", rt: "┤", current: "●", prompt: "❯" },
+	nerd: { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│", lt: "├", rt: "┤", current: "\uf00c", prompt: "\uf002" },
 	ascii: { tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|", lt: "+", rt: "+", current: "*", prompt: ">" },
 };
 

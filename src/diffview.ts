@@ -9,6 +9,7 @@
  */
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { FloatLine } from "./float.js";
+import { fileIcon } from "./icons.js";
 
 export interface DiffView {
 	lines: FloatLine[];
@@ -42,8 +43,8 @@ function cell(no: number | undefined, text: string | undefined, width: number, g
 	];
 }
 
-/** Side-by-side layout for a window `width` columns wide (inside its border). */
-export function splitView(text: string, width: number): DiffView {
+/** Side-by-side layout for a window `width` columns wide (inside its border). With `icons`, file names get their Nerd Font icon. */
+export function splitView(text: string, width: number, icons = false): DiffView {
 	const col = Math.max(12, Math.floor((width - 3) / 2));
 	const lines: FloatLine[] = [];
 	const jumps: number[] = [];
@@ -68,7 +69,9 @@ export function splitView(text: string, width: number): DiffView {
 		}
 		const file = /^\+\+\+ (?:b\/)?(.*)$/.exec(line);
 		if (file) {
-			lines.push([["Title", file[1] === "/dev/null" ? "(deleted file)" : file[1]]]);
+			const name = file[1] === "/dev/null" ? "(deleted file)" : file[1];
+			const [glyph, group] = fileIcon(name);
+			lines.push(icons ? [[group, `${glyph} `], ["Title", name]] : [["Title", name]]);
 			continue;
 		}
 		if (/^(---|index |new file|deleted file|similarity|rename |\\ No newline)/.test(line)) continue;

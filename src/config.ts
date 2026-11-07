@@ -8,7 +8,7 @@
  *   sidebar_width = 30
  *   number = true
  *   tilde = true
- *   icons = "unicode"        # or "ascii"
+ *   icons = "unicode"        # or "nerd" (a Nerd Font), "ascii"
  *
  *   [highlights]             # applied on top of whichever theme is active
  *   Normal = { bg = "NONE" } # transparent background
@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { EFFORTS } from "./choices.js";
+import { ICON_SETS, type IconSet } from "./icons.js";
 import { type EngineId, isEngineId } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
 import { KEY_MODES, type KeyMode } from "./keys.js";
@@ -30,7 +31,7 @@ export interface UiOptions {
 	sidebar_width: number;
 	number: boolean;
 	tilde: boolean;
-	icons: "unicode" | "ascii";
+	icons: IconSet;
 	/** ms to wait for the rest of a multi-key mapping, like vim's 'timeoutlen' */
 	timeoutlen: number;
 	/** 24-bit color (vim's 'termguicolors'); off maps colors to the nearest of 256 */
@@ -247,8 +248,8 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 			return;
 		}
 		case "icons":
-			if (value !== "unicode" && value !== "ascii") return `'${name}' should be "unicode" or "ascii"`;
-			ui.icons = value;
+			if (!ICON_SETS.includes(value as IconSet)) return `'${name}' should be "unicode", "nerd" or "ascii"`;
+			ui.icons = value as IconSet;
 			return;
 		case "transparent":
 			if (value === true || value === false || value === "auto") ui.transparent = value;
@@ -368,7 +369,7 @@ sidebar = true
 sidebar_width = 30
 number = true          # session numbers in the sidebar
 tilde = true           # ~ on empty sidebar rows
-icons = "unicode"      # "ascii" for fonts without box-drawing characters
+icons = "unicode"      # "nerd" for Nerd Font icons (like AstroNvim/LazyVim), "ascii" for fonts without box-drawing characters
 timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 # termguicolors = false  # for terminals without 24-bit color: use the nearest of 256
 # transparent = true    # use the terminal's background with any theme ("auto": the theme decides)
