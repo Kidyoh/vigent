@@ -242,8 +242,7 @@ test(":checkhealth and :worktrees show riftri and what the worktrees cost", asyn
 const cow = process.env.VIGENT_COW_DIR;
 test("real riftri on a copy-on-write volume: agents share storage", { skip: !cow && "set VIGENT_COW_DIR to a Btrfs/XFS/APFS folder" }, async () => {
 	delete process.env.RIFTRI_BINARY; // the riftri package installed with vigent
-	// riftri refuses injected git config (cloud sandboxes set it for credentials)
-	for (const k of Object.keys(process.env)) if (/^GIT_CONFIG_(COUNT|KEY_|VALUE_|PARAMETERS)/.test(k)) delete process.env[k];
+	// cloud sandboxes inject network-only git config (GIT_CONFIG_COUNT); riftri 0.6.7 accepts it
 	const repo = makeRepo(fs.mkdtempSync(path.join(cow, "vigent-cow-")));
 	try {
 		for (let i = 0; i < 50; i++) fs.writeFileSync(path.join(repo, `f${i}.txt`), "x".repeat(64 * 1024));
