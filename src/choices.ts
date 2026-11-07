@@ -1,10 +1,11 @@
 /**
  * What `:model` and `:effort` offer, per engine. Model lists come from the
- * engine itself where it can say (pi-ai's catalog, `opencode models`); any
+ * engine itself where it can say (pi-ai's catalog, `codex debug models`,
+ * `opencode models`); any
  * name can still be typed in the picker.
  */
 import { execFile } from "node:child_process";
-import type { EngineId } from "./engines.js";
+import { ENGINE_BINS, type EngineId } from "./engines.js";
 
 export interface Choice {
 	value: string;
@@ -15,7 +16,8 @@ export interface Choice {
 export const EFFORTS: Record<EngineId, string[]> = {
 	pi: ["off", "minimal", "low", "medium", "high", "xhigh"],
 	claude: ["low", "medium", "high", "xhigh", "max"],
-	codex: ["minimal", "low", "medium", "high", "xhigh"],
+	// what Codex's models take between them; each model's own levels come from `codex debug models`
+	codex: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
 	opencode: ["minimal", "low", "medium", "high", "max"],
 };
 
@@ -46,7 +48,10 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 				{ value: "haiku", note: "latest Haiku" },
 			];
 		case "codex":
-			return [{ value: "default", note: "Codex's own choice (type any model name)" }];
+			return [
+				{ value: "default", note: "Codex's own choice" },
+				...(await codexModels(env)).map((m) => ({ value: m.slug, note: m.description ? `${m.name} · ${m.description}` : m.name })),
+			];
 		case "opencode":
 			return [{ value: "default", note: "OpenCode's own choice" }, ...(await opencodeModels(env)).map((value) => ({ value }))];
 		case "pi": {
@@ -80,4 +85,69 @@ function opencodeModels(env: NodeJS.ProcessEnv): Promise<string[]> {
 			);
 		});
 	});
+}
+
+export interface CodexModel {
+	slug: string;
+	name: string;
+	description?: string;
+	/** the reasoning efforts this model takes */
+	efforts: string[];
+}
+
+let codexCatalog: Promise<CodexModel[]> | undefined;
+
+/**
+ * The models your Codex offers, from `codex debug models` (its own catalog,
+ * so it follows your Codex version and account). Asked once per run; empty
+ * when Codex isn't installed or can't say.
+ */
+export function codexModels(env: NodeJS.ProcessEnv = process.env): Promise<CodexModel[]> {
+	if (env !== process.env) return readCodexModels(env);
+	codexCatalog ??= readCodexModels(env).then((list) => {
+		if (!list.length) codexCatalog = undefined; // try again next time
+		return list;
+	});
+	return codexCatalog;
+}
+
+function readCodexModels(env: NodeJS.ProcessEnv): Promise<CodexModel[]> {
+	return new Promise((resolve) => {
+		execFile(ENGINE_BINS.codex, ["debug", "models"], { env, timeout: 20000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+			if (err) return resolve([]);
+			resolve(parseCodexModels(String(stdout)));
+		});
+	});
+}
+
+/** The models `codex debug models` lists for people to pick (not the hidden ones). */
+export function parseCodexModels(json: string): CodexModel[] {
+	try {
+		const models: any[] = JSON.parse(json)?.models ?? [];
+		return models
+			.filter((m) => m && typeof m.slug === "string" && (m.visibility === undefined || m.visibility === "list"))
+			.map((m) => ({
+				slug: m.slug,
+				name: typeof m.display_name === "string" ? m.display_name : m.slug,
+				description: typeof m.description === "string" ? m.description : undefined,
+				efforts: Array.isArray(m.supported_reasoning_levels)
+					? m.supported_reasoning_levels.map((l: any) => (typeof l === "string" ? l : l?.effort)).filter((e: unknown) => typeof e === "string")
+					: [],
+			}));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * `:effort` for an agent: the levels its engine takes. For Codex, the levels
+ * of the model it uses (all of Codex's levels when that's its default).
+ */
+export async function effortChoicesFor(engine: EngineId, model?: string, env: NodeJS.ProcessEnv = process.env): Promise<Choice[]> {
+	if (engine !== "codex") return effortChoices(engine);
+	const catalog = await codexModels(env);
+	const own = catalog.find((m) => m.slug === model)?.efforts;
+	const levels = own?.length ? own : [...new Set(catalog.flatMap((m) => m.efforts))];
+	if (!levels.length) return effortChoices(engine);
+	return [{ value: "default", note: "what the model uses" }, ...EFFORTS.codex.filter((e) => levels.includes(e)).map((value) => ({ value })), ...levels.filter((e) => !EFFORTS.codex.includes(e)).map((value) => ({ value }))];
 }

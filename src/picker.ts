@@ -208,12 +208,15 @@ export interface PickerChoice {
 }
 
 /**
- * A filterable list (`:model`, `:effort`). Type to filter, ↑/↓ (Ctrl-n/p,
- * Tab) to move, Enter picks. With `custom`, Enter on text that matches
- * nothing picks the text itself (a model the list doesn't know).
+ * A list to pick from (`:model`, `:effort`), vim-style. `j`/`k` (↓/↑, Ctrl-n/p,
+ * Tab) move, `g`/`G` jump to the top/bottom, Enter picks, `q`/Esc closes.
+ * `/` starts a search: type to filter, Esc ends it. With `custom`, Enter on a
+ * search that matches nothing picks the text itself (a model the list doesn't know).
  */
 export class ChoicePicker implements Component {
 	private query = "";
+	/** typing goes to the search (after `/`) */
+	private searching = false;
 	private index = 0;
 	private scroll = 0;
 	private items: PickerChoice[] = [];
@@ -250,42 +253,57 @@ export class ChoicePicker implements Component {
 	handleInput(data: string): void {
 		const key = parseKey(data) ?? "";
 		const items = this.filtered();
-		switch (key) {
-			case "escape":
-			case "ctrl+c":
-				this.onDone(null);
-				return;
-			case "enter":
-			case "return": {
-				const picked = items[this.index]?.value ?? (this.custom && this.query.trim() ? this.query.trim() : undefined);
-				if (picked !== undefined) this.onDone(picked);
-				return;
-			}
-			case "down":
-			case "tab":
-			case "ctrl+n":
-			case "ctrl+j":
-				if (items.length) this.index = (this.index + 1) % items.length;
-				break;
-			case "up":
-			case "shift+tab":
-			case "ctrl+p":
-			case "ctrl+k":
-				if (items.length) this.index = (this.index - 1 + items.length) % items.length;
-				break;
-			case "backspace":
-				this.query = this.query.slice(0, -1);
+		const move = (by: number) => {
+			if (items.length) this.index = (this.index + by + items.length) % items.length;
+		};
+		if (key === "ctrl+c") return this.onDone(null);
+		if (key === "enter" || key === "return") {
+			const picked = items[this.index]?.value ?? (this.custom && this.query.trim() ? this.query.trim() : undefined);
+			if (picked !== undefined) this.onDone(picked);
+			return;
+		}
+		if (["down", "tab", "ctrl+n", "ctrl+j"].includes(key)) move(1);
+		else if (["up", "shift+tab", "ctrl+p", "ctrl+k"].includes(key)) move(-1);
+		else if (this.searching) {
+			if (key === "escape") this.searching = false; // the filter stays; j/k move through it
+			else if (key === "backspace") {
+				if (this.query) this.query = this.query.slice(0, -1);
+				else this.searching = false;
 				this.index = 0;
-				break;
-			case "ctrl+u":
+			} else if (key === "ctrl+u") {
 				this.query = "";
 				this.index = 0;
-				break;
-			default:
-				if (data.length >= 1 && !data.startsWith("\x1b") && data >= " ") {
-					this.query += data;
+			} else if (data.length >= 1 && !data.startsWith("\x1b") && data >= " ") {
+				this.query += data;
+				this.index = 0;
+			}
+		} else {
+			switch (data) {
+				case "j":
+					move(1);
+					break;
+				case "k":
+					move(-1);
+					break;
+				case "g":
 					this.index = 0;
-				}
+					break;
+				case "G":
+					this.index = Math.max(0, items.length - 1);
+					break;
+				case "/":
+					this.searching = true;
+					break;
+				case "q":
+					return this.onDone(null);
+				default:
+					if (key === "escape") {
+						if (this.query) {
+							this.query = ""; // first Esc drops the filter, the next one closes
+							this.index = 0;
+						} else return this.onDone(null);
+					}
+			}
 		}
 		if (this.index < this.scroll) this.scroll = this.index;
 		if (this.index >= this.scroll + VISIBLE) this.scroll = this.index - VISIBLE + 1;
@@ -305,7 +323,13 @@ export class ChoicePicker implements Component {
 		const items = this.filtered();
 		const title = ` ${this.title} `;
 		const lines = [border(I.tl + I.h) + P.on("FloatTitle", bg) + title + RESET + border(I.h.repeat(Math.max(0, inner - 1 - visibleWidth(title))) + I.tr)];
-		lines.push(row(P.on("Title", bg) + ` ${I.prompt} ` + RESET + P.on("NormalFloat", bg) + this.query + P.on("PmenuSel", undefined) + " " + RESET, visibleWidth(this.query) + 4));
+		if (this.searching) {
+			lines.push(row(P.on("Title", bg) + ` ${I.prompt} ` + RESET + P.on("NormalFloat", bg) + this.query + P.on("PmenuSel", undefined) + " " + RESET, visibleWidth(this.query) + 4));
+		} else {
+			const hint = this.query ? `/${this.query}` : `/ to search${this.custom ? " or type any name" : ""}`;
+			const text = truncateToWidth(hint, Math.max(0, inner - 4), "…");
+			lines.push(row(P.on("Comment", bg) + ` ${I.prompt} ${text}` + RESET, visibleWidth(text) + 3));
+		}
 		lines.push(border(I.lt + I.h.repeat(inner) + I.rt));
 		const shown = items.slice(this.scroll, this.scroll + VISIBLE);
 		for (let i = 0; i < VISIBLE; i++) {
@@ -325,7 +349,8 @@ export class ChoicePicker implements Component {
 			const note = c.note ? truncateToWidth(`  ${c.note}`, Math.max(0, inner - 2 - visibleWidth(name)), "…") : "";
 			lines.push(row(P.on(group, rowBg) + ` ${name}` + P.on("Comment", rowBg) + note + RESET, 1 + visibleWidth(name) + visibleWidth(note), rowBg));
 		}
-		const count = ` ${items.length ? this.index + 1 : 0}/${items.length}${this.custom ? " · type any name" : ""} `;
+		const keys = this.searching ? "type to filter · Esc done" : "j/k move · Enter pick · q close";
+		const count = ` ${items.length ? this.index + 1 : 0}/${items.length} · ${keys} `;
 		lines.push(border(I.bl + I.h.repeat(Math.max(0, inner - visibleWidth(count) - 1))) + P.on("Comment", bg) + count + RESET + border(I.h + I.br));
 		return lines;
 	}

@@ -44,7 +44,7 @@ import { TREE_GLYPHS, type TreeRow } from "./tree.js";
 import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
 import { ChoicePicker, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
-import { EFFORTS, effortChoices, modelChoices } from "./choices.js";
+import { EFFORTS, effortChoicesFor, modelChoices } from "./choices.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
@@ -1008,7 +1008,8 @@ export class App implements Component {
 	/** `:effort <level>` */
 	chooseEffort(level: string, t = this.modelTarget()) {
 		const allowed = ["default", ...EFFORTS[t.engine]];
-		if (!allowed.includes(level)) {
+		// Codex's levels differ per model and version; Codex itself says if one doesn't fit
+		if (!allowed.includes(level) && !(t.engine === "codex" && /^[a-z]+$/.test(level))) {
 			this.setMessage(`${ENGINE_NAMES[t.engine]} takes: ${allowed.join(", ")}`, "ErrorMsg");
 			return;
 		}
@@ -1045,8 +1046,17 @@ export class App implements Component {
 	/** `:effort`: the reasoning effort / thinking levels the engine accepts. */
 	openEffortPicker(t = this.modelTarget()) {
 		const current = (t.session ? t.session.effort : this.newAgentEffort[t.engine]) ?? "default";
-		this.openChoices(`Effort · ${t.label}`, effortChoices(t.engine), current, false, (v) => this.chooseEffort(v, t));
+		this.openChoices(`Effort · ${t.label}`, this.effortChoices(t.engine, this.modelOf(t)), current, false, (v) => this.chooseEffort(v, t));
 	}
+
+	/** the model an agent (or new agents) asked for, if any */
+	private modelOf(t: ReturnType<App["modelTarget"]>): string | undefined {
+		if (!t.session) return this.newAgentModel[t.engine];
+		return "chosenModel" in t.session ? (t.session as { chosenModel?: string }).chosenModel : t.session.model;
+	}
+
+	/** where effort levels come from (replaced in tests) */
+	effortChoices: (engine: EngineId, model?: string) => Promise<PickerChoice[]> = (engine, model) => effortChoicesFor(engine, model);
 
 	/** where model lists come from (replaced in tests) */
 	modelChoices: (engine: EngineId) => Promise<PickerChoice[]> = (engine) => modelChoices(engine);

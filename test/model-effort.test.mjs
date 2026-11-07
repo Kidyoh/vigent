@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { App } from "../dist/app.js";
-import { EFFORTS, effortChoices, modelChoices } from "../dist/choices.js";
+import { EFFORTS, effortChoices, effortChoicesFor, modelChoices, parseCodexModels } from "../dist/choices.js";
 import { CLI_ADAPTERS, CliSession } from "../dist/cli-engines.js";
 import { DEFAULT_UI, loadConfig } from "../dist/config.js";
 import { Keymap } from "../dist/keys.js";
@@ -28,7 +28,7 @@ test("each CLI gets the effort its own way", () => {
 
 test("model lists per engine; pi models as provider/model", async () => {
 	assert.deepEqual((await modelChoices("claude")).map((c) => c.value), ["default", "fable", "opus", "sonnet", "haiku"]);
-	assert.deepEqual((await modelChoices("codex")).map((c) => c.value), ["default"]);
+	assert.deepEqual((await modelChoices("codex", { PATH: "" })).map((c) => c.value), ["default"], "no Codex installed: its default, and any name can be typed");
 	const pi = await modelChoices("pi", { OPENAI_API_KEY: "x" });
 	assert.ok(pi.length > 0 && pi.every((c) => c.value.startsWith("openai/")), "the providers you have a key for");
 	assert.ok(await piModel("claude-sonnet-4-5"), "a bare name is Anthropic's");
@@ -59,6 +59,14 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	assert.match(screen, /● default +Claude Code's own choice/);
 	assert.match(screen, /opus +latest Opus/);
 	for (const k of "opu") picker.handleInput(k);
+	assert.match(plain(picker.render(70)), /j\/k move/, "letters don't search until /");
+	picker.handleInput("j");
+	picker.handleInput("j");
+	assert.match(plain(picker.render(70)), / 3\/5 /, "j moves down (o, p and u did nothing)");
+	picker.handleInput("k");
+	assert.match(plain(picker.render(70)), / 2\/5 /, "k moves up");
+	for (const k of "/opu") picker.handleInput(k);
+	assert.match(plain(picker.render(70)), /type to filter · Esc done/);
 	picker.handleInput("\r");
 	await tick();
 	assert.equal(s.chosenModel, "opus");
@@ -70,7 +78,7 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	screen = plain(efforts.render(70));
 	assert.match(screen, /Effort · 'racer'/);
 	for (const v of ["low", "medium", "high", "xhigh", "max"]) assert.match(screen, new RegExp(`\\b${v}\\b`));
-	for (const k of "hig") efforts.handleInput(k);
+	for (const k of "/hig") efforts.handleInput(k);
 	efforts.handleInput("\r");
 	await tick();
 	assert.equal(s.effort, "high");
@@ -96,7 +104,8 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	ex("model");
 	await tick();
 	const custom = overlays.at(-1);
-	for (const k of "my-own-model") custom.handleInput(k);
+	assert.match(plain(custom.render(70)), /\/ to search or type any name/);
+	for (const k of "/my-own-model") custom.handleInput(k);
 	assert.match(plain(custom.render(70)), /Enter uses 'my-own-model'/);
 	custom.handleInput("\r");
 	await tick();
@@ -129,9 +138,59 @@ test("with no agent open, :model and :effort set them for new agents", async () 
 
 test("config: [engines.<id>] effort, and pi's own", () => {
 	const file = path.join(tmp, "config.toml");
-	fs.writeFileSync(file, `[engines.claude]\neffort = "max"\n[engines.pi]\nmodel = "openai/gpt-5"\neffort = "high"\n[engines.codex]\neffort = "max"\n`);
+	fs.writeFileSync(file, `[engines.claude]\neffort = "max"\n[engines.pi]\nmodel = "openai/gpt-5"\neffort = "high"\n[engines.codex]\neffort = "turbo"\n`);
 	const { config, warnings } = loadConfig(file);
 	assert.equal(config.engines.claude.effort, "max");
 	assert.deepEqual(config.engines.pi, { model: "openai/gpt-5", effort: "high" });
-	assert.deepEqual(warnings, ["config [engines.codex]: 'effort' should be one of minimal, low, medium, high, xhigh"]);
+	assert.deepEqual(warnings, ["config [engines.codex]: 'effort' should be one of minimal, low, medium, high, xhigh, max, ultra"]);
+});
+
+const CODEX_CATALOG = JSON.stringify({
+	models: [
+		{ slug: "gpt-6-astra", display_name: "GPT-6-Astra", description: "Frontier intelligence.", visibility: "list", supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }, { effort: "ultra" }] },
+		{ slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }] },
+		{ slug: "codex-auto-review", display_name: "Codex Auto Review", visibility: "hide", supported_reasoning_levels: [] },
+	],
+});
+
+test("Codex's models and efforts come from `codex debug models`", async () => {
+	const models = parseCodexModels(CODEX_CATALOG);
+	assert.deepEqual(models.map((m) => m.slug), ["gpt-6-astra", "gpt-5.5"], "hidden models are left out");
+	assert.deepEqual(models[0].efforts, ["low", "high", "ultra"]);
+	assert.deepEqual(parseCodexModels("not json"), []);
+
+	// a fake codex on PATH that prints the catalog
+	const dir = path.join(tmp, "codex-bin");
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, "codex"), `#!${process.execPath}\nif (process.argv.slice(2).join(" ") === "debug models") process.stdout.write(${JSON.stringify(CODEX_CATALOG)});\n`);
+	fs.chmodSync(path.join(dir, "codex"), 0o755);
+	const env = { PATH: dir };
+	const list = await modelChoices("codex", env);
+	assert.deepEqual(list.map((c) => c.value), ["default", "gpt-6-astra", "gpt-5.5"]);
+	assert.equal(list[1].note, "GPT-6-Astra · Frontier intelligence.");
+	assert.deepEqual((await effortChoicesFor("codex", "gpt-6-astra", env)).map((c) => c.value), ["default", "low", "high", "ultra"], "the model's own levels");
+	assert.deepEqual((await effortChoicesFor("codex", undefined, env)).map((c) => c.value), ["default", "low", "medium", "high", "ultra"], "Codex's default model: all its levels");
+	assert.deepEqual((await effortChoicesFor("codex", undefined, { PATH: "" })).map((c) => c.value), effortChoices("codex").map((c) => c.value), "no Codex: the usual list");
+});
+
+test("the picker: Esc ends a search, then drops the filter, then closes", async () => {
+	const tui = { requestRender() {}, showOverlay: (c) => (shown.push(c), { hide: () => hidden.push(c) }) };
+	const shown = [];
+	const hidden = [];
+	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
+	app.defaultEngine = () => "claude";
+	[":", ..."model", "\r"].forEach((k) => app.handleInput(k));
+	await tick();
+	const p = shown.at(-1);
+	for (const k of "/hai") p.handleInput(k);
+	assert.match(plain(p.render(70)), /haiku/);
+	assert.doesNotMatch(plain(p.render(70)), /opus/);
+	p.handleInput("\x1b");
+	assert.match(plain(p.render(70)), /\/hai/, "out of the search, the filter stays");
+	assert.match(plain(p.render(70)), /j\/k move/);
+	p.handleInput("\x1b");
+	assert.match(plain(p.render(70)), /opus/, "the filter is gone");
+	assert.equal(hidden.length, 0);
+	p.handleInput("q");
+	assert.equal(hidden.length, 1, "q closes");
 });

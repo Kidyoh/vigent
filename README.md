@@ -94,7 +94,7 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 | `codex` | `codex exec --json` (`exec resume` to continue) | `-c sandbox_mode="workspace-write"` |
 | `opencode` | `opencode run --format json --dir <worktree>` | none |
 
-**Model and effort:** `:model` (`<Space>M`) opens a picker with the models the agent's engine offers, and you can type any name. `:effort` (`<Space>e`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
+**Model and effort:** `:model` (`<Space>M`) opens a picker with the models the agent's engine offers (Claude Code's model names, Codex's own catalog from `codex debug models`, OpenCode's `opencode models`, or pi's for the providers you have a key for). In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>e`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
 
 ![:model on a Claude Code agent](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/model-picker.png)
 
