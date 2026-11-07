@@ -335,6 +335,8 @@ export const CONFIG_TEMPLATE = `# vigent config: ~/.config/vigent/config.toml
 # Built-in: default, lazyvim (transparent), tokyonight, tokyonight-moon, gruvbox,
 # catppuccin, catppuccin-latte, nord, rose-pine, kanagawa. Or any theme in ~/.config/vigent/themes, e.g. one made
 # with  vigent theme import  (your nvim/vim colorscheme) or  vigent theme new.
+# "nvim" (or "vim") follows your editor: the colorscheme your config and plugins
+# set (AstroNvim, LazyVim, NvChad...), updated each time vigent starts.
 theme = "default"
 
 # Model used for new pi agents.

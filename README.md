@@ -201,7 +201,10 @@ vigent theme import kanagawa        # any colorscheme your editor can load (plug
 vigent theme import ./molokai.vim   # a .vim file, no editor needed
 vigent theme new mine --from nord   # start your own theme, pre-filled with nord's colors
 vigent --theme lazyvim              # LazyVim's look, on your terminal's own (transparent) background
+vigent --theme nvim                 # follow your Neovim: the colorscheme your config sets
 ```
+
+**Follow your editor:** with `theme = "nvim"` (or `"vim"`) in config.toml, vigent uses whatever colorscheme your Neovim config and plugins set, whether that's AstroNvim's `astrodark`, LazyVim's `tokyonight` or anything else. Change it in Neovim, and vigent picks it up the next time it starts. vigent keeps a copy (`themes/nvim.json`) so it opens instantly, and checks Neovim in the background.
 
 Inside vigent, `:colorscheme` opens a picker with live preview. `:hi Group guifg=… guibg=…` changes any color on the spot, `:set transparent` lets your terminal's background (its blur, opacity or wallpaper) show through any theme, and `:theme save mine` keeps what's on screen as your own theme file. To keep settings, put them in `~/.config/vigent/config.toml` (`vigent config init` writes a starter file):
 

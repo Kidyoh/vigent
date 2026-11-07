@@ -14,6 +14,7 @@ import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
 import { formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
 import { DemoSession, PiSession, type Session } from "./session.js";
+import { followedColorscheme, followTheme, isFollow, refreshFollow } from "./follow.js";
 import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./theme.js";
 import { themeNewTemplate } from "./theme-new.js";
 import {
@@ -219,7 +220,8 @@ async function main(): Promise<number | undefined> {
 		const keys = buildKeymap(config.leader, config.keys);
 		warnings.push(...keys.warnings);
 		try {
-			if (config.theme) loadTheme(config.theme);
+			if (isFollow(config.theme)) followTheme(config.theme);
+			else if (config.theme) loadTheme(config.theme);
 		} catch (err) {
 			warnings.push((err as Error).message);
 		}
@@ -274,7 +276,8 @@ async function main(): Promise<number | undefined> {
 	const themeName = flag(argv, "--theme") ?? config.theme ?? "default";
 	let theme = BUILTIN_THEMES.default;
 	try {
-		theme = loadTheme(themeName);
+		// theme = "nvim" / "vim": your editor's colorscheme (kept up to date below)
+		theme = isFollow(themeName) ? followTheme(themeName) : loadTheme(themeName);
 	} catch (err) {
 		if (flag(argv, "--theme")) {
 			console.error(`vigent: ${(err as Error).message}`);
@@ -435,6 +438,13 @@ async function main(): Promise<number | undefined> {
 	terminal.setTitle("vigent");
 	tui.start();
 	if (warnings.length > 0) app.notify(warnings.join(" · "));
+	if (isFollow(themeName)) {
+		const editor = themeName;
+		refreshFollow(editor, (t) => {
+			app.setTheme(t);
+			app.notify(`colorscheme from ${editor}: ${followedColorscheme(editor) ?? editor}`, "Comment");
+		});
+	}
 	tui.requestRender(true);
 	return undefined;
 }

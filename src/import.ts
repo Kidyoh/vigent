@@ -280,6 +280,7 @@ export function importTheme(opts: ImportOptions = {}): ImportResult {
 	const dir = opts.outDir ?? themesDir();
 	fs.mkdirSync(dir, { recursive: true });
 	const file = path.join(dir, `${name}.json`);
-	fs.writeFileSync(file, `${JSON.stringify({ name, background, source: via, groups }, null, "\t")}\n`);
+	const colorscheme = dump?.name || undefined;
+	fs.writeFileSync(file, `${JSON.stringify({ name, background, source: via, colorscheme, groups }, null, "\t")}\n`);
 	return { name, file, groups: Object.keys(groups).length, via };
 }
