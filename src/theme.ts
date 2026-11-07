@@ -1,41 +1,46 @@
 /**
  * Vigent theme engine.
  *
- * Themes are keyed by *Neovim highlight group names* (Normal, StatusLine,
- * Visual, Comment, DiffAdd, ...). The default theme reproduces Neovim's
- * built-in dark colorscheme (the NvimDark / NvimLight palette, nvim >= 0.10).
+ * Themes are keyed by Neovim highlight group names (Normal, StatusLine,
+ * Visual, Comment, DiffAdd, ...), so any vim/nvim colorscheme maps on
+ * directly. A group is resolved in this order:
  *
- * Any vim/nvim colorscheme can be brought in:
- *   - `vigent theme import <colorscheme>` dumps highlight groups from a local
- *     nvim via `nvim --headless` into ~/.config/vigent/themes/<name>.json
- *   - or drop a JSON file mapping group -> {fg, bg, bold, ...} in that dir.
+ *   1. user overrides (config [highlights] and live `:hi`) and the theme's
+ *      own definition, following `link`s
+ *   2. colors derived from the theme for vigent's own groups the theme does
+ *      not define (mode badges, sidebar background)
+ *   3. vim-style fallback links, ending at Normal
+ *
+ * A group with no foreground uses Normal's foreground, like nvim.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { parse as parseToml } from "smol-toml";
+import { BUILTIN_THEMES } from "./builtin-themes.js";
+import { isLight, mix, parseHex } from "./color.js";
+import { fromPalette, type Palette } from "./palette.js";
+import { parseHighlightCommand, parseVimColorscheme } from "./vimcolors.js";
 
 export interface Attr {
-	fg?: string; // #rrggbb
-	bg?: string; // #rrggbb
+	/** "#rrggbb", or "NONE" for the terminal's own color (transparent) */
+	fg?: string;
+	bg?: string;
 	bold?: boolean;
 	italic?: boolean;
 	underline?: boolean;
 	reverse?: boolean;
+	/** follow another group instead, like `:hi link` */
+	link?: string;
 }
 
 export interface Theme {
 	name: string;
+	background?: "dark" | "light";
 	groups: Record<string, Attr>;
 }
 
 export const RESET = "\x1b[0m";
-
-function hexToRgb(hex: string): [number, number, number] | null {
-	const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
-	if (!m) return null;
-	const n = parseInt(m[1], 16);
-	return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
-}
 
 /** Build an SGR escape sequence for an attribute set. */
 export function sgr(attr: Attr): string {
@@ -44,76 +49,152 @@ export function sgr(attr: Attr): string {
 	if (attr.italic) parts.push("3");
 	if (attr.underline) parts.push("4");
 	if (attr.reverse) parts.push("7");
-	const fg = attr.fg ? hexToRgb(attr.fg) : null;
+	const fg = parseHex(attr.fg);
 	if (fg) parts.push(`38;2;${fg[0]};${fg[1]};${fg[2]}`);
-	const bg = attr.bg ? hexToRgb(attr.bg) : null;
+	const bg = parseHex(attr.bg);
 	if (bg) parts.push(`48;2;${bg[0]};${bg[1]};${bg[2]}`);
-	if (parts.length === 0) return "";
-	return `\x1b[${parts.join(";")}m`;
+	return parts.length === 0 ? "" : `\x1b[${parts.join(";")}m`;
 }
 
-/** Fallback chains, mirroring how vim links highlight groups. */
+/** Fallback links, mirroring how nvim links its default groups. */
 const LINKS: Record<string, string> = {
 	NormalNC: "Normal",
-	WinSeparator: "Normal",
-	VertSplit: "WinSeparator",
+	NormalFloat: "Pmenu",
+	FloatBorder: "NormalFloat",
+	FloatTitle: "Title",
+	WinSeparator: "VertSplit",
+	VertSplit: "NonText",
+	EndOfBuffer: "NonText",
 	CursorLineNr: "LineNr",
+	LineNr: "NonText",
 	StatusLineNC: "StatusLine",
+	WinBar: "Title",
 	TabLine: "StatusLineNC",
 	TabLineSel: "StatusLine",
 	Directory: "Identifier",
 	Function: "Identifier",
+	Keyword: "Statement",
 	Title: "Normal",
-	ModeMsg: "Normal",
 	MsgArea: "Normal",
-	Pmenu: "StatusLineNC",
-	PmenuSel: "StatusLine",
+	PmenuSel: "Visual",
 	CurSearch: "Search",
 	IncSearch: "Search",
 	Added: "DiffAdd",
 	Removed: "DiffDelete",
 	Changed: "DiffChange",
-	EndOfBuffer: "NonText",
-	WinBar: "Title",
+	// tree plugins: imported themes keep their sidebar colors
 	NeoTreeNormal: "NvimTreeNormal",
 	NeoTreeIndentMarker: "NvimTreeIndentMarker",
 	NvimTreeIndentMarker: "NonText",
-	// Vigent-specific groups -> sensible vim fallbacks
+	// vigent groups
 	VigentSidebar: "NeoTreeNormal",
 	VigentIndent: "NeoTreeIndentMarker",
-	VigentModeNormal: "StatusLine",
-	VigentModeInsert: "ModeMsg",
-	VigentModeVisual: "Visual",
-	VigentModeCommand: "Search",
-	VigentAgent: "Normal",
 	VigentUser: "Title",
 	VigentTool: "Function",
 	VigentToolOutput: "Comment",
 	VigentSpinner: "WarningMsg",
 };
 
-export class Painter {
-	private cache = new Map<string, string>();
-	constructor(public theme: Theme) {}
+function hasStyle(a: Attr | undefined): a is Attr {
+	if (!a) return false;
+	return Object.entries(a).some(([k, v]) => k !== "link" && v !== undefined);
+}
 
-	attr(group: string): Attr {
+/** Colors computed from the theme when it does not define a group itself. */
+const DERIVED: Record<string, (p: Painter) => Attr | undefined> = {
+	VigentModeNormal: (p) => p.badge(["Function", "Directory", "Identifier"]),
+	VigentModeInsert: (p) => p.badge(["String", "MoreMsg", "Added"]),
+	VigentModeVisual: (p) => p.badge(["Statement", "Constant", "Special"]),
+	VigentModeCommand: (p) => p.badge(["WarningMsg", "Type", "Todo"]),
+	// last link in the sidebar chain: shade Normal's background
+	NvimTreeNormal: (p) => {
+		const n = p.normal();
+		if (!parseHex(n.bg)) return undefined;
+		return { fg: n.fg, bg: mix(n.bg!, "#000000", isLight(n.bg) ? 0.05 : 0.22) };
+	},
+};
+
+export class Painter {
+	private sgrCache = new Map<string, string>();
+	private attrCache = new Map<string, Attr>();
+	overrides: Record<string, Attr>;
+	/** bumped whenever colors change, so renderers can drop cached output */
+	generation = 0;
+
+	constructor(
+		public theme: Theme,
+		overrides: Record<string, Attr> = {},
+	) {
+		this.overrides = { ...overrides };
+	}
+
+	/** Theme definition with user overrides merged on top. */
+	private explicit(group: string): Attr | undefined {
+		const o = this.overrides[group];
+		const t = this.theme.groups[group];
+		if (!o) return t;
+		if (o.link) return { link: o.link };
+		const base = t && !t.link ? t : {};
+		return { ...base, ...o };
+	}
+
+	normal(): Attr {
+		const n = this.explicit("Normal");
+		return n && !n.link ? n : {};
+	}
+
+	/** Resolve a group without filling in Normal's foreground. */
+	private resolve(group: string): Attr {
 		const seen = new Set<string>();
 		let g: string | undefined = group;
 		while (g && !seen.has(g)) {
 			seen.add(g);
-			const a = this.theme.groups[g];
-			if (a && Object.keys(a).length > 0) return a;
+			const e = this.explicit(g);
+			if (e?.link) {
+				g = e.link;
+				continue;
+			}
+			if (hasStyle(e)) return e;
+			const derived = DERIVED[g]?.(this);
+			if (derived) return derived;
 			g = LINKS[g];
 		}
-		return this.theme.groups.Normal ?? {};
+		return this.normal();
+	}
+
+	attr(group: string): Attr {
+		let a = this.attrCache.get(group);
+		if (!a) {
+			const { link: _link, ...r } = this.resolve(group);
+			a = r;
+			if (group !== "Normal" && a.fg === undefined && !a.reverse) {
+				const fg = this.normal().fg;
+				if (fg) a = { ...a, fg };
+			}
+			this.attrCache.set(group, a);
+		}
+		return a;
+	}
+
+	/** A mode badge colored from the first candidate group with a usable foreground. */
+	badge(candidates: string[]): Attr | undefined {
+		const n = this.normal();
+		for (const c of candidates) {
+			const color = this.resolve(c).fg;
+			if (!parseHex(color) || color === n.fg) continue;
+			const text = parseHex(n.bg) ? n.bg : isLight(color) ? "#111111" : "#eeeeee";
+			return { fg: text, bg: color, bold: true };
+		}
+		const s = this.resolve("StatusLine");
+		return hasStyle(s) ? { ...s, bold: true } : undefined;
 	}
 
 	/** SGR prefix for a group (cached). */
 	s(group: string): string {
-		let v = this.cache.get(group);
+		let v = this.sgrCache.get(group);
 		if (v === undefined) {
 			v = sgr(this.attr(group));
-			this.cache.set(group, v);
+			this.sgrCache.set(group, v);
 		}
 		return v;
 	}
@@ -121,10 +202,10 @@ export class Painter {
 	/** SGR prefix for a group drawn on an explicit background (cached). */
 	on(group: string, bg: string | undefined, extra?: Attr): string {
 		const key = `${group}|${bg ?? ""}|${extra ? JSON.stringify(extra) : ""}`;
-		let v = this.cache.get(key);
+		let v = this.sgrCache.get(key);
 		if (v === undefined) {
 			v = sgr({ ...this.attr(group), ...extra, bg });
-			this.cache.set(key, v);
+			this.sgrCache.set(key, v);
 		}
 		return v;
 	}
@@ -136,175 +217,170 @@ export class Painter {
 
 	setTheme(theme: Theme) {
 		this.theme = theme;
-		this.cache.clear();
+		this.flush();
+	}
+
+	setOverrides(overrides: Record<string, Attr>) {
+		this.overrides = { ...overrides };
+		this.flush();
+	}
+
+	/** `:hi Group ...`: merge into the group, like vim. */
+	highlight(group: string, attr: Attr) {
+		const current = this.overrides[group];
+		this.overrides[group] = current && !current.link ? { ...current, ...attr } : { ...attr };
+		this.flush();
+	}
+
+	/** `:hi link From To` */
+	link(from: string, to: string) {
+		this.overrides[from] = { link: to };
+		this.flush();
+	}
+
+	/** `:hi clear [Group]`: drop overrides, back to the theme's colors. */
+	clear(group?: string) {
+		if (group) delete this.overrides[group];
+		else this.overrides = {};
+		this.flush();
+	}
+
+	private flush() {
+		this.sgrCache.clear();
+		this.attrCache.clear();
+		this.generation++;
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Built-in: Neovim default dark colorscheme (NvimDark*/NvimLight* palette)
+// Loading themes from files
 // ---------------------------------------------------------------------------
-const c = {
-	darkBlue: "#004c73",
-	darkCyan: "#007373",
-	darkGreen: "#005523",
-	darkGrey1: "#07080d",
-	darkGrey2: "#14161b",
-	darkGrey3: "#2c2e33",
-	darkGrey4: "#4f5258",
-	darkMagenta: "#470045",
-	darkRed: "#590008",
-	darkYellow: "#6b5300",
-	lightBlue: "#a6dbff",
-	lightCyan: "#8cf8f7",
-	lightGreen: "#b3f6c0",
-	lightGrey1: "#eef1f8",
-	lightGrey2: "#e0e2ea",
-	lightGrey3: "#c4c6cd",
-	lightGrey4: "#9b9ea4",
-	lightMagenta: "#ffcaff",
-	lightRed: "#ffc0b9",
-	lightYellow: "#fce094",
-};
 
-export const NVIM_DEFAULT: Theme = {
-	name: "default",
-	groups: {
-		Normal: { fg: c.lightGrey2, bg: c.darkGrey2 },
-		NormalFloat: { fg: c.lightGrey2, bg: c.darkGrey1 },
-		WinSeparator: { fg: c.darkGrey4, bg: c.darkGrey2 },
-		StatusLine: { fg: c.darkGrey3, bg: c.lightGrey3 },
-		StatusLineNC: { fg: c.lightGrey4, bg: c.darkGrey3 },
-		CursorLine: { bg: c.darkGrey3 },
-		Visual: { bg: c.darkGrey4 },
-		LineNr: { fg: c.darkGrey4 },
-		CursorLineNr: { fg: c.lightGrey2, bold: true },
-		WinBar: { fg: c.lightGrey2, bold: true },
-		Comment: { fg: c.lightGrey4, italic: true },
-		NonText: { fg: c.darkGrey4 },
-		Title: { fg: c.lightGrey2, bold: true },
-		Identifier: { fg: c.lightBlue },
-		Function: { fg: c.lightCyan },
-		String: { fg: c.lightGreen },
-		Constant: { fg: c.lightMagenta },
-		Keyword: { fg: c.lightGrey2, bold: true },
-		Search: { fg: c.lightGrey1, bg: c.darkYellow },
-		CurSearch: { fg: c.darkGrey1, bg: c.lightYellow },
-		DiffAdd: { fg: c.lightGreen, bg: c.darkGreen },
-		DiffDelete: { fg: c.lightRed, bg: c.darkRed },
-		DiffChange: { fg: c.lightGrey2, bg: c.darkGrey4 },
-		Added: { fg: c.lightGreen },
-		Removed: { fg: c.lightRed },
-		ErrorMsg: { fg: c.lightRed },
-		WarningMsg: { fg: c.lightYellow },
-		ModeMsg: { fg: c.lightGreen, bold: true },
-		Pmenu: { fg: c.lightGrey2, bg: c.darkGrey3 },
-		PmenuSel: { fg: c.darkGrey2, bg: c.lightGrey3 },
-		// Vigent mode badges (vim-airline-style blocks)
-		VigentSidebar: { fg: c.lightGrey2, bg: c.darkGrey1 },
-		VigentModeNormal: { fg: c.darkGrey1, bg: c.lightBlue, bold: true },
-		VigentModeInsert: { fg: c.darkGrey1, bg: c.lightGreen, bold: true },
-		VigentModeVisual: { fg: c.darkGrey1, bg: c.lightMagenta, bold: true },
-		VigentModeCommand: { fg: c.darkGrey1, bg: c.lightYellow, bold: true },
-		VigentUser: { fg: c.lightBlue, bold: true },
-		VigentTool: { fg: c.lightCyan },
-		VigentToolOutput: { fg: c.lightGrey4 },
-		VigentSpinner: { fg: c.lightYellow },
-	},
-};
-
-// ---------------------------------------------------------------------------
-// Built-in: gruvbox (dark, medium) — ported from morhetz/gruvbox
-// ---------------------------------------------------------------------------
-const g = {
-	bg0h: "#1d2021",
-	bg0: "#282828",
-	bg1: "#3c3836",
-	bg2: "#504945",
-	bg3: "#665c54",
-	bg4: "#7c6f64",
-	fg0: "#fbf1c7",
-	fg1: "#ebdbb2",
-	fg3: "#bdae93",
-	grey: "#928374",
-	red: "#fb4934",
-	green: "#b8bb26",
-	yellow: "#fabd2f",
-	blue: "#83a598",
-	purple: "#d3869b",
-	aqua: "#8ec07c",
-	orange: "#fe8019",
-	darkRed: "#421e1e",
-	darkGreen: "#32361a",
-};
-
-export const GRUVBOX: Theme = {
-	name: "gruvbox",
-	groups: {
-		Normal: { fg: g.fg1, bg: g.bg0 },
-		WinSeparator: { fg: g.bg3, bg: g.bg0 },
-		StatusLine: { fg: g.bg0, bg: g.fg3 },
-		StatusLineNC: { fg: g.fg3, bg: g.bg1 },
-		CursorLine: { bg: g.bg1 },
-		Visual: { bg: g.bg2 },
-		LineNr: { fg: g.bg4 },
-		CursorLineNr: { fg: g.yellow, bold: true },
-		WinBar: { fg: g.fg1, bold: true },
-		VigentSidebar: { fg: g.fg1, bg: g.bg0h },
-		Comment: { fg: g.grey, italic: true },
-		NonText: { fg: g.bg2 },
-		Title: { fg: g.green, bold: true },
-		Identifier: { fg: g.blue },
-		Function: { fg: g.aqua },
-		String: { fg: g.green },
-		Constant: { fg: g.purple },
-		Keyword: { fg: g.red },
-		Search: { fg: g.bg0, bg: g.yellow },
-		DiffAdd: { fg: g.green, bg: g.darkGreen },
-		DiffDelete: { fg: g.red, bg: g.darkRed },
-		Added: { fg: g.green },
-		Removed: { fg: g.red },
-		ErrorMsg: { fg: g.red, bold: true },
-		WarningMsg: { fg: g.yellow },
-		ModeMsg: { fg: g.fg1, bold: true },
-		Pmenu: { fg: g.fg1, bg: g.bg1 },
-		PmenuSel: { fg: g.bg0, bg: g.blue },
-		VigentModeNormal: { fg: g.bg0, bg: g.blue, bold: true },
-		VigentModeInsert: { fg: g.bg0, bg: g.green, bold: true },
-		VigentModeVisual: { fg: g.bg0, bg: g.orange, bold: true },
-		VigentModeCommand: { fg: g.bg0, bg: g.yellow, bold: true },
-		VigentUser: { fg: g.yellow, bold: true },
-		VigentTool: { fg: g.aqua },
-		VigentToolOutput: { fg: g.grey },
-		VigentSpinner: { fg: g.orange },
-	},
-};
-
-export const BUILTIN_THEMES: Record<string, Theme> = {
-	default: NVIM_DEFAULT,
-	gruvbox: GRUVBOX,
-};
-
-export function themesDir(): string {
-	return path.join(os.homedir(), ".config", "vigent", "themes");
+export function configDir(): string {
+	const xdg = process.env.XDG_CONFIG_HOME;
+	return path.join(xdg && xdg.length > 0 ? xdg : path.join(os.homedir(), ".config"), "vigent");
 }
 
-export function loadTheme(name: string): Theme {
-	const builtin = BUILTIN_THEMES[name];
+export function themesDir(): string {
+	return path.join(configDir(), "themes");
+}
+
+const THEME_EXTS = [".toml", ".json", ".vim"];
+const SPEC_KEYS = ["name", "background", "extends", "palette", "groups", "highlights"];
+
+/** A theme file: extend another theme, define a palette, and/or set groups. */
+export interface ThemeSpec {
+	name?: string;
+	background?: "dark" | "light";
+	extends?: string;
+	palette?: Partial<Palette>;
+	groups?: Record<string, unknown>;
+	highlights?: Record<string, unknown>;
+}
+
+/**
+ * Normalize user-written group values. Each value may be:
+ *   { fg = "#..", bg = "NONE", bold = true }   table / object
+ *   { link = "Visual" }                         link
+ *   "guifg=#.. guibg=#.. gui=bold"              vim :hi syntax
+ *   "Visual"                                    shorthand for a link
+ */
+export function normalizeGroups(input: Record<string, unknown> | undefined): Record<string, Attr> {
+	const out: Record<string, Attr> = {};
+	if (!input) return out;
+	for (const [group, value] of Object.entries(input)) {
+		if (typeof value === "string") {
+			if (/=/.test(value) || /^(bold|italic|underline|reverse|NONE)\b/i.test(value)) {
+				const cmd = parseHighlightCommand(`${group} ${value}`);
+				if (cmd?.kind === "set") out[group] = cmd.attr;
+			} else {
+				out[group] = { link: value };
+			}
+			continue;
+		}
+		if (value && typeof value === "object") {
+			const v = value as Record<string, unknown>;
+			const attr: Attr = {};
+			for (const key of ["fg", "bg", "link"] as const) {
+				if (typeof v[key] === "string") attr[key] = v[key] as string;
+			}
+			for (const key of ["bold", "italic", "underline", "reverse"] as const) {
+				if (typeof v[key] === "boolean") attr[key] = v[key] as boolean;
+			}
+			out[group] = attr;
+		}
+	}
+	return out;
+}
+
+function readSpec(file: string): ThemeSpec {
+	const text = fs.readFileSync(file, "utf8");
+	if (file.endsWith(".vim")) {
+		const parsed = parseVimColorscheme(text);
+		return { name: parsed.name, background: parsed.background, groups: parsed.groups as Record<string, unknown> };
+	}
+	const raw = (file.endsWith(".toml") ? parseToml(text) : JSON.parse(text)) as Record<string, unknown>;
+	if (!Object.keys(raw).some((k) => SPEC_KEYS.includes(k))) return { groups: raw };
+	return raw as ThemeSpec;
+}
+
+function findThemeFile(name: string): string | undefined {
+	if (/[/\\]/.test(name) || THEME_EXTS.some((e) => name.endsWith(e))) {
+		const p = path.resolve(name.replace(/^~(?=\/)/, os.homedir()));
+		return fs.existsSync(p) ? p : undefined;
+	}
+	for (const ext of THEME_EXTS) {
+		const p = path.join(themesDir(), name + ext);
+		if (fs.existsSync(p)) return p;
+	}
+	return undefined;
+}
+
+export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set<string>()): Theme {
+	const name = spec.name ?? fallbackName;
+	let groups: Record<string, Attr> = {};
+	let background = spec.background;
+
+	if (spec.extends) {
+		if (seen.has(spec.extends)) throw new Error(`theme '${name}' extends itself through '${spec.extends}'`);
+		const base = loadTheme(spec.extends, new Set([...seen, name]));
+		groups = { ...base.groups };
+		background ??= base.background;
+	}
+	if (spec.palette) {
+		const missing = (["bg", "fg", "red", "yellow", "green", "cyan", "blue", "magenta"] as const).filter(
+			(k) => !spec.palette?.[k],
+		);
+		if (missing.length > 0) throw new Error(`theme '${name}': palette is missing ${missing.join(", ")}`);
+		const t = fromPalette(name, spec.palette as Palette);
+		groups = { ...groups, ...t.groups };
+		background ??= t.background;
+	}
+	groups = { ...groups, ...normalizeGroups(spec.groups), ...normalizeGroups(spec.highlights) };
+	return { name, background, groups };
+}
+
+/** Load a built-in theme, a theme file from ~/.config/vigent/themes, or a path. */
+export function loadTheme(nameOrPath: string, seen = new Set<string>()): Theme {
+	const builtin = BUILTIN_THEMES[nameOrPath];
 	if (builtin) return builtin;
-	const file = path.join(themesDir(), `${name}.json`);
-	const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-	const groups: Record<string, Attr> = raw.groups ?? raw;
-	return { name, groups };
+	const file = findThemeFile(nameOrPath);
+	if (!file) throw new Error(`E185: Cannot find color scheme '${nameOrPath}'`);
+	const fallbackName = path.basename(file).replace(/\.(toml|json|vim)$/, "");
+	return buildTheme(readSpec(file), fallbackName, seen);
 }
 
 export function listThemes(): string[] {
 	const names = new Set(Object.keys(BUILTIN_THEMES));
 	try {
 		for (const f of fs.readdirSync(themesDir())) {
-			if (f.endsWith(".json")) names.add(f.slice(0, -5));
+			const ext = THEME_EXTS.find((e) => f.endsWith(e));
+			if (ext) names.add(f.slice(0, -ext.length));
 		}
 	} catch {
 		// no user themes dir yet
 	}
-	return [...names].sort();
+	return [...names].sort((a, b) => (a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b)));
 }
+
+export { BUILTIN_THEMES };

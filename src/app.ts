@@ -15,8 +15,11 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
-import { type Session, STATE_GLYPH } from "./session.js";
-import { listThemes, loadTheme, Painter, RESET, type Theme } from "./theme.js";
+import { applySetCommand, DEFAULT_UI, type UiOptions } from "./config.js";
+import { PICKER_ICONS, ThemePicker } from "./picker.js";
+import type { Session, SessionState } from "./session.js";
+import { type Attr, listThemes, loadTheme, type Painter, RESET, sgr, type Theme } from "./theme.js";
+import { parseHighlightCommand } from "./vimcolors.js";
 
 export type Mode = "NORMAL" | "INSERT" | "COMMAND" | "SEARCH";
 
@@ -27,8 +30,48 @@ const MODE_GROUP: Record<Mode, string> = {
 	SEARCH: "VigentModeCommand",
 };
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const SIDEBAR_W = 30;
+interface Icons {
+	spinner: string[];
+	state: Record<Exclude<SessionState, "running">, string>;
+	tee: string;
+	last: string;
+	pipe: string;
+	sep: string;
+	worktree: string;
+	prompt: string;
+	folded: string;
+	open: string;
+	cursor: string;
+}
+
+const ICONS: Record<UiOptions["icons"], Icons> = {
+	unicode: {
+		spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+		state: { waiting: "◐", idle: "○", error: "✗" },
+		tee: "├╴",
+		last: "└╴",
+		pipe: "│ ",
+		sep: "│",
+		worktree: "⎇ ",
+		prompt: "❯ ",
+		folded: "▸",
+		open: "▾",
+		cursor: "▍",
+	},
+	ascii: {
+		spinner: ["|", "/", "-", "\\"],
+		state: { waiting: "~", idle: "o", error: "x" },
+		tee: "|-",
+		last: "`-",
+		pipe: "| ",
+		sep: "|",
+		worktree: "wt:",
+		prompt: "> ",
+		folded: "+",
+		open: "-",
+		cursor: "_",
+	},
+};
 
 interface PaneLine {
 	text: string; // with ANSI
@@ -64,7 +107,17 @@ export class App implements Component {
 		private tui: TUI,
 		private terminal: Terminal,
 		public painter: Painter,
+		public ui: UiOptions = { ...DEFAULT_UI },
 	) {}
+
+	private get icons(): Icons {
+		return ICONS[this.ui.icons];
+	}
+
+	private spinner(): string {
+		const frames = this.icons.spinner;
+		return frames[this.spinnerFrame % frames.length];
+	}
 
 	// ------------------------------------------------------------------ state
 
@@ -98,7 +151,7 @@ export class App implements Component {
 		const running = this.sessions.some((s) => s.state === "running");
 		if (running && !this.spinnerTimer) {
 			this.spinnerTimer = setInterval(() => {
-				this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
+				this.spinnerFrame = (this.spinnerFrame + 1) % 120;
 				this.tui.requestRender();
 			}, 120);
 		} else if (!running && this.spinnerTimer) {
@@ -109,9 +162,18 @@ export class App implements Component {
 
 	setTheme(theme: Theme) {
 		this.painter.setTheme(theme);
-		this.paneCache.key = "";
+		this.repaint();
+	}
+
+	private repaint() {
 		this.invalidate();
 		this.tui.requestRender(true);
+	}
+
+	/** Show a startup message (config warnings etc.) in the command line. */
+	notify(text: string, group = "WarningMsg") {
+		this.setMessage(text, group);
+		this.tui.requestRender();
 	}
 
 	stopTimers() {
@@ -312,17 +374,32 @@ export class App implements Component {
 				this.setMessage(`killed session '${s.name}'`, "WarningMsg");
 				return;
 			}
+			case "colorscheme":
+			case "colo":
 			case "theme": {
 				if (!arg) {
-					this.setMessage(`themes: ${listThemes().join(", ")}`, "Comment");
+					this.openThemePicker();
 					return;
 				}
 				try {
 					this.setTheme(loadTheme(arg));
-					this.setMessage(`theme set to '${arg}'`, "ModeMsg");
-				} catch {
-					this.setMessage(`E185: Cannot find color scheme '${arg}'`, "ErrorMsg");
+					this.setMessage(`colorscheme ${this.painter.theme.name}`, "ModeMsg");
+				} catch (err) {
+					this.setMessage((err as Error).message, "ErrorMsg");
 				}
+				return;
+			}
+			case "hi":
+			case "highlight":
+			case "hi!":
+			case "highlight!":
+				this.execHighlight(arg);
+				return;
+			case "set":
+			case "se": {
+				const r = applySetCommand(this.ui, arg);
+				this.setMessage(r.message, r.error ? "ErrorMsg" : "Normal");
+				this.repaint();
 				return;
 			}
 			case "model": {
@@ -335,7 +412,7 @@ export class App implements Component {
 			case "help":
 			case "h":
 				this.setMessage(
-					"i prompt · j/k gg G scroll · ]s [s 1-9 sessions · za zM zR folds · /search · :new :kill :theme :q",
+					"i prompt · j/k gg G scroll · ]s [s 1-9 sessions · za zM zR folds · /search · :new :kill :colorscheme :hi :set :q",
 					"Comment",
 				);
 				return;
@@ -347,6 +424,71 @@ export class App implements Component {
 	private setMessage(text: string, group: string) {
 		this.message = text;
 		this.messageGroup = group;
+	}
+
+	private execHighlight(arg: string) {
+		const P = this.painter;
+		const cmd = parseHighlightCommand(arg);
+		if (!cmd) {
+			this.setMessage("usage: :hi Group guifg=#rrggbb guibg=#rrggbb gui=bold | :hi link A B | :hi clear", "Comment");
+			return;
+		}
+		switch (cmd.kind) {
+			case "show": {
+				const a = P.attr(cmd.group);
+				this.message = `${cmd.group} ${sgr(a)}xxx${RESET}${P.s("Normal")} ${describeAttr(a)}`;
+				this.messageGroup = "Normal";
+				return;
+			}
+			case "set":
+				P.highlight(cmd.group, cmd.attr);
+				break;
+			case "link":
+				P.link(cmd.from, cmd.to);
+				break;
+			case "clear":
+				P.clear(cmd.group);
+				break;
+		}
+		this.message = "";
+		this.repaint();
+	}
+
+	/** `:colorscheme` with no argument: floating picker with live preview. */
+	openThemePicker() {
+		const original = this.painter.theme;
+		const themes = listThemes();
+		const preview = (name: string) => {
+			try {
+				this.painter.setTheme(loadTheme(name));
+				this.invalidate();
+				this.message = "";
+			} catch (err) {
+				this.setMessage((err as Error).message, "ErrorMsg");
+			}
+			this.tui.requestRender(true);
+		};
+		let handle: { hide(): void } | undefined;
+		const picker = new ThemePicker(
+			this.painter,
+			themes,
+			original.name,
+			PICKER_ICONS[this.ui.icons],
+			preview,
+			(name) => {
+				handle?.hide();
+				if (name) {
+					preview(name);
+					this.setMessage(`colorscheme ${name}`, "ModeMsg");
+				} else {
+					this.painter.setTheme(original);
+				}
+				this.repaint();
+			},
+			() => this.tui.requestRender(),
+		);
+		handle = this.tui.showOverlay(picker, { width: 40, anchor: "center" });
+		this.tui.requestRender();
 	}
 
 	// ------------------------------------------------------------------ scroll & search
@@ -422,7 +564,7 @@ export class App implements Component {
 	// ------------------------------------------------------------------ rendering
 
 	private sidebarWidth(width: number): number {
-		return width >= 80 ? SIDEBAR_W : 0;
+		return this.ui.sidebar && width >= this.ui.sidebar_width + 40 ? this.ui.sidebar_width : 0;
 	}
 
 	private paneWidth(): number {
@@ -445,7 +587,7 @@ export class App implements Component {
 		const view = paneLines.slice(start, start + contentH);
 
 		const out: string[] = [];
-		const sep = P.p("WinSeparator", "│");
+		const sep = P.p("WinSeparator", this.icons.sep);
 		const normalBg = P.s("Normal");
 		for (let r = 0; r < contentH; r++) {
 			const left = sbW > 0 ? sidebar[r] + sep : "";
@@ -471,6 +613,7 @@ export class App implements Component {
 		const base = P.attr("VigentSidebar");
 		const bg = base.bg ?? P.attr("Normal").bg;
 		const clBg = P.attr("CursorLine").bg ?? bg;
+		const I = this.icons;
 		const lines: string[] = [];
 
 		// row = list of [group, text] segments drawn on one background, padded to w
@@ -509,12 +652,13 @@ export class App implements Component {
 						: s.state === "error"
 							? "ErrorMsg"
 							: "Comment";
-			const glyph = s.state === "running" ? SPINNER[this.spinnerFrame] : STATE_GLYPH[s.state];
+			const glyph = s.state === "running" ? this.spinner() : I.state[s.state];
+			const num = this.ui.number ? `${String(i + 1).padStart(3)} ` : " ";
 			lines.push(
 				row(
 					[
-						[focused ? "CursorLineNr" : "LineNr", `${String(i + 1).padStart(3)} `],
-						["VigentIndent", last ? "└╴" : "├╴"],
+						[focused ? "CursorLineNr" : "LineNr", num],
+						["VigentIndent", last ? I.last : I.tee],
 						[glyphGroup, `${glyph} `],
 						[focused ? "Title" : "VigentSidebar", s.name],
 					],
@@ -522,26 +666,27 @@ export class App implements Component {
 				),
 			);
 			const model = s.model.replace(/^claude-/, "");
-			const detail = s.worktree ? `⎇ ${s.worktree} · ${model}` : model;
+			const detail = s.worktree ? `${I.worktree}${s.worktree} · ${model}` : model;
 			lines.push(
 				row([
-					["LineNr", "    "],
-					["VigentIndent", last ? "  " : "│ "],
+					["LineNr", " ".repeat(num.length)],
+					["VigentIndent", last ? "  " : I.pipe],
 					["Comment", `  ${detail}`],
 				]),
 			);
 		});
 
-		while (lines.length < h) lines.push(row([["EndOfBuffer", "~"]]));
+		while (lines.length < h) lines.push(row([["EndOfBuffer", this.ui.tilde ? "~" : ""]]));
 		return lines.slice(0, h);
 	}
 
 	private buildPaneLines(paneW: number): PaneLine[] {
 		const s = this.focusedSession;
-		const key = s ? `${s.id}:${s.version}:${paneW}:${this.painter.theme.name}` : `empty:${paneW}`;
+		const key = `${s ? `${s.id}:${s.version}` : "empty"}:${paneW}:${this.painter.generation}:${this.ui.icons}`;
 		if (this.paneCache.key === key) return this.paneCache.lines;
 
 		const P = this.painter;
+		const I = this.icons;
 		const lines: PaneLine[] = [];
 		const normal = P.s("Normal");
 		// a RESET inside a line would drop the theme background; restore it after each one
@@ -558,19 +703,19 @@ export class App implements Component {
 					case "user": {
 						push("");
 						for (const l of wrapTextWithAnsi(item.text, paneW - 2)) {
-							push(P.p("VigentUser", "❯ ") + P.s("Normal") + P.p("Keyword", l), "❯ " + stripAnsi(l));
+							push(P.p("VigentUser", I.prompt) + P.s("Normal") + P.p("Keyword", l), I.prompt + stripAnsi(l));
 						}
 						break;
 					}
 					case "agent": {
 						push("");
-						const text = item.text + (item.streaming ? " ▍" : "");
+						const text = item.text + (item.streaming ? ` ${I.cursor}` : "");
 						for (const l of wrapTextWithAnsi(text, paneW)) push(P.s("Normal") + l + RESET, stripAnsi(l));
 						break;
 					}
 					case "tool": {
 						const t = item.tool!;
-						const fold = t.folded ? "▸" : "▾";
+						const fold = t.folded ? I.folded : I.open;
 						push(
 							P.p("NonText", ` ${fold} `) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
 							` ${fold} ${t.name} ${t.summary}`,
@@ -605,9 +750,9 @@ export class App implements Component {
 		const modeBadge = P.p(MODE_GROUP[this.mode], ` ${this.mode} `);
 		const running = this.sessions.filter((x) => x.state === "running").length;
 		const leftText = s ? ` ${s.name} ` : " [no session] ";
-		const worktree = s?.worktree ? `⎇ ${s.worktree} ` : "";
+		const worktree = s?.worktree ? `${this.icons.worktree}${s.worktree} ` : "";
 		const right = s
-			? ` ${s.model}  ${formatTokens(s.tokens)}  ${running}/${this.sessions.length}${running > 0 ? " " + SPINNER[this.spinnerFrame] : " ●"} `
+			? ` ${s.model}  ${formatTokens(s.tokens)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
 			: "";
 		const plainLen = visibleWidth(` ${this.mode} `) + visibleWidth(leftText) + visibleWidth(worktree) + visibleWidth(right);
 		const fill = Math.max(0, width - plainLen);
@@ -637,7 +782,7 @@ export class App implements Component {
 				break;
 			case "INSERT":
 				content =
-					P.p("ModeMsg", "-- INSERT --") + P.s("Normal") + "  ❯ " + this.inputBuf + P.p("PmenuSel", " ");
+					P.p("ModeMsg", "-- INSERT --") + P.s("Normal") + `  ${this.icons.prompt}` + this.inputBuf + P.p("PmenuSel", " ");
 				break;
 			default: {
 				if (this.message) content = P.p(this.messageGroup, this.message);
@@ -653,6 +798,15 @@ export class App implements Component {
 function stripAnsi(s: string): string {
 	// biome-ignore lint: control chars intended
 	return s.replace(/\x1b\[[0-9;]*m|\x1b_pi:c\x07/g, "");
+}
+
+function describeAttr(a: Attr): string {
+	const parts: string[] = [];
+	if (a.fg) parts.push(`guifg=${a.fg}`);
+	if (a.bg) parts.push(`guibg=${a.bg}`);
+	const flags = (["bold", "italic", "underline", "reverse"] as const).filter((k) => a[k]);
+	if (flags.length > 0) parts.push(`gui=${flags.join(",")}`);
+	return parts.join(" ") || "cleared";
 }
 
 function formatTokens(n: number): string {

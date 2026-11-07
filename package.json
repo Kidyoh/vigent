@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
-    "demo": "node dist/cli.js --demo"
+    "demo": "node dist/cli.js --demo",
+    "test": "tsc && node --test test/*.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -23,7 +24,8 @@
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.73.1",
     "@mariozechner/pi-ai": "^0.73.1",
-    "@mariozechner/pi-tui": "^0.73.1"
+    "@mariozechner/pi-tui": "^0.73.1",
+    "smol-toml": "^1.9.1"
   },
   "devDependencies": {
     "typescript": "^7.0.2"
