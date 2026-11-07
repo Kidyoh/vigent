@@ -32,6 +32,8 @@ export type CliEvent =
 
 export interface CliRunOptions {
 	model?: string;
+	/** reasoning effort: claude --effort, codex model_reasoning_effort, opencode --variant */
+	effort?: string;
 	/** the CLI's conversation id, to continue it */
 	resumeId?: string;
 	cwd: string;
@@ -67,6 +69,7 @@ export const claudeAdapter: CliAdapter = {
 			"--include-partial-messages",
 			...(o.extraArgs ?? this.defaultArgs),
 			...(o.model ? ["--model", o.model] : []),
+			...(o.effort ? ["--effort", o.effort] : []),
 			...(o.resumeId ? ["--resume", o.resumeId] : []),
 			"--",
 			prompt,
@@ -136,6 +139,7 @@ export const codexAdapter: CliAdapter = {
 			"--skip-git-repo-check",
 			...(o.extraArgs ?? this.defaultArgs),
 			...(o.model ? ["-m", o.model] : []),
+			...(o.effort ? ["-c", `model_reasoning_effort="${o.effort}"`] : []),
 			...(o.resumeId ? [o.resumeId] : []),
 			"--",
 			prompt,
@@ -234,6 +238,7 @@ export const opencodeAdapter: CliAdapter = {
 			o.cwd,
 			...(o.extraArgs ?? this.defaultArgs),
 			...(o.model ? ["-m", o.model] : []),
+			...(o.effort ? ["--variant", o.effort] : []),
 			...(o.resumeId ? ["--session", o.resumeId] : []),
 			"--",
 			prompt,
@@ -293,6 +298,8 @@ export interface CliSessionOptions {
 	resumeId?: string;
 	/** replaces the adapter's default extra arguments */
 	extraArgs?: string[];
+	/** reasoning effort to start with */
+	effort?: string;
 	/** the CLI to run; default: the engine's usual command on PATH */
 	bin?: string;
 	env?: NodeJS.ProcessEnv;
@@ -316,6 +323,7 @@ export class CliSession extends Session {
 		this.adapter = CLI_ADAPTERS[engine];
 		this.cwd = opts.cwd;
 		this.requestedModel = model;
+		this.effort = opts.effort;
 		this.resumeId = opts.resumeId;
 		if (opts.resumeId) {
 			this.pushInfo(`continuing the ${ENGINE_NAMES[engine]} conversation ${opts.resumeId.slice(0, 8)}… (earlier messages live in ${ENGINE_NAMES[engine]}'s history)`);
@@ -327,6 +335,24 @@ export class CliSession extends Session {
 		return ENGINE_NAMES[this.engine];
 	}
 
+	/** The model for the next prompt; undefined (or "default") = the CLI's own. */
+	setModel(model: string | undefined): void {
+		this.requestedModel = model && model !== "default" ? model : undefined;
+		this.model = this.requestedModel ?? ENGINE_NAMES[this.engine];
+		this.emit();
+	}
+
+	/** Reasoning effort for the next prompt; undefined = the CLI's own. */
+	setEffort(effort: string | undefined): void {
+		this.effort = effort && effort !== "default" ? effort : undefined;
+		this.emit();
+	}
+
+	/** what was asked for (vs. what the CLI reported it used) */
+	get chosenModel(): string | undefined {
+		return this.requestedModel;
+	}
+
 	send(text: string): void {
 		this.pushUser(text);
 		this.setState("running");
@@ -334,6 +360,7 @@ export class CliSession extends Session {
 		const args = this.adapter.args(text, {
 			cwd: this.cwd,
 			model: this.requestedModel,
+			effort: this.effort,
 			resumeId: this.resumeId,
 			extraArgs: this.opts.extraArgs,
 		});

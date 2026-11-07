@@ -148,6 +148,8 @@ export const DEFAULT_KEYS: Record<KeyMode, Record<string, string>> = {
 		"<leader>D": ":dash<CR>",
 		"<leader>u": "session.tree",
 		"<leader>s": ":settings<CR>",
+		"<leader>M": ":model<CR>",
+		"<leader>e": ":effort<CR>",
 		ZZ: "app.quit",
 		ZQ: "app.quit_force",
 		q: "app.quit_hint",

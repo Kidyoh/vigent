@@ -200,3 +200,133 @@ export class ThemePicker implements Component {
 		return lines;
 	}
 }
+
+/** An item in a ChoicePicker. */
+export interface PickerChoice {
+	value: string;
+	note?: string;
+}
+
+/**
+ * A filterable list (`:model`, `:effort`). Type to filter, ↑/↓ (Ctrl-n/p,
+ * Tab) to move, Enter picks. With `custom`, Enter on text that matches
+ * nothing picks the text itself (a model the list doesn't know).
+ */
+export class ChoicePicker implements Component {
+	private query = "";
+	private index = 0;
+	private scroll = 0;
+	private items: PickerChoice[] = [];
+	private loading = true;
+
+	constructor(
+		private painter: Painter,
+		private icons: PickerIcons,
+		private title: string,
+		items: PickerChoice[] | Promise<PickerChoice[]>,
+		private current: string | undefined,
+		private custom: boolean,
+		private onDone: (value: string | null) => void,
+		private requestRender: () => void,
+	) {
+		Promise.resolve(items)
+			.then((list) => {
+				this.items = list;
+				this.loading = false;
+				this.index = Math.max(0, list.findIndex((c) => c.value === current));
+				this.scroll = Math.max(0, this.index - VISIBLE + 1);
+				this.requestRender();
+			})
+			.catch(() => {
+				this.loading = false;
+				this.requestRender();
+			});
+	}
+
+	private filtered(): PickerChoice[] {
+		return this.query ? fuzzyFilter(this.items, this.query, (c) => `${c.value} ${c.note ?? ""}`) : this.items;
+	}
+
+	handleInput(data: string): void {
+		const key = parseKey(data) ?? "";
+		const items = this.filtered();
+		switch (key) {
+			case "escape":
+			case "ctrl+c":
+				this.onDone(null);
+				return;
+			case "enter":
+			case "return": {
+				const picked = items[this.index]?.value ?? (this.custom && this.query.trim() ? this.query.trim() : undefined);
+				if (picked !== undefined) this.onDone(picked);
+				return;
+			}
+			case "down":
+			case "tab":
+			case "ctrl+n":
+			case "ctrl+j":
+				if (items.length) this.index = (this.index + 1) % items.length;
+				break;
+			case "up":
+			case "shift+tab":
+			case "ctrl+p":
+			case "ctrl+k":
+				if (items.length) this.index = (this.index - 1 + items.length) % items.length;
+				break;
+			case "backspace":
+				this.query = this.query.slice(0, -1);
+				this.index = 0;
+				break;
+			case "ctrl+u":
+				this.query = "";
+				this.index = 0;
+				break;
+			default:
+				if (data.length >= 1 && !data.startsWith("\x1b") && data >= " ") {
+					this.query += data;
+					this.index = 0;
+				}
+		}
+		if (this.index < this.scroll) this.scroll = this.index;
+		if (this.index >= this.scroll + VISIBLE) this.scroll = this.index - VISIBLE + 1;
+		this.requestRender();
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const P = this.painter;
+		const I = this.icons;
+		const inner = Math.max(20, width) - 2;
+		const bg = P.attr("NormalFloat").bg;
+		const border = (s: string) => P.on("FloatBorder", bg) + s + RESET;
+		const row = (content: string, used: number, rowBg = bg) =>
+			border(I.v) + content + P.on("NormalFloat", rowBg) + " ".repeat(Math.max(0, inner - used)) + RESET + border(I.v);
+		const items = this.filtered();
+		const title = ` ${this.title} `;
+		const lines = [border(I.tl + I.h) + P.on("FloatTitle", bg) + title + RESET + border(I.h.repeat(Math.max(0, inner - 1 - visibleWidth(title))) + I.tr)];
+		lines.push(row(P.on("Title", bg) + ` ${I.prompt} ` + RESET + P.on("NormalFloat", bg) + this.query + P.on("PmenuSel", undefined) + " " + RESET, visibleWidth(this.query) + 4));
+		lines.push(border(I.lt + I.h.repeat(inner) + I.rt));
+		const shown = items.slice(this.scroll, this.scroll + VISIBLE);
+		for (let i = 0; i < VISIBLE; i++) {
+			const c = shown[i];
+			if (!c) {
+				let text = "";
+				if (i === 0 && this.loading) text = "  loading…";
+				else if (i === 0 && items.length === 0) text = this.custom && this.query.trim() ? `  Enter uses '${this.query.trim()}'` : "  no match";
+				lines.push(row(P.on("Comment", bg) + truncateToWidth(text, inner, "…") + RESET, Math.min(inner, visibleWidth(text))));
+				continue;
+			}
+			const selected = this.scroll + i === this.index;
+			const rowBg = selected ? (P.attr("PmenuSel").bg ?? P.attr("Visual").bg) : bg;
+			const group = selected ? "PmenuSel" : "NormalFloat";
+			const marker = c.value === this.current ? `${I.current} ` : "  ";
+			const name = truncateToWidth(`${marker}${c.value}`, Math.max(10, inner - 4), "…");
+			const note = c.note ? truncateToWidth(`  ${c.note}`, Math.max(0, inner - 2 - visibleWidth(name)), "…") : "";
+			lines.push(row(P.on(group, rowBg) + ` ${name}` + P.on("Comment", rowBg) + note + RESET, 1 + visibleWidth(name) + visibleWidth(note), rowBg));
+		}
+		const count = ` ${items.length ? this.index + 1 : 0}/${items.length}${this.custom ? " · type any name" : ""} `;
+		lines.push(border(I.bl + I.h.repeat(Math.max(0, inner - visibleWidth(count) - 1))) + P.on("Comment", bg) + count + RESET + border(I.h + I.br));
+		return lines;
+	}
+}

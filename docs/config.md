@@ -176,6 +176,23 @@ model = "anthropic/claude-sonnet-4-5"         # provider/model
 |---|---|
 | `args` | Extra arguments for every run of that CLI. They **replace** the defaults above, so keep a permission or sandbox setting in them. vigent always adds its own JSON-output and resume flags, and the prompt last. |
 | `model` | Model for new agents on that engine. Without it, the CLI uses its own default. `:new <task> --engine claude --model sonnet` overrides it for one agent. |
+| `effort` | Reasoning effort for new agents on that engine: `low` to `max` for Claude Code, `minimal` to `xhigh` for Codex, `minimal` to `max` for OpenCode, `off` to `xhigh` for pi (its thinking level). Without it, the engine decides. |
+
+`[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`; a bare name means Anthropic's) and `effort` too.
+
+### Choosing a model and effort while vigent runs
+
+`:model` (`<Space>M`) opens a picker with the models the focused agent's engine offers:
+- **pi:** the catalog for each provider you have a key for.
+- **Claude Code:** `fable`, `opus`, `sonnet`, `haiku`.
+- **OpenCode:** everything `opencode models` lists.
+- **Codex:** type the model name.
+
+Type to filter. Enter on text that matches nothing uses the typed name as-is.
+
+`:effort` (`<Space>e`) picks the reasoning effort the same way.
+
+Both apply from the agent's next prompt, show in the winbar (`claude-fable-5 · high`), and are saved with the agent, so they survive a restart. With no agent open, they set the model and effort for new agents. Those are also in `:settings`. `:model <name>` and `:effort <level>` skip the picker.
 
 `claude -p` can't stop and ask before a tool runs, so with the default `acceptEdits` Claude Code may edit files in the worktree, and other tools follow the permission rules in your Claude Code settings. Use `"--permission-mode", "bypassPermissions"` only where the agent is sandboxed.
 
@@ -326,6 +343,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>D` | `:dash` |
 | `<leader>u` | `session.tree` (like an undo tree, for the conversation) |
 | `<leader>s` | `:settings<CR>` (theme, look, engine, worktrees and keys in one float) |
+| `<leader>M` | `:model<CR>` (pick the focused agent's model) |
+| `<leader>e` | `:effort<CR>` (pick its reasoning effort) |
 
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
 

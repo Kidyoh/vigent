@@ -294,11 +294,12 @@ async function main(): Promise<number | undefined> {
 		.catch(() => {});
 
 	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
-	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string) =>
+	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string) =>
 		new CliSession(name, engine, requested, {
 			cwd,
 			worktree: wt,
 			resumeId,
+			effort,
 			extraArgs: config.engines[engine]?.args,
 			onResumeId: (id) => {
 				if (!wt?.path) return;
@@ -307,7 +308,27 @@ async function main(): Promise<number | undefined> {
 			},
 		});
 
-	app.newSession = (name, { worktree, model: perAgent, engine = app.defaultEngine() }): Session => {
+	// model and effort for new agents, per engine, from [engines.<id>]
+	for (const [id, opts] of Object.entries(config.engines)) {
+		if (opts?.model) app.newAgentModel[id as EngineId] = opts.model;
+		if (opts?.effort) app.newAgentEffort[id as EngineId] = opts.effort;
+	}
+	// an agent's model and effort, changed with :model / :effort, survive a restart
+	app.persist = (s) => {
+		const wt = s.worktree?.path;
+		if (!wt) return;
+		const meta = loadAgentMeta(wt);
+		if (!meta) return;
+		const requested = s instanceof CliSession ? s.chosenModel : undefined;
+		saveAgentMeta(wt, {
+			...meta,
+			model: s instanceof CliSession ? (requested ?? "") : s.model,
+			...(s instanceof CliSession ? { requestedModel: requested } : {}),
+			effort: s.effort,
+		});
+	};
+
+	app.newSession = (name, { worktree, model: perAgent, engine = app.defaultEngine(), effort }): Session => {
 		if (demo) {
 			// demo mode never touches your repo: the worktree is only shown, not created
 			const shown = worktree ? { branch: branchName(name, config.worktree.branch) } : undefined;
@@ -324,18 +345,19 @@ async function main(): Promise<number | undefined> {
 				base: wt.base,
 				createdAt: new Date().toISOString(),
 				...(engine === "pi" ? {} : { engine, ...(requested ? { requestedModel: requested } : {}) }),
+				...(effort ? { effort } : {}),
 			});
 		}
 		const cwd = wt?.path ?? process.cwd();
-		if (engine !== "pi") return cliSession(name, engine, requested, cwd, wt?.path ? wt : undefined);
-		if (!wt?.path) return new PiSession(name, m, { cwd });
-		return new PiSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path) });
+		if (engine !== "pi") return cliSession(name, engine, requested, cwd, wt?.path ? wt : undefined, undefined, effort);
+		if (!wt?.path) return new PiSession(name, m, { cwd, effort });
+		return new PiSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path), effort });
 	};
 	/** Reopen a saved agent with the engine it was started with. */
 	const reopen = (meta: AgentMeta, worktree: WorktreeInfo): Session => {
 		const engine = meta.engine && isEngineId(meta.engine) ? meta.engine : "pi";
-		if (engine !== "pi") return cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId);
-		return new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!) });
+		if (engine !== "pi") return cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId, meta.effort);
+		return new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!), effort: meta.effort });
 	};
 	app.attachSession = (wt) => {
 		if (demo || !wt.path) throw new Error("attaching needs a real agent (not --demo)");

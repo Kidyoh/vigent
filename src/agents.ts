@@ -27,6 +27,8 @@ export interface AgentMeta {
 	resumeId?: string;
 	/** the model asked for (CLI engines; missing = the CLI's own default) */
 	requestedModel?: string;
+	/** reasoning effort / thinking level (missing = the engine's default) */
+	effort?: string;
 }
 
 /** vigent's folder in git's per-worktree admin dir. */

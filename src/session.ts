@@ -40,6 +40,8 @@ export abstract class Session {
 	id = nextId++;
 	/** what runs this agent */
 	engine: EngineId = "pi";
+	/** reasoning effort / thinking level; undefined = the engine's default */
+	effort?: string;
 	state: SessionState = "idle";
 	items: TranscriptItem[] = [];
 	tokens = 0;
@@ -155,6 +157,18 @@ export abstract class Session {
 		if (tools.length === 0) return;
 		const anyFolded = tools.some((i) => i.tool!.folded);
 		for (const i of tools) i.tool!.folded = !anyFolded;
+		this.emit();
+	}
+
+	/** Use this model from the next prompt on. */
+	setModel(model: string | undefined): void | Promise<void> {
+		if (model) this.model = model;
+		this.emit();
+	}
+
+	/** Use this reasoning effort (thinking level) from the next prompt on. */
+	setEffort(effort: string | undefined): void | Promise<void> {
+		this.effort = effort && effort !== "default" ? effort : undefined;
 		this.emit();
 	}
 
@@ -284,6 +298,8 @@ export interface PiSessionOptions {
 	agentDir?: string;
 	/** keep the conversation in this folder so the agent survives a restart (default: memory only) */
 	sessionDir?: string;
+	/** thinking level to start with: off, minimal, low, medium, high, xhigh */
+	effort?: string;
 }
 
 export class PiSession extends Session {
@@ -294,6 +310,7 @@ export class PiSession extends Session {
 	constructor(name: string, model: string, private opts: PiSessionOptions) {
 		super(name, model, opts.worktree);
 		this.cwd = opts.cwd;
+		this.effort = opts.effort;
 		this.ready = this.init();
 	}
 
@@ -305,16 +322,12 @@ export class PiSession extends Session {
 		const resuming = sessionManager.buildSessionContext().messages.length > 0;
 		let model = this.opts.modelObject;
 		if (!model && !resuming) {
-			const ai = await import("@mariozechner/pi-ai");
-			try {
-				model = (ai as any).getModel("anthropic", this.model);
-			} catch {
-				model = undefined; // let pi pick its default
-			}
+			model = await piModel(this.model); // undefined: let pi pick its default
 		}
 		// a resumed conversation keeps the model it was saved with, unless one is given
 		const { session } = await sdk.createAgentSession({
 			cwd: this.cwd,
+			...(this.effort ? { thinkingLevel: this.effort as any } : {}),
 			...(model ? { model: model as any } : {}),
 			sessionManager,
 			...(this.opts.authStorage ? { authStorage: this.opts.authStorage as any } : {}),
@@ -386,6 +399,24 @@ export class PiSession extends Session {
 				break;
 			}
 		}
+	}
+
+	async setModel(model: string | undefined): Promise<void> {
+		if (!model || model === "default") return;
+		const m = await piModel(model);
+		if (!m) throw new Error(`pi doesn't know the model '${model}' (provider/model, e.g. anthropic/claude-sonnet-4-5)`);
+		await this.ready;
+		await this.session.setModel(m);
+		this.model = model;
+		this.emit();
+	}
+
+	async setEffort(effort: string | undefined): Promise<void> {
+		await this.ready;
+		const level = !effort || effort === "default" ? "off" : effort;
+		this.session.setThinkingLevel(level);
+		this.effort = level === "off" ? undefined : level;
+		this.emit();
 	}
 
 	tree(glyphs?: TreeGlyphs): TreeRow[] | undefined {
@@ -476,4 +507,16 @@ function summarizeArgs(args: any): string {
 	if (typeof args === "string") return args.slice(0, 80);
 	const v = args.command ?? args.path ?? args.file_path ?? args.filePath ?? JSON.stringify(args);
 	return String(v).slice(0, 80);
+}
+
+/** A pi-ai model from "provider/model", or a bare id (Anthropic's). Undefined when pi doesn't know it. */
+export async function piModel(id: string): Promise<unknown> {
+	const ai: any = await import("@mariozechner/pi-ai");
+	const slash = id.indexOf("/");
+	const [provider, modelId] = slash > 0 ? [id.slice(0, slash), id.slice(slash + 1)] : ["anthropic", id];
+	try {
+		return ai.getModel(provider, modelId) ?? undefined;
+	} catch {
+		return undefined;
+	}
 }

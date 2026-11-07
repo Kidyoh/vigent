@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
+import { EFFORTS } from "./choices.js";
 import { type EngineId, isEngineId } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
 import { KEY_MODES, type KeyMode } from "./keys.js";
@@ -44,6 +45,8 @@ export interface EngineOptions {
 	args?: string[];
 	/** model for new agents on that engine (default: the CLI's own) */
 	model?: string;
+	/** reasoning effort for new agents on that engine (pi: thinking level) */
+	effort?: string;
 }
 
 export interface Config {
@@ -51,7 +54,7 @@ export interface Config {
 	model?: string;
 	/** engine for new agents: pi, claude, codex, opencode, or auto (default) */
 	engine?: EngineId | "auto";
-	engines: Partial<Record<Exclude<EngineId, "pi">, EngineOptions>>;
+	engines: Partial<Record<EngineId, EngineOptions>>;
 	leader?: string;
 	ui: UiOptions;
 	highlights: Record<string, Attr>;
@@ -112,8 +115,8 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 					break;
 				}
 				for (const [id, opts] of Object.entries(value)) {
-					if (id === "pi" || !isEngineId(id)) {
-						warnings.push(`config: unknown engine [engines.${id}] (claude, codex or opencode)`);
+					if (!isEngineId(id)) {
+						warnings.push(`config: unknown engine [engines.${id}] (pi, claude, codex or opencode)`);
 						continue;
 					}
 					if (!opts || typeof opts !== "object" || Array.isArray(opts)) {
@@ -124,9 +127,11 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 					for (const [k, v] of Object.entries(opts)) {
 						if (k === "args" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.args = v;
 						else if (k === "model" && typeof v === "string") e.model = v;
+						else if (k === "effort" && typeof v === "string" && (EFFORTS[id as EngineId] as string[]).includes(v)) e.effort = v;
+						else if (k === "effort") warnings.push(`config [engines.${id}]: 'effort' should be one of ${EFFORTS[id as EngineId].join(", ")}`);
 						else warnings.push(`config [engines.${id}]: ${k === "args" ? "'args' should be a list of strings" : k === "model" ? "'model' should be a string" : `unknown option '${k}'`}`);
 					}
-					config.engines[id as Exclude<EngineId, "pi">] = e;
+					config.engines[id as EngineId] = e;
 				}
 				break;
 			case "keys":

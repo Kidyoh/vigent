@@ -43,7 +43,8 @@ import { splitView, unifiedView } from "./diffview.js";
 import { TREE_GLYPHS, type TreeRow } from "./tree.js";
 import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
-import { PICKER_ICONS, ThemePicker } from "./picker.js";
+import { ChoicePicker, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
+import { EFFORTS, effortChoices, modelChoices } from "./choices.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
@@ -182,7 +183,7 @@ export class App implements Component {
 	};
 
 	/** create an agent; `worktree: false` runs it in the current checkout */
-	newSession: (name: string, opts: { worktree: boolean; model?: string; engine?: EngineId }) => Session = () => {
+	newSession: (name: string, opts: { worktree: boolean; model?: string; engine?: EngineId; effort?: string }) => Session = () => {
 		throw new Error("newSession factory not set");
 	};
 
@@ -196,6 +197,11 @@ export class App implements Component {
 	checkStorage?: () => Promise<RiftriHealth>;
 	/** scripted agents, no model behind them (shown in the statusline) */
 	demo = false;
+	/** model and effort for new agents, per engine ([engines.<id>] in config.toml, :model / :effort with no agent) */
+	newAgentModel: Partial<Record<EngineId, string>> = {};
+	newAgentEffort: Partial<Record<EngineId, string>> = {};
+	/** save an agent's settings (model, effort) so they survive a restart */
+	persist: (s: Session) => void = () => {};
 	/** `engine` from config.toml or :settings; "auto" lets defaultEngine() pick */
 	preferredEngine: EngineId | "auto" = "auto";
 	/** key changes made in :settings, saved with w: lhs -> rhs (false unbinds) */
@@ -771,13 +777,16 @@ export class App implements Component {
 				this.repaint();
 				return;
 			}
-			case "model": {
-				if (this.focusedSession && arg) {
-					this.focusedSession.model = arg;
-					this.setMessage(`model set to '${arg}'`, "ModeMsg");
-				}
+			case "model":
+			case "mo":
+				if (arg) this.chooseModel(arg);
+				else this.openModelPicker();
 				return;
-			}
+			case "effort":
+			case "think":
+				if (arg) this.chooseEffort(arg);
+				else this.openEffortPicker();
+				return;
 			case "help":
 			case "h":
 				this.openHelp();
@@ -956,6 +965,103 @@ export class App implements Component {
 		this.tui.requestRender();
 	}
 
+	/** Who `:model` / `:effort` change: the focused agent, or new agents on the default engine. */
+	private modelTarget(forNewAgents = false): { session?: Session; engine: EngineId; label: string } {
+		const s = forNewAgents ? undefined : this.focusedSession;
+		if (s) return { session: s, engine: s.engine, label: `'${s.name}' (${ENGINE_NAMES[s.engine]})` };
+		const engine = this.defaultEngine();
+		return { engine, label: `new ${ENGINE_NAMES[engine]} agents` };
+	}
+
+	/** `:model <name>` */
+	chooseModel(model: string, t = this.modelTarget()) {
+		const value = model === "default" ? undefined : model;
+		if (!t.session) {
+			if (value) this.newAgentModel[t.engine] = value;
+			else delete this.newAgentModel[t.engine];
+			this.setMessage(`model for ${t.label}: ${model}`, "ModeMsg");
+			return;
+		}
+		const s = t.session;
+		Promise.resolve(s.setModel(value))
+			.then(() => {
+				this.persist(s);
+				this.setMessage(`model for ${t.label}: ${model} (from the next prompt)`, "ModeMsg");
+				this.tui.requestRender();
+			})
+			.catch((err) => {
+				this.setMessage(String((err as Error)?.message ?? err), "ErrorMsg");
+				this.tui.requestRender();
+			});
+	}
+
+	/** `:effort <level>` */
+	chooseEffort(level: string, t = this.modelTarget()) {
+		const allowed = ["default", ...EFFORTS[t.engine]];
+		if (!allowed.includes(level)) {
+			this.setMessage(`${ENGINE_NAMES[t.engine]} takes: ${allowed.join(", ")}`, "ErrorMsg");
+			return;
+		}
+		const value = level === "default" ? undefined : level;
+		if (!t.session) {
+			if (value) this.newAgentEffort[t.engine] = value;
+			else delete this.newAgentEffort[t.engine];
+			this.setMessage(`effort for ${t.label}: ${level}`, "ModeMsg");
+			return;
+		}
+		const s = t.session;
+		Promise.resolve(s.setEffort(value))
+			.then(() => {
+				this.persist(s);
+				this.setMessage(`effort for ${t.label}: ${level} (from the next prompt)`, "ModeMsg");
+				this.tui.requestRender();
+			})
+			.catch((err) => {
+				this.setMessage(String((err as Error)?.message ?? err), "ErrorMsg");
+				this.tui.requestRender();
+			});
+	}
+
+	/** `:model`: pick from what the engine offers, or type any name. */
+	openModelPicker(t = this.modelTarget()) {
+		const current = t.session
+			? "chosenModel" in t.session
+				? ((t.session as { chosenModel?: string }).chosenModel ?? "default")
+				: t.session.model
+			: (this.newAgentModel[t.engine] ?? "default");
+		this.openChoices(`Model · ${t.label}`, this.modelChoices(t.engine), current, true, (v) => this.chooseModel(v, t));
+	}
+
+	/** `:effort`: the reasoning effort / thinking levels the engine accepts. */
+	openEffortPicker(t = this.modelTarget()) {
+		const current = (t.session ? t.session.effort : this.newAgentEffort[t.engine]) ?? "default";
+		this.openChoices(`Effort · ${t.label}`, effortChoices(t.engine), current, false, (v) => this.chooseEffort(v, t));
+	}
+
+	/** where model lists come from (replaced in tests) */
+	modelChoices: (engine: EngineId) => Promise<PickerChoice[]> = (engine) => modelChoices(engine);
+
+	private openChoices(title: string, items: PickerChoice[] | Promise<PickerChoice[]>, current: string, custom: boolean, done: (v: string) => void) {
+		this.seq.reset();
+		let handle: { hide(): void } | undefined;
+		const picker = new ChoicePicker(
+			this.painter,
+			PICKER_ICONS[this.ui.icons],
+			title,
+			items,
+			current,
+			custom,
+			(v) => {
+				handle?.hide();
+				if (v !== null) done(v);
+				this.repaint();
+			},
+			() => this.tui.requestRender(),
+		);
+		handle = this.tui.showOverlay(picker, { width: Math.min(72, this.terminal.columns - 4), anchor: "center" });
+		this.tui.requestRender();
+	}
+
 	/** `:settings`: theme, look, agents and keys in one float; w saves them to config.toml. */
 	openSettings() {
 		this.seq.reset();
@@ -1008,6 +1114,29 @@ export class App implements Component {
 					this.preferredEngine = cycle<EngineId | "auto">(["auto", "pi", "claude", "codex", "opencode"], this.preferredEngine, d);
 				},
 				hint: "auto: pi with an API key, else the first signed-in CLI · :checkhealth shows which are ready",
+			},
+			{
+				section: "Agents",
+				label: "Model for new agents",
+				value: () => this.newAgentModel[this.defaultEngine()] ?? `default (${ENGINE_NAMES[this.defaultEngine()]}'s)`,
+				open: () => {
+					handle?.hide();
+					this.openModelPicker(this.modelTarget(true));
+				},
+				hint: ":model in an agent changes just that agent",
+			},
+			{
+				section: "Agents",
+				label: "Effort for new agents",
+				value: () => this.newAgentEffort[this.defaultEngine()] ?? "default",
+				change: (d) => {
+					const e = this.defaultEngine();
+					const all = ["default", ...EFFORTS[e]];
+					const next = cycle(all, this.newAgentEffort[e] ?? "default", d);
+					if (next === "default") delete this.newAgentEffort[e];
+					else this.newAgentEffort[e] = next;
+				},
+				hint: "reasoning effort (pi: thinking level) · :effort in an agent changes just that agent",
 			},
 			{ section: "Agents", label: "A worktree for each agent", value: () => onOff(wt.enabled), change: () => (wt.enabled = !wt.enabled), hint: "off: agents work in this checkout" },
 			{
@@ -1127,7 +1256,9 @@ export class App implements Component {
 		}
 		const withWorktree = opts.worktree !== false && this.workspace.config.enabled;
 		try {
-			const s = this.newSession(name, { worktree: withWorktree, model: opts.model, engine });
+			const model = opts.model ?? this.newAgentModel[engine];
+			const effort = this.newAgentEffort[engine];
+			const s = this.newSession(name, { worktree: withWorktree, model, engine, ...(effort ? { effort } : {}) });
 			this.addSession(s);
 			const wt = s.worktree;
 			if (wt?.riftri) this.refreshStorage();
@@ -1868,7 +1999,7 @@ export class App implements Component {
 		const bg = P.attr("WinBar").bg ?? P.attr("Normal").bg;
 		const s = this.focusedSession;
 		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
-		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}` : "";
+		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}${s.effort ? ` · ${s.effort}` : ""}` : "";
 		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? " · riftri" : ""}` : s ? "this checkout" : "";
 		const status = s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "";
 		// the path gives way first (from its start: the end names the worktree), always two spaces before it
@@ -2283,6 +2414,8 @@ const EX_HELP: [string, string][] = [
 	[":tree", "the conversation's branches; go back and branch"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],
+	[":model [name]", "pick the agent's model (no agent: for new agents)"],
+	[":effort [level]", "pick its reasoning effort: low … max (pi: thinking level)"],
 	[":settings", "theme, look, engine, worktrees and keys in one place (w saves)"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],

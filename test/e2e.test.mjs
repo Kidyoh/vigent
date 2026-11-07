@@ -125,6 +125,19 @@ test("first run: i, a task, Enter starts an agent on Claude Code in its own work
 		await t.waitFor(/Claude Code {2}2\.1\.319 {2}\(default for :new\)/);
 		await t.type("q");
 
+		// effort and model, picked while it runs, reach Claude Code on the next prompt
+		await t.ex("effort high");
+		await t.waitFor(/effort for 'write hello file' \(Claude Code\): high/);
+		await t.ex("model opus");
+		await t.waitFor(/opus · high/);
+		await t.type("i");
+		await t.type("third\r");
+		const until3 = Date.now() + 10000;
+		while (calls().length < 3 && Date.now() < until3) await new Promise((r) => setTimeout(r, 100));
+		const third = calls()[2].args;
+		assert.deepEqual(third.slice(third.indexOf("--model"), third.indexOf("--model") + 4), ["--model", "opus", "--effort", "high"]);
+		await t.waitFor(/│ done\s*$/m);
+
 		await t.ex("q");
 		assert.equal(await t.exited, 0);
 	} finally {
