@@ -52,7 +52,8 @@ keys (NORMAL mode):
   {  }         previous / next message         :dash           all agents at a glance
   dd           kill agent (asks first)         :queue <text>   follow-up after this run
   :worktrees   list agent worktrees            :attach <branch> reopen a kept agent
-  :diff split  side-by-side diff               :nmap <lhs> <rhs> map keys (see :help)
+  :diff split  side-by-side diff               :tree           go back to any point and branch
+  <Space>u     the conversation tree           :nmap <lhs> <rhs> map keys (see :help)
   :help        every key, including yours      :q              quit
 
 Runs in demo mode (scripted sessions, no network) when --demo is passed

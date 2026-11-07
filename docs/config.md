@@ -230,6 +230,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `session.abort` | stop the focused agent's current run |
 | `session.pause` | stop the run and hold queued prompts (`:pause`) |
 | `session.resume` | continue a paused agent (`:resume`) |
+| `session.tree` | the conversation tree: go back to an earlier point and branch (`:tree`) |
 | `fold.toggle` | fold / unfold tool output |
 | `fold.open_all`, `fold.close_all` | unfold / fold all tool output |
 | `search.next`, `search.prev` | next / previous match |
@@ -281,6 +282,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>q` | `:queue ` (type a follow-up) |
 | `<leader>t` | `theme.picker` |
 | `<leader>D` | `:dash` |
+| `<leader>u` | `session.tree` (like an undo tree, for the conversation) |
 
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
 

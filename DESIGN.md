@@ -99,7 +99,7 @@ Alternate full-screen views (like vim "windows" you toggle into):
 :colorscheme <name>   :hi   :set <opt>=<val>   :map <lhs> <rhs>
 :w [file]                               export transcript as Markdown
 :q   :q!                                quit (refuses while agents run) / quit anyway
-:tree                                   pi session tree (not yet)
+:tree                                   pi session tree: go back to any point and branch
 ```
 
 ## 4. Configuration — dotfile-first
@@ -190,7 +190,9 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
 - **M5 — polish.** ✅ Agents and their conversations survive a restart
   (`:attach` reopens a kept worktree), side-by-side `:diff split`, Esc typed
   quickly before a key is no longer lost.
-- **Not yet.** `:tree` (pi's session tree, branching from an earlier point).
+- **M6 — conversation tree.** ✅ `:tree` shows pi's session tree with every
+  branch; going back to a prompt reopens it for editing, and the next prompt
+  starts a new branch. Branches persist with the session.
 - **Later.** Server/remote mode (phone follows a session), pi extensions
   passthrough, partial-hunk accept, session templates.
 

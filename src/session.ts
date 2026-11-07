@@ -6,6 +6,7 @@
  * - DemoSession replays a scripted transcript so the UI can be explored
  *   without API keys.
  */
+import { flattenTree, type TreeGlyphs, type TreeRow } from "./tree.js";
 import { diffStat, type WorktreeInfo } from "./worktree.js";
 
 export type SessionState = "running" | "waiting" | "idle" | "paused" | "error";
@@ -152,6 +153,19 @@ export abstract class Session {
 		const anyFolded = tools.some((i) => i.tool!.folded);
 		for (const i of tools) i.tool!.folded = !anyFolded;
 		this.emit();
+	}
+
+	/** The conversation tree (`:tree`), or undefined if this agent doesn't keep one. */
+	tree(_glyphs?: TreeGlyphs): TreeRow[] | undefined {
+		return undefined;
+	}
+
+	/**
+	 * Go back to an earlier point. Picking a prompt rewinds to just before it and
+	 * returns its text to edit and resend; picking a reply continues from there.
+	 */
+	async navigate(_id: string): Promise<{ editorText?: string }> {
+		throw new Error("this agent doesn't keep a conversation tree");
 	}
 
 	abstract send(text: string): void;
@@ -371,10 +385,30 @@ export class PiSession extends Session {
 		}
 	}
 
+	tree(glyphs?: TreeGlyphs): TreeRow[] | undefined {
+		const sm = this.session?.sessionManager;
+		if (!sm) return undefined;
+		return flattenTree(sm.getTree(), sm.getLeafId(), glyphs);
+	}
+
+	async navigate(id: string): Promise<{ editorText?: string }> {
+		await this.ready;
+		if (this.state === "running") throw new Error(`'${this.name}' is running; wait for it or :pause it first`);
+		await this.session.agent?.waitForIdle?.();
+		const r = await this.session.navigateTree(id);
+		if (r.cancelled) throw new Error("cancelled");
+		// the transcript shows the branch the agent is on now
+		this.items = itemsFromMessages(this.session.messages ?? []).items;
+		this.emit();
+		return { editorText: r.editorText };
+	}
+
 	send(text: string): void {
 		this.pushUser(text);
 		this.setState("running");
 		this.ready
+			// pi reports agent_end a moment before it accepts the next prompt (queued prompts hit this)
+			.then(() => this.session.agent?.waitForIdle?.())
 			.then(() => this.session.prompt(text))
 			.catch((err: any) => {
 				this.pushInfo(`error: ${err?.message ?? err}`);

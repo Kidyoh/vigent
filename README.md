@@ -29,7 +29,7 @@ With a provider key set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
 | NORMAL | `V` / `v` | VISUAL: select lines with `j` `k`, `ib` for a code block, `y` to copy |
 | NORMAL | `yy` / `yib` | Copy the agent's last reply / the nearest code block |
 | NORMAL | `dd` | Kill the focused agent (asks first) |
-| NORMAL | `<Space>n` `d` `m` `p` `q` `t` `D` | `:new`, `:diff`, `:merge`, `:pr`, `:queue`, colorscheme, `:dash` |
+| NORMAL | `<Space>n` `d` `m` `p` `q` `t` `D` `u` | `:new`, `:diff`, `:merge`, `:pr`, `:queue`, colorscheme, `:dash`, `:tree` |
 | INSERT | `Enter` / `Esc` | Send the prompt / back to NORMAL |
 
 Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
@@ -69,13 +69,18 @@ Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `r
 :w [file]              " save the transcript as Markdown
 :diff split            " side by side; s switches layouts inside the diff window
 :attach <branch>       " reopen an agent in a kept worktree (see :worktrees)
+:tree                  " the conversation's branches: go back to any point and try again
 ```
+
+`:tree` (or `<Space>u`) shows the focused agent's whole conversation, including branches you left. Pick an earlier prompt to edit it and send it again as a new branch, or pick a reply to continue from there. Every branch is kept in pi's session file, so it's still there after a restart.
 
 Agents survive a restart: quit vigent, start it again in the same repo, and the agents you didn't `:kill` come back with their conversations. Their records live in git's own worktree metadata (`.git/worktrees/<name>/vigent/`), not in your files, and are deleted along with the worktree.
 
 `:merge` and `:pr` first commit anything the agent left uncommitted. `:merge` only touches your checkout when it's on the agent's base branch with no uncommitted changes, and a conflict is rolled back so nothing changes. After a merge, `:kill!` removes the worktree and the merged branch. `:q` won't quit while agents are running; `:q!` or `ZQ` does. Use `:new <task> --model <id>` to give one agent a different model.
 
 ![:diff split](docs/screenshots/diff-split.png)
+
+![:tree](docs/screenshots/tree.png)
 
 ![:merge](docs/screenshots/merge.png)
 

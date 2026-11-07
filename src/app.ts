@@ -35,6 +35,7 @@ import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
 import { copyToClipboard } from "./clipboard.js";
 import { splitView, unifiedView } from "./diffview.js";
+import { TREE_GLYPHS, type TreeRow } from "./tree.js";
 import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
@@ -85,6 +86,7 @@ interface Icons {
 	bullet: string;
 	queued: string;
 	open_agent: string;
+	here: string;
 }
 
 const ICONS: Record<UiOptions["icons"], Icons> = {
@@ -104,6 +106,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		bullet: "•",
 		queued: "⧗",
 		open_agent: "▸",
+		here: "●",
 	},
 	ascii: {
 		spinner: ["|", "/", "-", "\\"],
@@ -121,6 +124,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		bullet: "-",
 		queued: "+",
 		open_agent: ">",
+		here: "*",
 	},
 };
 
@@ -552,6 +556,8 @@ export class App implements Component {
 				return this.onQuit();
 			case "app.dashboard":
 				return this.openDashboard();
+			case "session.tree":
+				return this.openTree();
 			case "app.quit_hint":
 				this.setMessage("Type  :q  and press <Enter> to exit vigent", "Comment");
 				return;
@@ -647,6 +653,9 @@ export class App implements Component {
 			case "dash":
 			case "dashboard":
 				this.openDashboard();
+				return;
+			case "tree":
+				this.openTree();
 				return;
 			case "w":
 			case "w!":
@@ -831,6 +840,74 @@ export class App implements Component {
 			return;
 		}
 		this.setMessage(`"${this.shortPath(file)}" ${md.split("\n").length - 1}L, ${Buffer.byteLength(md)}B written`, "Normal");
+	}
+
+	/** `:tree`: the conversation with every branch; Enter goes back to a point. */
+	openTree() {
+		const s = this.focusedSession;
+		if (!s) {
+			this.setMessage("no agent (:new <task> starts one)", "ErrorMsg");
+			return;
+		}
+		const rows = s.tree(TREE_GLYPHS[this.ui.icons]);
+		if (!rows) {
+			this.setMessage(`'${s.name}' has no conversation tree (demo agents don't keep one)`, "Comment");
+			return;
+		}
+		if (rows.length === 0) {
+			this.setMessage(`nothing in '${s.name}' yet`, "Comment");
+			return;
+		}
+		const I = this.icons;
+		const kindGlyph: Record<TreeRow["kind"], [string, string]> = {
+			user: ["VigentUser", I.prompt],
+			agent: ["Normal", ""],
+			tool: ["VigentTool", `${I.folded} `],
+			summary: ["Special", "≈ "],
+			note: ["NonText", "… "],
+		};
+		// every ├─ is one more alternative next to the └─ that ends its fork
+		const branches = 1 + rows.filter((r) => r.guide.endsWith(TREE_GLYPHS[this.ui.icons].tee)).length;
+		const lines: FloatLine[] = rows.map((r) => {
+			const [g, glyph] = kindGlyph[r.kind];
+			const textGroup = r.current ? "Title" : r.onPath ? (r.kind === "tool" ? "VigentTool" : "NormalFloat") : "Comment";
+			return [
+				["NonText", r.guide],
+				[r.onPath ? g : "Comment", glyph],
+				[textGroup, r.text],
+				["String", r.current ? `  ${I.here} here` : ""],
+				["Special", r.label ? `  [${r.label}]` : ""],
+			];
+		});
+		const here = rows.findIndex((r) => r.current);
+		const prompts = rows.filter((r) => r.kind === "user").length;
+		const summary = `${prompts} prompt${prompts === 1 ? "" : "s"} · ${branches > 1 ? `${branches} branches` : "no branches yet"}`;
+		this.openFloat(`Tree · ${s.name} · ${summary} · Enter: go back to that point`, lines, Math.min(110, this.terminal.columns - 4), {
+			selectable: rows.map((_, i) => i),
+			initial: here >= 0 ? here : rows.length - 1,
+			onSelect: (i) => this.goToTreeNode(s, rows[i]),
+		});
+	}
+
+	private goToTreeNode(s: Session, row: TreeRow) {
+		if (row.current) return;
+		s.navigate(row.id)
+			.then(({ editorText }) => {
+				this.scrollOffset = 0;
+				this.invalidate();
+				if (editorText !== undefined) {
+					this.mode = "INSERT";
+					this.inputBuf = editorText;
+					this.setMessage("editing an earlier prompt · Enter sends it as a new branch (the old one stays in :tree)", "Comment");
+				} else {
+					this.setMessage("back at an earlier point · your next prompt starts a new branch (the old one stays in :tree)", "Comment");
+				}
+				this.tui.requestRender(true);
+			})
+			.catch((err) => {
+				this.setMessage((err as Error).message, "ErrorMsg");
+				this.tui.requestRender();
+			});
 	}
 
 	/** `:dash`: every agent at a glance; Enter jumps to one. */
@@ -1749,6 +1826,7 @@ const EX_HELP: [string, string][] = [
 	[":queue <prompt>", "send after the current run (:queue lists)"],
 	[":pause  /  :resume", "hold the agent and its queue / continue"],
 	[":dash", "all agents at a glance"],
+	[":tree", "the conversation's branches; go back and branch"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],
 	[":attach <branch>", "reopen an agent in a kept worktree"],
