@@ -7,7 +7,7 @@ import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
 import { type AgentMeta, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
 import { CliSession } from "./cli-engines.js";
-import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected } from "./engines.js";
+import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
@@ -280,7 +280,8 @@ async function main(): Promise<number | undefined> {
 	}
 	app.defaultEngine = () => chosenEngine ?? defaultEngine(app.engines);
 	app.detectEngines = () => detectEngines();
-	// installed? signed in? Checked in the background: the CLIs take a moment to answer
+	// installed? signed in? What's on PATH shows at once; the CLIs' sign-in checks take a moment
+	app.setEngines(quickEngines());
 	detectEngines()
 		.then((engines) => app.setEngines(engines))
 		.catch(() => {});

@@ -27,6 +27,8 @@ export interface EngineInfo {
 	connect?: string;
 	/** how to install it */
 	install?: string;
+	/** sign-in status not known yet (shown while the real check runs) */
+	checking?: boolean;
 }
 
 export const ENGINE_NAMES: Record<EngineId, string> = {
@@ -188,6 +190,28 @@ async function detectOpenCode(env: NodeJS.ProcessEnv, timeoutMs: number): Promis
 		return { ...base, installed: true, connected: true, version, detail: parts.join(", "), connect: undefined };
 	}
 	return { ...base, installed: true, connected: false, version, detail: "no providers connected" };
+}
+
+/**
+ * What's known instantly, without running anything: which CLIs are on PATH,
+ * and pi's keys. Shown at startup while detectEngines() asks the CLIs.
+ */
+export function quickEngines(env: NodeJS.ProcessEnv = process.env): EngineInfo[] {
+	return [
+		detectPi(env),
+		...(["claude", "codex", "opencode"] as const).map((id): EngineInfo => {
+			const installed = onPath(ENGINE_BINS[id], env);
+			return {
+				id,
+				name: ENGINE_NAMES[id],
+				installed,
+				connected: false,
+				checking: installed,
+				detail: installed ? "checking sign-in…" : "not installed",
+				install: INSTALL[id],
+			};
+		}),
+	];
 }
 
 /** Check every engine in parallel. Each CLI check is bounded by `timeoutMs`. */

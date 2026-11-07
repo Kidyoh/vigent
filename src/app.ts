@@ -596,7 +596,12 @@ export class App implements Component {
 			const text = this.inputBuf.trim();
 			this.inputBuf = "";
 			this.mode = "NORMAL";
-			const s = this.focusedSession;
+			let s = this.focusedSession;
+			if (text && !s) {
+				// no agent yet: the first prompt starts one, named after the task
+				s = this.startAgent(agentNameFrom(text));
+				if (!s) return;
+			}
 			if (text && s) {
 				const waiting = s.submit(text);
 				if (waiting > 0) this.setMessage(`queued: '${s.name}' gets it after the current run (${waiting} waiting)`, "Comment");
@@ -700,41 +705,7 @@ export class App implements Component {
 						.replace(/(?:^|\s)--model[= ]\S+/, "")
 						.replace(/(?:^|\s)(?:--engine|-e)[= ]\S+/, "")
 						.trim() || `agent-${this.sessions.length + 1}`;
-				const engine = engineFlag?.[1] ?? this.defaultEngine();
-				if (!isEngineId(engine)) {
-					this.setMessage(`unknown engine '${engine}': pi, claude, codex or opencode`, "ErrorMsg");
-					return;
-				}
-				const info = this.engines?.find((e) => e.id === engine);
-				if (info && !info.installed) {
-					this.setMessage(`${info.name} isn't installed: ${info.install} · :checkhealth`, "ErrorMsg");
-					return;
-				}
-				try {
-					const s = this.newSession(name, {
-						worktree: cmd === "new" && this.workspace.config.enabled,
-						model: modelFlag?.[1],
-						engine,
-					});
-					this.addSession(s);
-					const wt = s.worktree;
-					if (wt?.riftri) this.refreshStorage();
-					const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
-					if (wt?.path) {
-						const how = wt.riftri ? ` · riftri ${wt.riftri}` : wt.riftriSkipped ? " · full copy (riftri declined: :checkhealth)" : "";
-						this.setMessage(
-							`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}${how}`,
-							wt.riftriSkipped ? "WarningMsg" : "ModeMsg",
-						);
-					} else if (wt) {
-						this.setMessage(`'${name}'${by} on ${wt.branch}`, "ModeMsg");
-					} else {
-						const why = cmd === "new!" || !this.workspace.config.enabled ? "" : " (not a git repo, so no worktree)";
-						this.setMessage(`'${name}'${by} in this checkout${why}`, "ModeMsg");
-					}
-				} catch (err: any) {
-					this.setMessage(String(err?.message ?? err), "ErrorMsg");
-				}
+				this.startAgent(name, { worktree: cmd === "new", model: modelFlag?.[1], engine: engineFlag?.[1] });
 				return;
 			}
 			case "kill":
@@ -969,6 +940,47 @@ export class App implements Component {
 	setEngines(engines: EngineInfo[]) {
 		this.engines = engines;
 		this.tui.requestRender();
+	}
+
+	/**
+	 * Start an agent (`:new`, or the first prompt typed with no agent yet).
+	 * Returns it, or undefined after showing why it couldn't start.
+	 */
+	startAgent(name: string, opts: { worktree?: boolean; model?: string; engine?: string } = {}): Session | undefined {
+		const engine = opts.engine ?? this.defaultEngine();
+		if (!isEngineId(engine)) {
+			this.setMessage(`unknown engine '${engine}': pi, claude, codex or opencode`, "ErrorMsg");
+			return undefined;
+		}
+		const info = this.engines?.find((e) => e.id === engine);
+		if (info && !info.installed) {
+			this.setMessage(`${info.name} isn't installed: ${info.install} · :checkhealth`, "ErrorMsg");
+			return undefined;
+		}
+		const withWorktree = opts.worktree !== false && this.workspace.config.enabled;
+		try {
+			const s = this.newSession(name, { worktree: withWorktree, model: opts.model, engine });
+			this.addSession(s);
+			const wt = s.worktree;
+			if (wt?.riftri) this.refreshStorage();
+			const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
+			if (wt?.path) {
+				const how = wt.riftri ? ` · riftri ${wt.riftri}` : wt.riftriSkipped ? " · full copy (riftri declined: :checkhealth)" : "";
+				this.setMessage(
+					`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}${how}`,
+					wt.riftriSkipped ? "WarningMsg" : "ModeMsg",
+				);
+			} else if (wt) {
+				this.setMessage(`'${name}'${by} on ${wt.branch}`, "ModeMsg");
+			} else {
+				const why = !withWorktree || !this.workspace.config.enabled ? "" : " (not a git repo, so no worktree)";
+				this.setMessage(`'${name}'${by} in this checkout${why}`, "ModeMsg");
+			}
+			return s;
+		} catch (err: any) {
+			this.setMessage(String(err?.message ?? err), "ErrorMsg");
+			return undefined;
+		}
 	}
 
 	/**
@@ -1678,9 +1690,12 @@ export class App implements Component {
 		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
 		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}` : "";
 		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? " · riftri" : ""}` : s ? "this checkout" : "";
-		const right = where ? `${where} ` : "";
-		const room = Math.max(0, w - visibleWidth(left) - visibleWidth(model) - visibleWidth(right));
 		const status = s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "";
+		// the path gives way first (from its start: the end names the worktree), always two spaces before it
+		const pathRoom = w - visibleWidth(left) - visibleWidth(model) - visibleWidth(status) - 3;
+		const shownWhere = !where ? "" : visibleWidth(where) <= pathRoom ? where : pathRoom > 4 ? `…${where.slice(where.length - pathRoom + 1)}` : "";
+		const right = shownWhere ? `${shownWhere} ` : "";
+		const room = Math.max(0, w - visibleWidth(left) - visibleWidth(model) - visibleWidth(right));
 		return (
 			P.on("WinBar", bg) +
 			left +
@@ -1709,7 +1724,8 @@ export class App implements Component {
 		for (const l of ["vim-native coding-agent orchestrator", "built on pi · every agent in its own git worktree"]) add(P.p("Comment", l), l);
 		add("", "");
 		const tips: [string, string][] = [
-			[":new fix flaky test<Enter>", "start an agent"],
+			["i", "type a task, Enter: an agent starts on it"],
+			[":new fix flaky test<Enter>", "start an agent by name"],
 			[":colorscheme<Enter>", "pick a theme"],
 			[":help<Enter>", "every key, yours included"],
 			[":q<Enter>", "to exit"],
@@ -1846,7 +1862,17 @@ export class App implements Component {
 			for (const e of engines) {
 				const glyph = e.connected ? I.ok : e.installed ? I.warn : I.off;
 				const group = e.connected ? "String" : e.installed ? "WarningMsg" : "Comment";
-				const note = e.connected ? (e.id === def ? "default" : "") : e.id === "pi" ? "no API key" : e.installed ? (e.connect ?? "not signed in") : "not installed";
+				const note = e.checking
+					? "checking…"
+					: e.connected
+						? e.id === def
+							? "default"
+							: ""
+						: e.id === "pi"
+							? "no API key"
+							: e.installed
+								? (e.connect ?? "not signed in")
+								: "not installed";
 				const left = `  ${glyph} ${e.name}`;
 				const room = w - visibleWidth(left) - 1;
 				const tail = note ? truncateToWidth(note, Math.max(0, room - 1), "…") : "";
@@ -1996,7 +2022,10 @@ export class App implements Component {
 					`  ${this.icons.prompt}` +
 					this.inputBuf +
 					P.p("Comment", formatKeys(this.seq.pendingKeys).replace(/<Space>/g, " ")) +
-					P.p("PmenuSel", " ");
+					P.p("PmenuSel", " ") +
+					(this.sessions.length === 0 && !this.inputBuf
+						? P.p("Comment", `  type what you want done; Enter starts an agent on ${ENGINE_NAMES[this.defaultEngine()]}`)
+						: "");
 				break;
 			default: {
 				if (this.message) content = P.p(this.messageGroup, this.message);
@@ -2117,4 +2146,17 @@ function describeAttr(a: Attr): string {
 function formatTokens(n: number): string {
 	if (n >= 1000) return `${(n / 1000).toFixed(1)}k tok`;
 	return `${n} tok`;
+}
+
+/** A short agent name from a prompt: its first words, without punctuation ("Fix the flaky checkout test, please" -> "fix the flaky checkout test"). */
+export function agentNameFrom(prompt: string): string {
+	const words = prompt
+		.toLowerCase()
+		.replace(/[`'"“”‘’]/g, "")
+		.replace(/[^\p{L}\p{N}/]+/gu, " ")
+		.trim()
+		.split(/\s+/)
+		.filter((w) => !["please", "pls", "can", "you", "could", "would", "the", "a", "an"].includes(w));
+	const name = words.slice(0, 5).join(" ");
+	return name || "agent";
 }

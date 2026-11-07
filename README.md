@@ -21,6 +21,10 @@ vigent --demo             # scripted agents, nothing needed
 vigent --help
 ```
 
+### First agent
+
+Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using pi if it has an API key, or else the first signed-in CLI (Claude Code, Codex, OpenCode; `:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.
+
 ## From source
 
 ```bash
@@ -39,7 +43,7 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 
 | Mode | Key | Action |
 |---|---|---|
-| NORMAL | `i` / `a` / `o` | Enter INSERT and type a prompt for the focused agent (it waits in a queue if the agent is busy) |
+| NORMAL | `i` / `a` / `o` | Enter INSERT and type a prompt for the focused agent (it waits in a queue if the agent is busy). With no agent yet, the prompt starts one |
 | NORMAL | `j` `k` `gg` `G` `Ctrl-d` `Ctrl-u` `{` `}` | Scroll the transcript, or jump between messages |
 | NORMAL | `]s` `[s` `1`–`9` `Ctrl-^` | Switch agents |
 | NORMAL | `za` `zR` `zM` | Toggle, open or close tool-output folds |
