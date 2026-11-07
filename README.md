@@ -12,7 +12,7 @@ A vim-style, lightweight terminal app for running several coding agents at once,
 npm install -g @vigent/cli
 ```
 
-The package is `@vigent/cli` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`.
+The package is `@vigent/cli` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`. Run `vigent` in a project, or `vigent <folder>` (`vigent .`, `vigent ~/code/app`) from anywhere.
 
 Requires Node.js 20 or newer and git. Then, inside any git repository:
 

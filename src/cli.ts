@@ -31,7 +31,7 @@ const HELP = `vigent — vim-native agent orchestrator (pi engine)
 
 usage:
   vigent --version                           which vigent this is (and the commit, from a clone)
-  vigent [--demo] [--theme <name>] [--model <id>] [--engine pi|claude|codex|opencode]
+  vigent [folder] [--demo] [--theme <name>] [--model <id>] [--engine pi|claude|codex|opencode]
 
 engines (what runs new agents; :checkhealth shows which are signed in):
   pi        built in, uses ANTHROPIC_API_KEY / OPENAI_API_KEY / ... or pi's login
@@ -240,6 +240,18 @@ async function main(): Promise<number | undefined> {
 		fs.writeFileSync(file, CONFIG_TEMPLATE);
 		console.log(`created ${file}`);
 		return 0;
+	}
+
+	// `vigent <folder>` (like `code .` or `nvim .`) opens that folder; with none, the current one.
+	const VALUE_FLAGS = ["--theme", "--model", "--engine"];
+	const folder = argv.find((a, i) => !a.startsWith("-") && !VALUE_FLAGS.includes(argv[i - 1]));
+	if (folder !== undefined) {
+		const dir = path.resolve(folder);
+		if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+			console.error(`vigent: '${folder}' is not a folder (usage: vigent [folder])`);
+			return 1;
+		}
+		process.chdir(dir);
 	}
 
 	const { config, warnings } = loadConfig();

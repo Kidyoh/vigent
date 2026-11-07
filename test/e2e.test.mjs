@@ -156,6 +156,23 @@ test("first run: i, a task, Enter starts an agent on Claude Code in its own work
 	} finally {
 		again.kill();
 	}
+
+	// `vigent <folder>` from somewhere else opens that project, like `vigent .` inside it
+	const fromOutside = new Tty([repo], { cwd: tmp, env });
+	try {
+		await fromOutside.waitFor(/reopened 1 agent from last time/);
+		await fromOutside.waitFor(/write hello file/);
+		await fromOutside.ex("q");
+		assert.equal(await fromOutside.exited, 0);
+	} finally {
+		fromOutside.kill();
+	}
+});
+
+test("vigent <folder> that isn't a folder says so", () => {
+	const r = spawnSync(process.execPath, [CLI, path.join(os.tmpdir(), "no-such-vigent-folder")], { env, encoding: "utf8" });
+	assert.equal(r.status, 1);
+	assert.match(r.stderr, /is not a folder \(usage: vigent \[folder\]\)/);
 });
 
 test("no agent CLI and no API key: the demo starts, and says so", { skip, timeout: 60000 }, async () => {
