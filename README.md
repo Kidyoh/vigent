@@ -2,9 +2,9 @@
 
 A vim-style, lightweight terminal app for running several coding agents at once, built on the [pi](https://github.com/badlogic/pi-mono) engine. It can also drive the Claude Code, Codex and OpenCode CLIs you already have installed, with their own logins.
 
-![vigent with the default Neovim theme](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/vigent-default-theme.png)
+![vigent with the default Neovim theme](docs/screenshots/vigent-default-theme.png)
 
-![vigent with the gruvbox theme, second session focused](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/vigent-gruvbox.png)
+![vigent with the gruvbox theme, second session focused](docs/screenshots/vigent-gruvbox.png)
 
 ## Install
 
@@ -29,9 +29,9 @@ vigent --help
 
 Like LazyVim, vigent opens on a dashboard. Press `i` and type a task, `n` to name a new agent, `t` for themes, `s` for settings, `m` / `e` for model and effort, `c` to check engines, `?` for every key, or `q` to quit. Press `Space` (the leader) and pause, and a which-key panel lists every key that can follow and what it does. `Esc` closes it, and `:set nowhichkey` turns it off.
 
-![the dashboard, with the lazyvim theme over a translucent terminal](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/dashboard-lazyvim.png)
+![the dashboard, with the lazyvim theme over a translucent terminal](docs/screenshots/dashboard-lazyvim.png)
 
-![which-key after Space](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/which-key.png)
+![which-key after Space](docs/screenshots/which-key.png)
 
 ### First agent
 
@@ -68,9 +68,9 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 
 Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
 
-![Neovim-style intro screen](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/intro.png)
+![Neovim-style intro screen](docs/screenshots/intro.png)
 
-![VISUAL mode on a markdown reply](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/visual-mode.png)
+![VISUAL mode on a markdown reply](docs/screenshots/visual-mode.png)
 
 ## Engines: pi, Claude Code, Codex, OpenCode
 
@@ -84,9 +84,9 @@ pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may alre
 
 The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks pi if it has an API key, otherwise the first signed-in CLI. **`:engine`** (`<Space>E`, or `E` on the dashboard) switches it while vigent runs: a menu lists auto, pi, Claude Code, Codex and OpenCode with which are ready, and `:engine claude` sets it directly. Agents already open keep their engine, since their conversation lives there; `:new <task>` starts one on the new engine. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
 
-![:checkhealth with Claude Code signed in and Codex waiting for codex login](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/checkhealth.png)
+![:checkhealth with Claude Code signed in and Codex waiting for codex login](docs/screenshots/checkhealth.png)
 
-![a Claude Code agent reopened after a restart, continuing its conversation](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/claude-code-agent.png)
+![a Claude Code agent reopened after a restart, continuing its conversation](docs/screenshots/claude-code-agent.png)
 
 | Engine | vigent runs | Default extra arguments |
 |---|---|---|
@@ -96,7 +96,7 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 
 **Model and effort:** `:model` (`<Space>M`) opens a picker with the models the agent's engine offers (Claude Code's model names, Codex's own catalog from `codex debug models`, OpenCode's `opencode models`, or pi's for the providers you have a key for). In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>e`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
 
-![:model on a Claude Code agent](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/model-picker.png)
+![:model on a Claude Code agent](docs/screenshots/model-picker.png)
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
@@ -124,11 +124,11 @@ A worktree is normally a full copy of your checkout, so ten agents on a big repo
 - On restart, vigent inspects riftri's worktrees before reopening their agents. If an OverlayFS view lost its mount (after a reboot), vigent repairs it first.
 - vigent falls back to git only when riftri declines with a receipt saying nothing was changed (unsupported volume, checkout or environment). Any other riftri failure is shown, never papered over. `[worktree] backend = "riftri"` requires riftri, and `"git"` turns it off.
 
-![:worktrees with every agent on riftri](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/riftri-worktrees.png)
+![:worktrees with every agent on riftri](docs/screenshots/riftri-worktrees.png)
 
-![agents in their own worktrees](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/worktrees-sidebar.png)
+![agents in their own worktrees](docs/screenshots/worktrees-sidebar.png)
 
-![:diff](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/worktrees-diff.png)
+![:diff](docs/screenshots/worktrees-diff.png)
 
 ## Reviewing and landing work
 
@@ -152,13 +152,13 @@ Agents survive a restart: quit vigent, start it again in the same repo, and the 
 
 `:merge` and `:pr` first commit anything the agent left uncommitted. `:merge` only touches your checkout when it's on the agent's base branch with no uncommitted changes, and a conflict is rolled back so nothing changes. After a merge, `:kill!` removes the worktree and the merged branch. `:q` won't quit while agents are running; `:q!` or `ZQ` does. Use `:new <task> --model <id>` to give one agent a different model.
 
-![:diff split](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/diff-split.png)
+![:diff split](docs/screenshots/diff-split.png)
 
-![:tree](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/tree.png)
+![:tree](docs/screenshots/tree.png)
 
-![:merge](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/merge.png)
+![:merge](docs/screenshots/merge.png)
 
-![:dash](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/dashboard.png)
+![:dash](docs/screenshots/dashboard.png)
 
 ## Configuration
 
@@ -189,7 +189,7 @@ Normal = { bg = "NONE" }
 
 You can also change keys while vigent runs, with `:nmap`, `:imap`, `:cmap`, `:unmap` and `:let mapleader`. **[docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md)** has every option, action and built-in key.
 
-![:help lists every key, yours first](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/keys-help.png)
+![:help lists every key, yours first](docs/screenshots/keys-help.png)
 
 ## Themes
 
@@ -225,19 +225,19 @@ CursorLine = "guibg=#2a2f3a"
 
 25 built in, including `lazyvim` (LazyVim's look, transparent), the tokyonight, catppuccin and rose-pine families, `dracula`, `onedark`, `everforest`, `nightfox`, `gruvbox`, `kanagawa`, `nord`, `monokai-pro`, `ayu-mirage`, and GitHub and solarized in dark and light. The picker shows each one's colors:
 
-![the colorscheme picker: every theme with its colors, dark / light / transparent](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/colorscheme-swatches.png)
+![the colorscheme picker: every theme with its colors, dark / light / transparent](docs/screenshots/colorscheme-swatches.png)
 
 **`:settings`** (`<Space>s`) changes the theme, transparency, layout, engine, worktrees and any key in one place. Press `w` and it's saved to config.toml:
 
-![:settings](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/settings.png)
+![:settings](docs/screenshots/settings.png)
 
-![the lazyvim theme over a translucent terminal: sidebar, transcript and floats show the background through](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/lazyvim-transparent.png)
+![the lazyvim theme over a translucent terminal: sidebar, transcript and floats show the background through](docs/screenshots/lazyvim-transparent.png)
 
-![colorscheme picker with live preview](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/colorscheme-picker.png)
+![colorscheme picker with live preview](docs/screenshots/colorscheme-picker.png)
 
-![habamax imported from Neovim](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/imported-habamax.png)
+![habamax imported from Neovim](docs/screenshots/imported-habamax.png)
 
-![nord with :hi and :set changes applied live](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/live-customization.png)
+![nord with :hi and :set changes applied live](docs/screenshots/live-customization.png)
 
 The full guide covers importing, theme files, palettes, every option and every highlight group: **[docs/themes.md](https://github.com/farming-labs/vigent/blob/main/docs/themes.md)**.
 

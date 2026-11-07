@@ -50,7 +50,7 @@ A transparent theme leaves the background to your terminal, so a translucent or 
 
 To keep it, set `transparent = true` under `[ui]` in config.toml (every theme), or in a theme file (that theme). A theme that `extends` a transparent one is transparent too, unless it says `transparent = false`.
 
-![lazyvim with a float open, over a translucent terminal](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/lazyvim-transparent.png)
+![lazyvim with a float open, over a translucent terminal](screenshots/lazyvim-transparent.png)
 
 ## Importing vim and Neovim colorschemes
 
