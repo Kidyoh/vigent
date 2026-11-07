@@ -9,7 +9,8 @@ vigent uses **Neovim's highlight group names** (`Normal`, `StatusLine`, `CursorL
 | Use my Neovim/Vim theme | `vigent theme import` (reads whatever your editor config uses) |
 | Use a specific vim/nvim colorscheme | `vigent theme import tokyonight` |
 | Use a `.vim` colorscheme file | `vigent theme import ./molokai.vim` (no editor needed) |
-| Pick a theme interactively | `:colorscheme` inside vigent (live preview) |
+| Pick a theme interactively | `:colorscheme` or `<Space>t` (live preview, with each theme's colors) |
+| Change theme, options and keys in one place | `:settings` or `<Space>s`, then `w` to save them |
 | Set my default theme | `theme = "…"` in `~/.config/vigent/config.toml` |
 | Tweak a few colors | `[highlights]` in config.toml, or `:hi Group guifg=… guibg=…` |
 | Make my own theme | `vigent theme new mytheme --from tokyonight` (pre-filled with its colors) |
@@ -20,7 +21,19 @@ Files live in `~/.config/vigent/` (or `$XDG_CONFIG_HOME/vigent/`). `vigent theme
 
 ## Built-in themes
 
-`default` (Neovim's default dark theme), `lazyvim`, `tokyonight`, `tokyonight-moon`, `gruvbox`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
+25 of them, dark and light:
+
+| | |
+|---|---|
+| Neovim | `default` (Neovim's own), `lazyvim` (LazyVim's look, transparent) |
+| tokyonight | `tokyonight`, `tokyonight-storm`, `tokyonight-moon` |
+| catppuccin | `catppuccin` (mocha), `catppuccin-macchiato`, `catppuccin-frappe`, `catppuccin-latte` (light) |
+| rose-pine | `rose-pine`, `rose-pine-moon`, `rose-pine-dawn` (light) |
+| GitHub | `github-dark`, `github-light` (light) |
+| solarized | `solarized-dark`, `solarized-light` (light) |
+| more | `gruvbox`, `kanagawa`, `nord`, `dracula`, `onedark`, `everforest`, `nightfox`, `monokai-pro`, `ayu-mirage` |
+
+`:colorscheme` (or `<Space>t`) opens a picker that shows each theme's colors and whether it's dark, light or transparent, and previews the one under the cursor live. Type to filter, Enter keeps it, Esc goes back.
 
 `lazyvim` is the look LazyVim starts with: tokyonight's "moon" palette with its highlight choices (orange current line number, blue rounded float borders, cyan italic keywords, blue / green / magenta / yellow mode badges), drawn on the terminal's own background. `tokyonight-moon` is the same theme with solid backgrounds.
 

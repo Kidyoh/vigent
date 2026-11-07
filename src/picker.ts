@@ -5,7 +5,14 @@
  * the theme live), Enter to keep it, Esc to go back to the previous theme.
  */
 import { type Component, fuzzyFilter, parseKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { type Painter, RESET } from "./theme.js";
+import { type Painter, RESET, sgr } from "./theme.js";
+
+/** What the picker shows next to a theme's name: its colors, and dark / light / transparent. */
+export interface ThemeLook {
+	/** background first, then the accents */
+	colors: string[];
+	tags: string[];
+}
 
 export interface PickerIcons {
 	tl: string;
@@ -25,7 +32,7 @@ export const PICKER_ICONS: Record<"unicode" | "ascii", PickerIcons> = {
 	ascii: { tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|", lt: "+", rt: "+", current: "*", prompt: ">" },
 };
 
-const VISIBLE = 10;
+const VISIBLE = 14;
 
 export class ThemePicker implements Component {
 	private query = "";
@@ -40,6 +47,7 @@ export class ThemePicker implements Component {
 		private onPreview: (name: string) => void,
 		private onDone: (name: string | null) => void,
 		private requestRender: () => void,
+		private look: (name: string) => ThemeLook | undefined = () => undefined,
 	) {
 		this.index = Math.max(0, themes.indexOf(current));
 		this.scroll = Math.max(0, this.index - VISIBLE + 1);
@@ -107,6 +115,12 @@ export class ThemePicker implements Component {
 		if (first) this.onPreview(first);
 	}
 
+	private lookCache = new Map<string, ThemeLook | undefined>();
+	private looks(name: string): ThemeLook | undefined {
+		if (!this.lookCache.has(name)) this.lookCache.set(name, this.look(name));
+		return this.lookCache.get(name);
+	}
+
 	invalidate(): void {}
 
 	render(width: number): string[] {
@@ -154,9 +168,25 @@ export class ThemePicker implements Component {
 			const selected = this.scroll + i === this.index;
 			const rowBg = selected ? (P.attr("PmenuSel").bg ?? P.attr("Visual").bg) : bg;
 			const marker = name === this.current ? `${I.current} ` : "  ";
-			const text = truncateToWidth(`${marker}${name}`, inner - 2, "…");
 			const group = selected ? "PmenuSel" : "NormalFloat";
-			lines.push(row(P.on(group, rowBg) + ` ${text} ` + RESET, visibleWidth(text) + 2, rowBg));
+			const look = this.looks(name);
+			// name, then a strip of the theme's own colors, then its tags
+			const swatchW = look ? look.colors.length * 2 + 1 : 0;
+			const tags = look?.tags.join(" ") ?? "";
+			const nameW = Math.max(8, Math.min(24, inner - 2 - swatchW - (tags ? tags.length + 1 : 0)));
+			const text = truncateToWidth(`${marker}${name}`, nameW, "…");
+			let content = P.on(group, rowBg) + ` ${text}${" ".repeat(Math.max(0, nameW - visibleWidth(text)))} `;
+			let used = nameW + 2;
+			if (look && inner - used >= swatchW) {
+				for (const c of look.colors) content += sgr({ bg: c }, P.colorMode) + "  ";
+				content += RESET + P.on(group, rowBg) + " ";
+				used += swatchW;
+				if (tags && inner - used >= tags.length) {
+					content += P.on("Comment", rowBg) + tags;
+					used += tags.length;
+				}
+			}
+			lines.push(row(content + RESET, used, rowBg));
 		}
 		if (items.length === 0) lines[3] = row(P.on("Comment", bg) + "  no match" + RESET, 10);
 

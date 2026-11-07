@@ -14,7 +14,9 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
-import { applySetCommand, DEFAULT_UI, type UiOptions } from "./config.js";
+import { applySetCommand, CONFIG_TEMPLATE, configPath, DEFAULT_UI, type UiOptions } from "./config.js";
+import { setTomlValue, tomlValue } from "./config-edit.js";
+import { type SettingItem, SettingsFloat } from "./settings.js";
 import { type FloatLine, type FloatOptions, TextFloat } from "./float.js";
 import {
 	ACTIONS,
@@ -44,7 +46,7 @@ import { renderMarkdown } from "./markdown.js";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { Session, SessionState } from "./session.js";
-import { type Attr, BUILTIN_THEMES, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
+import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
 import {
 	DEFAULT_WORKTREE,
@@ -194,6 +196,10 @@ export class App implements Component {
 	checkStorage?: () => Promise<RiftriHealth>;
 	/** scripted agents, no model behind them (shown in the statusline) */
 	demo = false;
+	/** `engine` from config.toml or :settings; "auto" lets defaultEngine() pick */
+	preferredEngine: EngineId | "auto" = "auto";
+	/** key changes made in :settings, saved with w: lhs -> rhs (false unbinds) */
+	private keyChanges = new Map<string, string | false>();
 	/** the engine :new uses without --engine */
 	defaultEngine: () => EngineId = () => "pi";
 
@@ -693,6 +699,11 @@ export class App implements Component {
 			case "engines":
 				this.openHealth();
 				return;
+			case "settings":
+			case "options":
+			case "prefs":
+				this.openSettings();
+				return;
 			case "w":
 			case "w!":
 			case "write":
@@ -943,6 +954,160 @@ export class App implements Component {
 	setEngines(engines: EngineInfo[]) {
 		this.engines = engines;
 		this.tui.requestRender();
+	}
+
+	/** `:settings`: theme, look, agents and keys in one float; w saves them to config.toml. */
+	openSettings() {
+		this.seq.reset();
+		const ui = this.ui;
+		const wt = this.workspace.config;
+		const onOff = (b: boolean) => (b ? "on" : "off");
+		const cycle = <T,>(values: T[], now: T, dir: 1 | -1) => values[(values.indexOf(now) + dir + values.length) % values.length];
+		const refresh = () => {
+			this.applyColorMode();
+			this.repaint();
+		};
+		const items: SettingItem[] = [
+			{
+				section: "Look",
+				label: "Theme",
+				value: () => this.painter.theme.name,
+				open: () => {
+					handle?.hide();
+					this.openThemePicker();
+				},
+				hint: `${listThemes().length} themes, with a live preview · :theme save <name> keeps your own`,
+			},
+			{
+				section: "Look",
+				label: "Transparent background",
+				value: () => (ui.transparent === "auto" ? `auto (${this.painter.transparent ? "on" : "off"}: the theme decides)` : onOff(ui.transparent)),
+				change: (d) => {
+					ui.transparent = cycle<boolean | "auto">(["auto", true, false], ui.transparent, d);
+					refresh();
+				},
+				hint: "the terminal's own background shows through (its blur, opacity or wallpaper)",
+			},
+			{ section: "Look", label: "Icons", value: () => ui.icons, change: () => ((ui.icons = ui.icons === "unicode" ? "ascii" : "unicode"), refresh()), hint: "ascii for fonts without box-drawing characters" },
+			{ section: "Look", label: "24-bit color", value: () => onOff(ui.termguicolors), change: () => ((ui.termguicolors = !ui.termguicolors), refresh()), hint: "off: the nearest of the 256 standard colors (vim's 'termguicolors')" },
+			{ section: "Layout", label: "Sidebar", value: () => onOff(ui.sidebar), change: () => ((ui.sidebar = !ui.sidebar), refresh()) },
+			{
+				section: "Layout",
+				label: "Sidebar width",
+				value: () => `${ui.sidebar_width} columns`,
+				change: (d) => ((ui.sidebar_width = Math.max(16, Math.min(80, ui.sidebar_width + 2 * d))), refresh()),
+				hint: "h / l: 2 columns narrower / wider",
+			},
+			{ section: "Layout", label: "Session numbers", value: () => onOff(ui.number), change: () => ((ui.number = !ui.number), refresh()) },
+			{ section: "Layout", label: "~ on empty sidebar rows", value: () => onOff(ui.tilde), change: () => ((ui.tilde = !ui.tilde), refresh()) },
+			{
+				section: "Agents",
+				label: "Engine for new agents",
+				value: () => (this.preferredEngine === "auto" ? `auto (${ENGINE_NAMES[this.defaultEngine()]})` : ENGINE_NAMES[this.preferredEngine]),
+				change: (d) => {
+					this.preferredEngine = cycle<EngineId | "auto">(["auto", "pi", "claude", "codex", "opencode"], this.preferredEngine, d);
+				},
+				hint: "auto: pi with an API key, else the first signed-in CLI · :checkhealth shows which are ready",
+			},
+			{ section: "Agents", label: "A worktree for each agent", value: () => onOff(wt.enabled), change: () => (wt.enabled = !wt.enabled), hint: "off: agents work in this checkout" },
+			{
+				section: "Agents",
+				label: "Worktree storage",
+				value: () => ({ auto: "auto (riftri when it can)", riftri: "riftri", git: "git" })[wt.backend ?? "auto"],
+				change: (d) => (wt.backend = cycle(["auto", "riftri", "git"] as const, wt.backend ?? "auto", d) as typeof wt.backend),
+				hint: "riftri: copy-on-write worktrees that share unchanged files (riftri.dev)",
+			},
+			{
+				section: "Keys",
+				label: "Leader key",
+				value: () => formatKeys(parseKeys(this.keymap.leader)),
+				bind: (keys) => {
+					if (keys.length !== 1) return "the leader is one key";
+					this.keymap.leader = keys[0];
+					return `leader is now ${keys[0]} (mappings written with <leader> use it from the next start)`;
+				},
+				hint: "Enter, then press the key <leader> should mean",
+			},
+		];
+		// every NORMAL-mode mapping, one row per thing it does
+		const groups = new Map<string, Binding[]>();
+		for (const b of this.keymap.bindings("normal")) {
+			if (b.rhs.length === 1 && b.rhs[0].kind === "nop") continue;
+			// 1-9 jump to an agent: not worth a row each
+			if (b.rhs.length === 1 && b.rhs[0].kind === "action" && b.rhs[0].name === "session.goto") continue;
+			groups.set(b.rhsText, [...(groups.get(b.rhsText) ?? []), b]);
+		}
+		for (const [rhsText, bindings] of groups) {
+			const label = settingsLabel(bindings[0].rhs);
+			items.push({
+				section: "Keys (NORMAL mode)",
+				label: label.charAt(0).toUpperCase() + label.slice(1),
+				value: () =>
+					this.keymap
+						.bindings("normal")
+						.filter((b) => b.rhsText === rhsText)
+						.map((b) => formatKeys(b.keys))
+						.join("  ") || "(none)",
+				bind: (keys) => {
+					const lhs = keys.join("");
+					try {
+						parseKeys(lhs);
+					} catch {
+						return `'${lhs}' isn't a key`;
+					}
+					const taken = this.keymap.lookup("normal", parseKeys(lhs)).exact;
+					for (const b of this.keymap.bindings("normal").filter((x) => x.rhsText === rhsText)) {
+						const old = b.keys.join("");
+						this.keymap.unset("normal", old);
+						this.keyChanges.set(old, false);
+					}
+					this.keymap.set("normal", lhs, rhsText);
+					this.keyChanges.set(lhs, rhsText);
+					return `${formatKeys(parseKeys(lhs))} now: ${label}${taken && taken.rhsText !== rhsText ? ` (was: ${describeRhs(taken.rhs)})` : ""} · w saves it`;
+				},
+				hint: "Enter, then the new keys (they replace these)",
+			});
+		}
+
+		let handle: { hide(): void } | undefined;
+		const float = new SettingsFloat(
+			this.painter,
+			PICKER_ICONS[ui.icons],
+			items,
+			() => this.terminal.rows - 2,
+			() => {
+				handle?.hide();
+				this.repaint();
+			},
+			() => this.saveSettings(),
+			() => this.tui.requestRender(),
+		);
+		handle = this.tui.showOverlay(float, { width: Math.min(96, this.terminal.columns - 4), anchor: "center" });
+		this.tui.requestRender();
+	}
+
+	/** Write what :settings changed into config.toml, keeping everything else in the file as it is. */
+	saveSettings(): string {
+		const file = configPath();
+		try {
+			let text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : CONFIG_TEMPLATE;
+			const ui = this.ui;
+			const set = (section: string | undefined, key: string, value: string | number | boolean) => {
+				text = setTomlValue(text, section, key, tomlValue(value));
+			};
+			set(undefined, "theme", this.painter.theme.name);
+			set(undefined, "engine", this.preferredEngine);
+			set(undefined, "leader", this.keymap.leader);
+			for (const k of ["sidebar", "sidebar_width", "number", "tilde", "icons", "termguicolors", "transparent"] as const) set("ui", k, ui[k]);
+			set("worktree", "enabled", this.workspace.config.enabled);
+			set("worktree", "backend", this.workspace.config.backend ?? "auto");
+			for (const [lhs, rhs] of this.keyChanges) set("keys.normal", lhs, rhs);
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			fs.writeFileSync(file, text);
+			return `saved to ${this.shortPath(file)}`;
+		} catch (err) {
+			return `couldn't save: ${(err as Error).message}`;
+		}
 	}
 
 	/**
@@ -1551,8 +1716,20 @@ export class App implements Component {
 				this.repaint();
 			},
 			() => this.tui.requestRender(),
+			(name) => {
+				try {
+					const t = loadTheme(name);
+					const p = extractPalette(t);
+					return {
+						colors: [p.bg, p.red, p.yellow, p.green, p.cyan, p.blue, p.magenta],
+						tags: [t.background === "light" ? "light" : "dark", ...(t.transparent ? ["transparent"] : [])],
+					};
+				} catch {
+					return undefined;
+				}
+			},
 		);
-		handle = this.tui.showOverlay(picker, { width: 40, anchor: "center" });
+		handle = this.tui.showOverlay(picker, { width: 64, anchor: "center" });
 		this.tui.requestRender();
 	}
 
@@ -2064,6 +2241,18 @@ function groupKeyIsDigits(keys: string[]): boolean {
 	return keys.every((k) => /^\d$/.test(k));
 }
 
+/** A key's job, for :settings: what an ex command does (from :help), else the action's description. */
+function settingsLabel(rhs: Rhs[]): string {
+	const r = rhs[0];
+	if (rhs.length === 1 && r.kind === "ex") {
+		const word = r.cmd.trim().split(/\s+/)[0];
+		const help = EX_HELP.find(([c]) => c === `:${word}` || c.startsWith(`:${word} `));
+		const cmd = `:${r.cmd.trimEnd()}${r.execute ? "" : " …"}`;
+		return help ? `${help[1].split(" (")[0]} (${cmd})` : cmd;
+	}
+	return describeRhs(rhs);
+}
+
 function describeRhs(rhs: Rhs[]): string {
 	return rhs
 		.map((r) => {
@@ -2094,6 +2283,7 @@ const EX_HELP: [string, string][] = [
 	[":tree", "the conversation's branches; go back and branch"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],
+	[":settings", "theme, look, engine, worktrees and keys in one place (w saves)"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],
 	[":attach <branch>", "reopen an agent in a kept worktree"],

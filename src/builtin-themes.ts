@@ -245,6 +245,115 @@ export const KANAGAWA = fromPalette("kanagawa", {
 	cyan: "#7fb4ca", blue: "#7e9cd8", magenta: "#957fb8", accent: "#ffa066",
 });
 
+// ---------------------------------------------------------------------------
+// More popular colorschemes, from their published palettes
+// ---------------------------------------------------------------------------
+
+export const CATPPUCCIN_FRAPPE = fromPalette("catppuccin-frappe", {
+	bg: "#303446", bg_dark: "#292c3c", bg_alt: "#414559", selection: "#51576d",
+	fg: "#c6d0f5", muted: "#737994", subtle: "#626880",
+	red: "#e78284", orange: "#ef9f76", yellow: "#e5c890", green: "#a6d189",
+	cyan: "#81c8be", blue: "#8caaee", magenta: "#ca9ee6", accent: "#babbf1",
+});
+
+export const CATPPUCCIN_MACCHIATO = fromPalette("catppuccin-macchiato", {
+	bg: "#24273a", bg_dark: "#1e2030", bg_alt: "#363a4f", selection: "#494d64",
+	fg: "#cad3f5", muted: "#6e738d", subtle: "#5b6078",
+	red: "#ed8796", orange: "#f5a97f", yellow: "#eed49f", green: "#a6da95",
+	cyan: "#8bd5ca", blue: "#8aadf4", magenta: "#c6a0f6", accent: "#b7bdf8",
+});
+
+export const TOKYONIGHT_STORM = fromPalette("tokyonight-storm", {
+	bg: "#24283b", bg_dark: "#1f2335", bg_alt: "#292e42", selection: "#2e3c64",
+	fg: "#c0caf5", muted: "#565f89", subtle: "#3b4261",
+	red: "#f7768e", orange: "#ff9e64", yellow: "#e0af68", green: "#9ece6a",
+	cyan: "#7dcfff", blue: "#7aa2f7", magenta: "#bb9af7", accent: "#ff9e64",
+});
+
+export const ROSE_PINE_MOON = fromPalette("rose-pine-moon", {
+	bg: "#232136", bg_dark: "#2a273f", bg_alt: "#393552", selection: "#44415a",
+	fg: "#e0def4", muted: "#6e6a86", subtle: "#56526e",
+	red: "#eb6f92", orange: "#ea9a97", yellow: "#f6c177", green: "#3e8fb0",
+	cyan: "#9ccfd8", blue: "#3e8fb0", magenta: "#c4a7e7", accent: "#f6c177",
+});
+
+export const ROSE_PINE_DAWN = fromPalette("rose-pine-dawn", {
+	bg: "#faf4ed", bg_dark: "#fffaf3", bg_alt: "#f2e9e1", selection: "#dfdad9",
+	fg: "#575279", muted: "#9893a5", subtle: "#cecacd",
+	red: "#b4637a", orange: "#d7827e", yellow: "#ea9d34", green: "#286983",
+	cyan: "#56949f", blue: "#286983", magenta: "#907aa9", accent: "#ea9d34",
+});
+
+export const DRACULA = fromPalette("dracula", {
+	bg: "#282a36", bg_dark: "#21222c", bg_alt: "#44475a", selection: "#44475a",
+	fg: "#f8f8f2", muted: "#6272a4", subtle: "#4d5066",
+	red: "#ff5555", orange: "#ffb86c", yellow: "#f1fa8c", green: "#50fa7b",
+	cyan: "#8be9fd", blue: "#bd93f9", magenta: "#ff79c6", accent: "#ff79c6",
+});
+
+export const ONEDARK = fromPalette("onedark", {
+	bg: "#282c34", bg_dark: "#21252b", bg_alt: "#2c313c", selection: "#3e4452",
+	fg: "#abb2bf", muted: "#5c6370", subtle: "#4b5263",
+	red: "#e06c75", orange: "#d19a66", yellow: "#e5c07b", green: "#98c379",
+	cyan: "#56b6c2", blue: "#61afef", magenta: "#c678dd", accent: "#e5c07b",
+});
+
+export const EVERFOREST = fromPalette("everforest", {
+	bg: "#2d353b", bg_dark: "#232a2e", bg_alt: "#343f44", selection: "#543a48",
+	fg: "#d3c6aa", muted: "#859289", subtle: "#4f585e",
+	red: "#e67e80", orange: "#e69875", yellow: "#dbbc7f", green: "#a7c080",
+	cyan: "#83c092", blue: "#7fbbb3", magenta: "#d699b6", accent: "#a7c080",
+});
+
+export const NIGHTFOX = fromPalette("nightfox", {
+	bg: "#192330", bg_dark: "#131a24", bg_alt: "#29394f", selection: "#2b3b51",
+	fg: "#cdcecf", muted: "#738091", subtle: "#39506d",
+	red: "#c94f6d", orange: "#f4a261", yellow: "#dbc074", green: "#81b29a",
+	cyan: "#63cdcf", blue: "#719cd6", magenta: "#9d79d6", accent: "#f4a261",
+});
+
+export const SOLARIZED_DARK = fromPalette("solarized-dark", {
+	bg: "#002b36", bg_dark: "#00212b", bg_alt: "#073642", selection: "#0b4a5a",
+	fg: "#93a1a1", muted: "#586e75", subtle: "#2c4f58",
+	red: "#dc322f", orange: "#cb4b16", yellow: "#b58900", green: "#859900",
+	cyan: "#2aa198", blue: "#268bd2", magenta: "#d33682", accent: "#b58900",
+});
+
+export const SOLARIZED_LIGHT = fromPalette("solarized-light", {
+	bg: "#fdf6e3", bg_dark: "#f5efdc", bg_alt: "#eee8d5", selection: "#e4ddc8",
+	fg: "#586e75", muted: "#93a1a1", subtle: "#c9c3b0",
+	red: "#dc322f", orange: "#cb4b16", yellow: "#b58900", green: "#859900",
+	cyan: "#2aa198", blue: "#268bd2", magenta: "#d33682", accent: "#cb4b16",
+});
+
+export const GITHUB_DARK = fromPalette("github-dark", {
+	bg: "#0d1117", bg_dark: "#010409", bg_alt: "#161b22", selection: "#1c3a5e",
+	fg: "#e6edf3", muted: "#7d8590", subtle: "#30363d",
+	red: "#ff7b72", orange: "#ffa657", yellow: "#d29922", green: "#3fb950",
+	cyan: "#a5d6ff", blue: "#58a6ff", magenta: "#d2a8ff", accent: "#58a6ff",
+});
+
+export const GITHUB_LIGHT = fromPalette("github-light", {
+	bg: "#ffffff", bg_dark: "#f6f8fa", bg_alt: "#eaeef2", selection: "#cce5ff",
+	fg: "#1f2328", muted: "#656d76", subtle: "#d0d7de",
+	red: "#cf222e", orange: "#bc4c00", yellow: "#9a6700", green: "#1a7f37",
+	cyan: "#0a3069", blue: "#0969da", magenta: "#8250df", accent: "#0969da",
+});
+
+export const MONOKAI_PRO = fromPalette("monokai-pro", {
+	bg: "#2d2a2e", bg_dark: "#221f22", bg_alt: "#403e41", selection: "#5b595c",
+	fg: "#fcfcfa", muted: "#727072", subtle: "#5b595c",
+	red: "#ff6188", orange: "#fc9867", yellow: "#ffd866", green: "#a9dc76",
+	cyan: "#78dce8", blue: "#78dce8", magenta: "#ab9df2", accent: "#ffd866",
+});
+
+export const AYU_MIRAGE = fromPalette("ayu-mirage", {
+	bg: "#1f2430", bg_dark: "#1a1f29", bg_alt: "#242936", selection: "#33415e",
+	fg: "#cccac2", muted: "#6c7380", subtle: "#3b4252",
+	red: "#f28779", orange: "#ffa659", yellow: "#ffcc66", green: "#d5ff80",
+	cyan: "#95e6cb", blue: "#73d0ff", magenta: "#dfbfff", accent: "#ffcc66",
+});
+
 export const BUILTIN_THEMES: Record<string, Theme> = {
 	default: NVIM_DEFAULT,
 	gruvbox: GRUVBOX,
@@ -256,4 +365,19 @@ export const BUILTIN_THEMES: Record<string, Theme> = {
 	nord: NORD,
 	"rose-pine": ROSE_PINE,
 	kanagawa: KANAGAWA,
+	"catppuccin-frappe": CATPPUCCIN_FRAPPE,
+	"catppuccin-macchiato": CATPPUCCIN_MACCHIATO,
+	"tokyonight-storm": TOKYONIGHT_STORM,
+	"rose-pine-moon": ROSE_PINE_MOON,
+	"rose-pine-dawn": ROSE_PINE_DAWN,
+	dracula: DRACULA,
+	onedark: ONEDARK,
+	everforest: EVERFOREST,
+	nightfox: NIGHTFOX,
+	"solarized-dark": SOLARIZED_DARK,
+	"solarized-light": SOLARIZED_LIGHT,
+	"github-dark": GITHUB_DARK,
+	"github-light": GITHUB_LIGHT,
+	"monokai-pro": MONOKAI_PRO,
+	"ayu-mirage": AYU_MIRAGE,
 };

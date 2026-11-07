@@ -53,7 +53,7 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 | NORMAL | `V` / `v` | VISUAL: select lines with `j` `k`, `ib` for a code block, `y` to copy |
 | NORMAL | `yy` / `yib` | Copy the agent's last reply / the nearest code block |
 | NORMAL | `dd` | Kill the focused agent (asks first) |
-| NORMAL | `<Space>n` `d` `m` `p` `q` `t` `D` `u` | `:new`, `:diff`, `:merge`, `:pr`, `:queue`, colorscheme, `:dash`, `:tree` |
+| NORMAL | `<Space>n` `d` `m` `p` `q` `t` `D` `u` `s` | `:new`, `:diff`, `:merge`, `:pr`, `:queue`, colorscheme, `:dash`, `:tree`, `:settings` |
 | INSERT | `Enter` / `Esc` | Send the prompt / back to NORMAL |
 
 Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
@@ -204,7 +204,13 @@ Normal = { bg = "NONE" }
 CursorLine = "guibg=#2a2f3a"
 ```
 
-Built in: `default` (Neovim's default look), `lazyvim` (LazyVim's tokyonight-moon look, transparent), `tokyonight`, `tokyonight-moon`, `gruvbox`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
+25 built in, including `lazyvim` (LazyVim's look, transparent), the tokyonight, catppuccin and rose-pine families, `dracula`, `onedark`, `everforest`, `nightfox`, `gruvbox`, `kanagawa`, `nord`, `monokai-pro`, `ayu-mirage`, and GitHub and solarized in dark and light. The picker shows each one's colors:
+
+![the colorscheme picker: every theme with its colors, dark / light / transparent](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/colorscheme-swatches.png)
+
+**`:settings`** (`<Space>s`) changes the theme, transparency, layout, engine, worktrees and any key in one place. Press `w` and it's saved to config.toml:
+
+![:settings](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/settings.png)
 
 ![the lazyvim theme over a translucent terminal: sidebar, transcript and floats show the background through](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/lazyvim-transparent.png)
 

@@ -58,6 +58,19 @@ branch = "{type}/{name}"        # "fix flaky test" -> fix/flaky-test
 "<C-k>" = "edit.clear"
 ```
 
+## `:settings`: change it all without editing this file
+
+`:settings` (or `<Space>s`) opens every option in one float, and changes apply immediately:
+
+| Section | What you can change |
+|---|---|
+| Look | theme (Enter opens the picker), transparent background, icons, 24-bit color |
+| Layout | sidebar, its width, session numbers, `~` rows |
+| Agents | the engine for new agents, a worktree per agent, worktree storage (riftri or git) |
+| Keys | the leader, and every NORMAL-mode key: Enter, type the new keys, Enter again |
+
+Move with `j`/`k`, change with `Enter`/`Space` (or step with `h`/`l`), and press `w` to write the changes to this file. Saving changes only those values: a setting you had commented out is replaced in place, and your comments and other settings stay. A key you move is saved as the new mapping plus `false` for the old key.
+
 ## Top-level settings
 
 | Key | Default | Meaning |
@@ -312,6 +325,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>t` | `theme.picker` |
 | `<leader>D` | `:dash` |
 | `<leader>u` | `session.tree` (like an undo tree, for the conversation) |
+| `<leader>s` | `:settings<CR>` (theme, look, engine, worktrees and keys in one float) |
 
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
 

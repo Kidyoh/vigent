@@ -147,6 +147,7 @@ export const DEFAULT_KEYS: Record<KeyMode, Record<string, string>> = {
 		"<leader>t": "theme.picker",
 		"<leader>D": ":dash<CR>",
 		"<leader>u": "session.tree",
+		"<leader>s": ":settings<CR>",
 		ZZ: "app.quit",
 		ZQ: "app.quit_force",
 		q: "app.quit_hint",

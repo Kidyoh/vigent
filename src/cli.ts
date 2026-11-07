@@ -284,7 +284,8 @@ async function main(): Promise<number | undefined> {
 			})
 			.catch(() => {});
 	}
-	app.defaultEngine = () => chosenEngine ?? defaultEngine(app.engines);
+	app.preferredEngine = chosenEngine ?? "auto";
+	app.defaultEngine = () => (app.preferredEngine === "auto" ? defaultEngine(app.engines) : app.preferredEngine);
 	app.detectEngines = () => detectEngines();
 	// installed? signed in? What's on PATH shows at once; the CLIs' sign-in checks take a moment
 	app.setEngines(quickEngines());
