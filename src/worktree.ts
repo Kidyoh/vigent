@@ -210,7 +210,11 @@ export interface RemoveResult {
  * git refuses to remove a worktree with uncommitted changes and keeps an
  * unmerged branch, so no work is lost by accident.
  */
-export function removeWorktree(root: string, wt: { path: string; branch?: string }, force = false): RemoveResult {
+export function removeWorktree(
+	root: string,
+	wt: { path: string; branch?: string; base?: string },
+	force = false,
+): RemoveResult {
 	try {
 		git(["worktree", "remove", ...(force ? ["--force"] : []), wt.path], root);
 	} catch (err) {
@@ -224,7 +228,8 @@ export function removeWorktree(root: string, wt: { path: string; branch?: string
 	}
 	if (!wt.branch) return { removed: true, branchDeleted: false, message: `removed ${wt.path}` };
 	try {
-		git(["branch", force ? "-D" : "-d", wt.branch], root);
+		const merged = force || isSquashMerged(root, wt.branch, wt.base);
+		git(["branch", merged ? "-D" : "-d", wt.branch], root);
 		return { removed: true, branchDeleted: true, message: `removed ${wt.path} and branch ${wt.branch}` };
 	} catch {
 		return {
@@ -232,6 +237,22 @@ export function removeWorktree(root: string, wt: { path: string; branch?: string
 			branchDeleted: false,
 			message: `removed ${wt.path}; kept branch ${wt.branch} (it has commits that aren't merged)`,
 		};
+	}
+}
+
+/**
+ * A squash merge makes a new commit, so git doesn't see the branch as merged.
+ * Treat it as merged when every file it changed has the same content on base.
+ */
+export function isSquashMerged(root: string, branch: string, base: string | undefined): boolean {
+	if (!base) return false;
+	try {
+		const fork = git(["merge-base", base, branch], root);
+		const files = git(["diff", "--name-only", fork, branch], root).split("\n").filter(Boolean);
+		if (files.length === 0) return false;
+		return gitOk(["diff", "--quiet", base, branch, "--", ...files], root);
+	} catch {
+		return false;
 	}
 }
 

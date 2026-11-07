@@ -43,7 +43,16 @@ export function createDemoSessions(): DemoSession[] {
 			delay: 700,
 			kind: "agent",
 			streamMs: 80,
-			text: "Done. The middleware now resolves tokens through TokenStore instead of verifying JWTs inline, revoked tokens are rejected, and all 14 tests pass. Want me to update the docs too?",
+			text: [
+				"Done. The middleware now resolves tokens through **TokenStore** instead of verifying JWTs inline:",
+				"- revoked tokens are rejected with a `401`",
+				"- all 14 tests pass",
+				"```ts",
+				"const session = await tokenStore.resolve(token);",
+				"if (!session) return res.status(401).end();",
+				"```",
+				"Want me to update the docs too?",
+			].join("\n"),
 		},
 		{ delay: 300, kind: "state", state: "waiting" },
 	]);

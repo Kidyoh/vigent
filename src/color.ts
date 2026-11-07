@@ -104,3 +104,23 @@ export function resolveVimColor(value: string, cterm = false): string | undefine
 	}
 	return GUI_NAMES[lower.replace(/\s+/g, "")];
 }
+
+/** The xterm-256 index closest to a hex color (6x6x6 cube or grayscale ramp). */
+export function nearest256(hex: string): number {
+	const c = parseHex(hex);
+	if (!c) return 7;
+	const levels = [0, 95, 135, 175, 215, 255];
+	const idx = (v: number) => {
+		let best = 0;
+		for (let i = 1; i < 6; i++) if (Math.abs(levels[i] - v) < Math.abs(levels[best] - v)) best = i;
+		return best;
+	};
+	const [r, g, b] = c.map(idx);
+	const cube = 16 + 36 * r + 6 * g + b;
+	const cubeRgb = [levels[r], levels[g], levels[b]];
+	const avg = (c[0] + c[1] + c[2]) / 3;
+	const grayIdx = Math.max(0, Math.min(23, Math.round((avg - 8) / 10)));
+	const grayV = 8 + grayIdx * 10;
+	const dist = (x: number[]) => (x[0] - c[0]) ** 2 + (x[1] - c[1]) ** 2 + (x[2] - c[2]) ** 2;
+	return dist([grayV, grayV, grayV]) < dist(cubeRgb) ? 232 + grayIdx : cube;
+}

@@ -16,8 +16,11 @@
 import { parseKey } from "@mariozechner/pi-tui";
 import { didYouMean } from "./suggest.js";
 
-export type KeyMode = "normal" | "insert" | "command";
-export const KEY_MODES: KeyMode[] = ["normal", "insert", "command"];
+export type KeyMode = "normal" | "insert" | "visual" | "command";
+export const KEY_MODES: KeyMode[] = ["normal", "insert", "visual", "command"];
+
+/** vigent's default <leader>, as in most Neovim configs (vim's own default is "\\") */
+export const DEFAULT_LEADER = "<Space>";
 
 export type Rhs =
 	| { kind: "action"; name: string; arg?: string }
@@ -43,6 +46,21 @@ export const ACTIONS: Record<string, string> = {
 	"mode.insert": "write a prompt to the focused agent (INSERT)",
 	"mode.command": "open the : command line",
 	"mode.search": "search the transcript",
+	"mode.search_back": "search the transcript backward",
+	"mode.visual": "select transcript lines (VISUAL)",
+	"cursor.down": "move the VISUAL cursor down",
+	"cursor.up": "move the VISUAL cursor up",
+	"cursor.half_down": "move the VISUAL cursor down half a page",
+	"cursor.half_up": "move the VISUAL cursor up half a page",
+	"cursor.top": "move the VISUAL cursor to the top",
+	"cursor.bottom": "move the VISUAL cursor to the bottom",
+	"visual.yank": "copy the selection to the clipboard",
+	"visual.inner_block": "select the code block under the cursor",
+	"visual.swap": "jump to the other end of the selection",
+	"message.next": "jump to the next message",
+	"message.prev": "jump to the previous message",
+	"yank.reply": "copy the agent's last reply",
+	"yank.block": "copy the nearest code block",
 	"scroll.down": "scroll down one line",
 	"scroll.up": "scroll up one line",
 	"scroll.half_down": "scroll down half a page",
@@ -56,8 +74,10 @@ export const ACTIONS: Record<string, string> = {
 	"session.alternate": "last focused session",
 	"session.goto": "session N (session.goto 3)",
 	"session.new": "spawn a new agent",
-	"session.kill": "kill the focused agent",
+	"session.kill": "kill the focused agent (asks first)",
 	"session.abort": "stop the focused agent's current run",
+	"session.pause": "pause the agent and hold its queued prompts",
+	"session.resume": "resume a paused agent",
 	"fold.toggle": "fold / unfold tool output",
 	"fold.open_all": "unfold all tool output",
 	"fold.close_all": "fold all tool output",
@@ -70,8 +90,10 @@ export const ACTIONS: Record<string, string> = {
 	"edit.clear": "clear the prompt / command line",
 	"theme.picker": "pick a colorscheme",
 	"app.help": "show all keys",
+	"app.dashboard": "all agents at a glance",
 	"app.redraw": "redraw the screen",
-	"app.quit": "quit vigent",
+	"app.quit": "quit vigent (asks if agents are running)",
+	"app.quit_force": "quit even if agents are running",
 	"app.quit_hint": "explain how to quit",
 	noop: "do nothing",
 };
@@ -84,6 +106,9 @@ export const DEFAULT_KEYS: Record<KeyMode, Record<string, string>> = {
 		o: "mode.insert",
 		":": "mode.command",
 		"/": "mode.search",
+		"?": "mode.search_back",
+		v: "mode.visual",
+		V: "mode.visual",
 		j: "scroll.down",
 		"<Down>": "scroll.down",
 		k: "scroll.up",
@@ -105,12 +130,41 @@ export const DEFAULT_KEYS: Record<KeyMode, Record<string, string>> = {
 		zM: "fold.close_all",
 		n: "search.next",
 		N: "search.prev",
+		"{": "message.prev",
+		"}": "message.next",
+		yy: "yank.reply",
+		yib: "yank.block",
+		dd: "session.kill",
 		"<Esc>": "search.clear",
 		"<C-c>": "session.abort",
 		"<C-l>": "app.redraw",
+		"<leader>n": ":new ",
+		"<leader>d": ":diff<CR>",
+		"<leader>m": ":merge<CR>",
+		"<leader>p": ":pr<CR>",
+		"<leader>q": ":queue ",
+		"<leader>t": "theme.picker",
+		"<leader>D": ":dash<CR>",
 		ZZ: "app.quit",
-		ZQ: "app.quit",
+		ZQ: "app.quit_force",
 		q: "app.quit_hint",
+	},
+	visual: {
+		j: "cursor.down",
+		"<Down>": "cursor.down",
+		k: "cursor.up",
+		"<Up>": "cursor.up",
+		"<C-d>": "cursor.half_down",
+		"<C-u>": "cursor.half_up",
+		gg: "cursor.top",
+		G: "cursor.bottom",
+		y: "visual.yank",
+		ib: "visual.inner_block",
+		o: "visual.swap",
+		"<Esc>": "mode.normal",
+		"<C-c>": "mode.normal",
+		v: "mode.normal",
+		V: "mode.normal",
 	},
 	insert: {
 		"<Esc>": "mode.normal",
@@ -200,7 +254,7 @@ function parseBracket(inner: string): string | undefined {
  * Parse vim key notation into canonical tokens.
  * `<leader>` expands to the given leader. Throws on an empty sequence.
  */
-export function parseKeys(notation: string, leader = "\\"): string[] {
+export function parseKeys(notation: string, leader = DEFAULT_LEADER): string[] {
 	const out: string[] = [];
 	const chars = [...notation];
 	for (let i = 0; i < chars.length; i++) {
@@ -291,7 +345,7 @@ export function tokenText(t: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 /** Parse a mapping's right-hand side. Throws with a readable message on errors. */
-export function parseRhs(value: unknown, leader = "\\"): Rhs[] {
+export function parseRhs(value: unknown, leader = DEFAULT_LEADER): Rhs[] {
 	if (value === false || value === "" || (typeof value === "string" && /^<nop>$/i.test(value.trim()))) {
 		return [{ kind: "nop" }];
 	}
@@ -335,15 +389,15 @@ export interface LookupResult {
 }
 
 export class Keymap {
-	private maps: Record<KeyMode, Map<string, Binding>> = { normal: new Map(), insert: new Map(), command: new Map() };
-	private defaults: Record<KeyMode, Map<string, Binding>> = { normal: new Map(), insert: new Map(), command: new Map() };
-	private prefixes: Record<KeyMode, Set<string>> = { normal: new Set(), insert: new Set(), command: new Set() };
-	private defaultPrefixes: Record<KeyMode, Set<string>> = { normal: new Set(), insert: new Set(), command: new Set() };
+	private maps = perMode(() => new Map<string, Binding>());
+	private defaults = perMode(() => new Map<string, Binding>());
+	private prefixes = perMode(() => new Set<string>());
+	private defaultPrefixes = perMode(() => new Set<string>());
 
-	constructor(public leader = "\\") {
+	constructor(public leader = DEFAULT_LEADER) {
 		for (const mode of KEY_MODES) {
 			for (const [lhs, rhs] of Object.entries(DEFAULT_KEYS[mode])) {
-				const b: Binding = { keys: parseKeys(lhs), rhs: parseRhs(rhs), rhsText: rhs, user: false };
+				const b: Binding = { keys: parseKeys(lhs, leader), rhs: parseRhs(rhs, leader), rhsText: rhs, user: false };
 				this.defaults[mode].set(b.keys.join(""), b);
 				this.maps[mode].set(b.keys.join(""), b);
 			}
@@ -381,6 +435,10 @@ export class Keymap {
 	}
 }
 
+function perMode<T>(make: () => T): Record<KeyMode, T> {
+	return Object.fromEntries(KEY_MODES.map((m) => [m, make()])) as Record<KeyMode, T>;
+}
+
 function computePrefixes(map: Map<string, Binding>): Set<string> {
 	const out = new Set<string>();
 	for (const b of map.values()) {
@@ -395,7 +453,7 @@ export function buildKeymap(
 	keys: Partial<Record<KeyMode, Record<string, unknown>>>,
 ): { keymap: Keymap; warnings: string[] } {
 	const warnings: string[] = [];
-	let leaderNotation = "\\";
+	let leaderNotation = DEFAULT_LEADER;
 	if (leader !== undefined) {
 		try {
 			parseKeys(leader);

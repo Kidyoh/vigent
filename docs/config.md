@@ -64,7 +64,7 @@ branch = "{type}/{name}"        # "fix flaky test" -> fix/flaky-test
 |---|---|---|
 | `theme` | `"default"` | Colorscheme at startup. `colorscheme` is accepted as an alias. See [themes.md](themes.md). |
 | `model` | `"claude-sonnet-4-5"` | Model for new agents. `--model` on the command line wins. |
-| `leader` | `"\"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader`. `mapleader` is accepted as an alias. |
+| `leader` | `"<Space>"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader` (vim's own default is `"\"`). `mapleader` is accepted as an alias. |
 
 ## `[ui]`
 
@@ -78,6 +78,7 @@ Each option can also be changed while vigent runs, with vim's `:set` syntax: `:s
 | `tilde` | `true` | `~` on empty sidebar rows |
 | `icons` | `"unicode"` | `"ascii"` swaps every glyph for plain ASCII |
 | `timeoutlen` | `1000` | ms to wait for the next key of a mapping (vim's `'timeoutlen'`, alias `tm`) |
+| `termguicolors` | `true` (`false` in macOS Terminal.app) | 24-bit color, as in vim. Turn it off on terminals without it, and every color is mapped to the nearest of the 256 standard ones (alias `tgc`) |
 
 ## `[highlights]`
 
@@ -122,14 +123,19 @@ A first or last word of `feat`, `fix` (also `bugfix`, `hotfix`, `bug`), `docs`, 
 :kill!                      " stop it and remove the worktree (refused if it has uncommitted changes)
 :worktree remove <branch>   " remove a worktree no agent is using (:worktree remove! forces it)
 :worktrees                  " list them; ● marks the ones an agent is working in
-:diff                       " everything the focused agent changed, new files included
+:diff                       " everything the focused agent changed, new files included (]c / [c between hunks)
+:merge                      " squash-merge the agent's branch into its base, in your checkout
+:merge --no-squash          " a regular merge commit instead
+:pr                         " push the branch and open a pull request
 ```
+
+`:merge` and `:pr` first commit anything the agent left uncommitted, using a message built from the branch (`fix/flaky-checkout-test` → `fix: flaky checkout test`). `:merge` only runs when your checkout is on the base branch with no uncommitted changes, and a conflict is rolled back so your checkout is left as it was. A squash merge makes a new commit, so git doesn't count the branch as merged. vigent checks the content instead, so `:kill!` afterwards deletes the branch too. `:pr` uses `gh` when it's installed and signed in; otherwise it pushes and prints the GitHub compare URL.
 
 From the shell: `vigent worktree list`, `vigent worktree remove <branch> [--force]`, `vigent worktree prune`.
 
 ## `[keys]`
 
-One table per mode: `[keys.normal]`, `[keys.insert]` and `[keys.command]` (the `:` and `/` command line). Entries placed directly under `[keys]` count as normal mode.
+One table per mode: `[keys.normal]`, `[keys.insert]`, `[keys.visual]` and `[keys.command]` (the `:`, `/` and `?` command line). Entries placed directly under `[keys]` count as normal mode.
 
 Each entry maps a key sequence (left) to what it does (right). Your mappings replace built-in ones with the same keys and leave every other built-in key alone.
 
@@ -178,6 +184,7 @@ The same mappings work as commands, with vim's names:
 ```vim
 :nmap <leader>t theme.picker        " normal mode (also :map, :noremap, :nnoremap)
 :imap jk <Esc>                       " insert mode (also :inoremap)
+:xmap Y visual.yank                  " VISUAL mode (also :vmap, :xnoremap)
 :cmap <C-k> edit.clear               " command line (also :cnoremap)
 :nunmap q                            " remove a mapping (:unmap, :iunmap, :cunmap)
 :nmap J                              " show what J does
@@ -196,6 +203,17 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `mode.insert` | write a prompt to the focused agent (INSERT) |
 | `mode.command` | open the `:` command line |
 | `mode.search` | search the transcript |
+| `mode.search_back` | search the transcript backward (`n` then goes up) |
+| `mode.visual` | select transcript lines (VISUAL LINE mode) |
+| `cursor.down`, `cursor.up` | move the VISUAL cursor one line |
+| `cursor.half_down`, `cursor.half_up` | move the VISUAL cursor half a page |
+| `cursor.top`, `cursor.bottom` | move the VISUAL cursor to the top / bottom |
+| `visual.yank` | copy the selected lines to the clipboard |
+| `visual.inner_block` | select the code block under the VISUAL cursor |
+| `visual.swap` | jump to the other end of the selection |
+| `message.next`, `message.prev` | jump to the next / previous message |
+| `yank.reply` | copy the agent's last reply |
+| `yank.block` | copy the code block nearest the bottom of the screen |
 | `scroll.down`, `scroll.up` | scroll one line |
 | `scroll.half_down`, `scroll.half_up` | scroll half a page |
 | `scroll.page_down`, `scroll.page_up` | scroll a page |
@@ -204,8 +222,10 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `session.alternate` | the session you were on before |
 | `session.goto N` | session N, e.g. `"session.goto 3"` |
 | `session.new` | spawn a new agent |
-| `session.kill` | kill the focused agent |
+| `session.kill` | kill the focused agent, after asking (`:kill` doesn't ask) |
 | `session.abort` | stop the focused agent's current run |
+| `session.pause` | stop the run and hold queued prompts (`:pause`) |
+| `session.resume` | continue a paused agent (`:resume`) |
 | `fold.toggle` | fold / unfold tool output |
 | `fold.open_all`, `fold.close_all` | unfold / fold all tool output |
 | `search.next`, `search.prev` | next / previous match |
@@ -216,8 +236,10 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `edit.clear` | clear the prompt or command line |
 | `theme.picker` | pick a colorscheme (live preview) |
 | `app.help` | show every key |
+| `app.dashboard` | all agents at a glance (`:dash`) |
 | `app.redraw` | redraw the screen |
-| `app.quit` | quit vigent |
+| `app.quit` | quit vigent; refuses while agents are running, like vim's `:q` |
+| `app.quit_force` | quit even with agents running (`:q!`) |
 | `app.quit_hint` | explain how to quit |
 | `noop` | do nothing |
 
@@ -229,7 +251,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 |---|---|
 | `i` `a` `o` | `mode.insert` |
 | `:` | `mode.command` |
-| `/` | `mode.search` |
+| `/` / `?` | `mode.search` / `mode.search_back` |
+| `v` `V` | `mode.visual` |
 | `j` `<Down>` / `k` `<Up>` | `scroll.down` / `scroll.up` |
 | `<C-d>` / `<C-u>` | `scroll.half_down` / `scroll.half_up` |
 | `<C-f>` `<PageDown>` / `<C-b>` `<PageUp>` | `scroll.page_down` / `scroll.page_up` |
@@ -239,11 +262,33 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `1` … `9` | `session.goto 1` … `session.goto 9` |
 | `za` / `zR` / `zM` | `fold.toggle` / `fold.open_all` / `fold.close_all` |
 | `n` / `N` | `search.next` / `search.prev` |
+| `{` / `}` | `message.prev` / `message.next` |
+| `yy` / `yib` | `yank.reply` / `yank.block` |
+| `dd` | `session.kill` (asks first) |
 | `<Esc>` | `search.clear` |
 | `<C-c>` | `session.abort` |
 | `<C-l>` | `app.redraw` |
-| `ZZ` `ZQ` | `app.quit` |
+| `ZZ` / `ZQ` | `app.quit` / `app.quit_force` |
 | `q` | `app.quit_hint` |
+| `<leader>n` | `:new ` (type the task) |
+| `<leader>d` | `:diff` |
+| `<leader>m` | `:merge` |
+| `<leader>p` | `:pr` |
+| `<leader>q` | `:queue ` (type a follow-up) |
+| `<leader>t` | `theme.picker` |
+| `<leader>D` | `:dash` |
+
+**VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
+
+| Keys | Action |
+|---|---|
+| `j` `<Down>` / `k` `<Up>` | `cursor.down` / `cursor.up` |
+| `<C-d>` / `<C-u>` | `cursor.half_down` / `cursor.half_up` |
+| `gg` / `G` | `cursor.top` / `cursor.bottom` |
+| `y` | `visual.yank` |
+| `ib` | `visual.inner_block` |
+| `o` | `visual.swap` |
+| `<Esc>` `<C-c>` `v` `V` | `mode.normal` |
 
 **Insert mode and the command line**
 

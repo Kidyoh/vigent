@@ -30,6 +30,8 @@ export interface UiOptions {
 	icons: "unicode" | "ascii";
 	/** ms to wait for the rest of a multi-key mapping, like vim's 'timeoutlen' */
 	timeoutlen: number;
+	/** 24-bit color (vim's 'termguicolors'); off maps colors to the nearest of 256 */
+	termguicolors: boolean;
 }
 
 export interface Config {
@@ -50,6 +52,8 @@ export const DEFAULT_UI: UiOptions = {
 	tilde: true,
 	icons: "unicode",
 	timeoutlen: 1000,
+	// macOS Terminal.app can't show 24-bit color
+	termguicolors: process.env.TERM_PROGRAM !== "Apple_Terminal",
 };
 
 export function configPath(): string {
@@ -160,6 +164,8 @@ const ALIASES: Record<string, keyof UiOptions> = {
 	icons: "icons",
 	timeoutlen: "timeoutlen",
 	tm: "timeoutlen",
+	termguicolors: "termguicolors",
+	tgc: "termguicolors",
 };
 
 /** Set one option from a config value. Returns an error message, or undefined on success. */
@@ -170,6 +176,7 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 		case "sidebar":
 		case "number":
 		case "tilde":
+		case "termguicolors":
 			if (typeof value !== "boolean") return `'${name}' should be true or false`;
 			ui[key] = value;
 			return;
@@ -263,6 +270,7 @@ number = true          # session numbers in the sidebar
 tilde = true           # ~ on empty sidebar rows
 icons = "unicode"      # "ascii" for fonts without box-drawing characters
 timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
+# termguicolors = false  # for terminals without 24-bit color: use the nearest of 256
 
 # --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
 # Applied on top of whichever theme is active. A value is a table, a vim

@@ -8,7 +8,7 @@
  */
 import { diffStat, type WorktreeInfo } from "./worktree.js";
 
-export type SessionState = "running" | "waiting" | "idle" | "error";
+export type SessionState = "running" | "waiting" | "idle" | "paused" | "error";
 
 export interface ToolInfo {
 	name: string;
@@ -28,6 +28,7 @@ export const STATE_GLYPH: Record<SessionState, string> = {
 	running: "●",
 	waiting: "◐",
 	idle: "○",
+	paused: "‖",
 	error: "✗",
 };
 
@@ -95,9 +96,54 @@ export abstract class Session {
 		this.emit();
 	}
 
+	/** prompts waiting for the agent to finish its current run */
+	queue: string[] = [];
+
 	setState(s: SessionState) {
+		if (this.state === "paused" && s === "idle") return; // an aborted run settling while paused
 		this.state = s;
 		this.emit();
+		if ((s === "idle" || s === "waiting") && this.queue.length > 0) {
+			// next queued prompt, after the current event has been handled
+			setTimeout(() => this.drainQueue(), 0);
+		}
+	}
+
+	private drainQueue() {
+		if (this.state === "running" || this.state === "paused" || this.queue.length === 0) return;
+		const next = this.queue.shift() as string;
+		this.emit();
+		this.send(next);
+	}
+
+	/**
+	 * Send a prompt now, or queue it if the agent is busy (or paused).
+	 * Returns how many prompts are waiting after this one, or 0 if it was sent.
+	 */
+	submit(text: string): number {
+		if (this.state === "running" || this.state === "paused") {
+			this.queue.push(text);
+			this.emit();
+			return this.queue.length;
+		}
+		this.send(text);
+		return 0;
+	}
+
+	/** Stop the current run and hold queued prompts until resume(). */
+	pause() {
+		if (this.state === "running") this.abort();
+		this.state = "paused";
+		this.emit();
+	}
+
+	/** Continue: the next queued prompt, or ask the agent to pick up where it stopped. */
+	resume() {
+		if (this.state !== "paused") return;
+		this.state = "idle";
+		this.emit();
+		if (this.queue.length > 0) this.drainQueue();
+		else this.send("Continue where you left off.");
 	}
 
 	toggleFolds(): void {

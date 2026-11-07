@@ -21,14 +21,22 @@ With a provider key set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
 
 | Mode | Key | Action |
 |---|---|---|
-| NORMAL | `i` / `a` / `o` | Enter INSERT and type a prompt for the focused agent |
-| NORMAL | `j` `k` `gg` `G` `Ctrl-d` `Ctrl-u` | Scroll the transcript |
-| NORMAL | `]s` `[s` `1`–`9` `Ctrl-^` | Switch sessions |
+| NORMAL | `i` / `a` / `o` | Enter INSERT and type a prompt for the focused agent (it waits in a queue if the agent is busy) |
+| NORMAL | `j` `k` `gg` `G` `Ctrl-d` `Ctrl-u` `{` `}` | Scroll the transcript, or jump between messages |
+| NORMAL | `]s` `[s` `1`–`9` `Ctrl-^` | Switch agents |
 | NORMAL | `za` `zR` `zM` | Toggle, open or close tool-output folds |
-| NORMAL | `/pattern` `n` `N` | Search the transcript |
+| NORMAL | `/pattern` `?pattern` `n` `N` | Search the transcript, forward or backward |
+| NORMAL | `V` / `v` | VISUAL: select lines with `j` `k`, `ib` for a code block, `y` to copy |
+| NORMAL | `yy` / `yib` | Copy the agent's last reply / the nearest code block |
+| NORMAL | `dd` | Kill the focused agent (asks first) |
+| NORMAL | `<Space>n` `d` `m` `p` `q` `t` `D` | `:new`, `:diff`, `:merge`, `:pr`, `:queue`, colorscheme, `:dash` |
 | INSERT | `Enter` / `Esc` | Send the prompt / back to NORMAL |
 
-`:help` lists every active key, including yours. Ex commands: `:new <name>`, `:kill`, `:colorscheme [name]`, `:hi`, `:set`, `:map`, `:model <id>`, `:help`, `:q`.
+Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
+
+![Neovim-style intro screen](docs/screenshots/intro.png)
+
+![VISUAL mode on a markdown reply](docs/screenshots/visual-mode.png)
 
 ## Worktrees
 
@@ -47,6 +55,25 @@ Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `r
 ![agents in their own worktrees](docs/screenshots/worktrees-sidebar.png)
 
 ![:diff](docs/screenshots/worktrees-diff.png)
+
+## Reviewing and landing work
+
+```vim
+:diff                  " the agent's changes; ]c / [c jump between hunks
+:merge                 " squash-merge its branch into yours: one commit, e.g. "fix: flaky checkout test"
+:merge --no-squash     " a regular merge commit instead
+:pr                    " push the branch and open a pull request (gh), or print the compare URL
+:dash                  " every agent at a glance; j/k and Enter to jump to one
+:queue <prompt>        " send a follow-up after the current run (:queue alone lists them)
+:pause  /  :resume     " hold an agent and its queue, then continue
+:w [file]              " save the transcript as Markdown
+```
+
+`:merge` and `:pr` first commit anything the agent left uncommitted. `:merge` only touches your checkout when it's on the agent's base branch with no uncommitted changes, and a conflict is rolled back so nothing changes. After a merge, `:kill!` removes the worktree and the merged branch. `:q` won't quit while agents are running; `:q!` or `ZQ` does. Use `:new <task> --model <id>` to give one agent a different model.
+
+![:merge](docs/screenshots/merge.png)
+
+![:dash](docs/screenshots/dashboard.png)
 
 ## Configuration
 

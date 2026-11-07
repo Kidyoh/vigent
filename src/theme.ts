@@ -18,7 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { BUILTIN_THEMES } from "./builtin-themes.js";
-import { isLight, mix, parseHex } from "./color.js";
+import { isLight, mix, nearest256, parseHex } from "./color.js";
 import { fromPalette, type Palette } from "./palette.js";
 import { didYouMean } from "./suggest.js";
 import { parseHighlightCommand, parseVimColorscheme } from "./vimcolors.js";
@@ -43,17 +43,19 @@ export interface Theme {
 
 export const RESET = "\x1b[0m";
 
-/** Build an SGR escape sequence for an attribute set. */
-export function sgr(attr: Attr): string {
+export type ColorMode = "truecolor" | "256";
+
+/** Build an SGR escape sequence for an attribute set (24-bit color, or the nearest of 256). */
+export function sgr(attr: Attr, mode: ColorMode = "truecolor"): string {
 	const parts: string[] = [];
 	if (attr.bold) parts.push("1");
 	if (attr.italic) parts.push("3");
 	if (attr.underline) parts.push("4");
 	if (attr.reverse) parts.push("7");
 	const fg = parseHex(attr.fg);
-	if (fg) parts.push(`38;2;${fg[0]};${fg[1]};${fg[2]}`);
+	if (fg) parts.push(mode === "256" ? `38;5;${nearest256(attr.fg!)}` : `38;2;${fg[0]};${fg[1]};${fg[2]}`);
 	const bg = parseHex(attr.bg);
-	if (bg) parts.push(`48;2;${bg[0]};${bg[1]};${bg[2]}`);
+	if (bg) parts.push(mode === "256" ? `48;5;${nearest256(attr.bg!)}` : `48;2;${bg[0]};${bg[1]};${bg[2]}`);
 	return parts.length === 0 ? "" : `\x1b[${parts.join(";")}m`;
 }
 
@@ -94,6 +96,9 @@ const LINKS: Record<string, string> = {
 	VigentTool: "Function",
 	VigentToolOutput: "Comment",
 	VigentSpinner: "WarningMsg",
+	VigentCode: "String",
+	Question: "MoreMsg",
+	MoreMsg: "String",
 };
 
 function hasStyle(a: Attr | undefined): a is Attr {
@@ -121,6 +126,14 @@ export class Painter {
 	overrides: Record<string, Attr>;
 	/** bumped whenever colors change, so renderers can drop cached output */
 	generation = 0;
+	/** 24-bit color, or the nearest of 256 for terminals without it (vim's 'termguicolors') */
+	colorMode: ColorMode = "truecolor";
+
+	setColorMode(mode: ColorMode) {
+		if (mode === this.colorMode) return;
+		this.colorMode = mode;
+		this.flush();
+	}
 
 	constructor(
 		public theme: Theme,
@@ -194,7 +207,7 @@ export class Painter {
 	s(group: string): string {
 		let v = this.sgrCache.get(group);
 		if (v === undefined) {
-			v = sgr(this.attr(group));
+			v = sgr(this.attr(group), this.colorMode);
 			this.sgrCache.set(group, v);
 		}
 		return v;
@@ -205,7 +218,7 @@ export class Painter {
 		const key = `${group}|${bg ?? ""}|${extra ? JSON.stringify(extra) : ""}`;
 		let v = this.sgrCache.get(key);
 		if (v === undefined) {
-			v = sgr({ ...this.attr(group), ...extra, bg });
+			v = sgr({ ...this.attr(group), ...extra, bg }, this.colorMode);
 			this.sgrCache.set(key, v);
 		}
 		return v;

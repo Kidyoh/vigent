@@ -15,7 +15,7 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { applySetCommand, DEFAULT_UI, type UiOptions } from "./config.js";
-import { type FloatLine, TextFloat } from "./float.js";
+import { type FloatLine, type FloatOptions, TextFloat } from "./float.js";
 import {
 	ACTIONS,
 	type Binding,
@@ -31,7 +31,12 @@ import {
 	tokenText,
 } from "./keys.js";
 import * as path from "node:path";
+import * as fs from "node:fs";
+import { copyToClipboard } from "./clipboard.js";
+import { transcriptMarkdown } from "./export.js";
+import { renderMarkdown } from "./markdown.js";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
+import { mergeWorktree, openPullRequest } from "./review.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, listThemes, loadTheme, type Painter, RESET, sgr, type Theme } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
@@ -51,11 +56,12 @@ export interface Workspace {
 	config: WorktreeConfig;
 }
 
-export type Mode = "NORMAL" | "INSERT" | "COMMAND" | "SEARCH";
+export type Mode = "NORMAL" | "INSERT" | "VISUAL" | "COMMAND" | "SEARCH";
 
 const MODE_GROUP: Record<Mode, string> = {
 	NORMAL: "VigentModeNormal",
 	INSERT: "VigentModeInsert",
+	VISUAL: "VigentModeVisual",
 	COMMAND: "VigentModeCommand",
 	SEARCH: "VigentModeCommand",
 };
@@ -73,12 +79,15 @@ interface Icons {
 	open: string;
 	cursor: string;
 	minus: string;
+	bullet: string;
+	queued: string;
+	open_agent: string;
 }
 
 const ICONS: Record<UiOptions["icons"], Icons> = {
 	unicode: {
 		spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-		state: { waiting: "◐", idle: "○", error: "✗" },
+		state: { waiting: "◐", idle: "○", paused: "‖", error: "✗" },
 		tee: "├╴",
 		last: "└╴",
 		pipe: "│ ",
@@ -89,10 +98,13 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		open: "▾",
 		cursor: "▍",
 		minus: "−",
+		bullet: "•",
+		queued: "⧗",
+		open_agent: "▸",
 	},
 	ascii: {
 		spinner: ["|", "/", "-", "\\"],
-		state: { waiting: "~", idle: "o", error: "x" },
+		state: { waiting: "~", idle: "o", paused: "=", error: "x" },
 		tee: "|-",
 		last: "`-",
 		pipe: "| ",
@@ -103,12 +115,23 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		open: "-",
 		cursor: "_",
 		minus: "-",
+		bullet: "-",
+		queued: "+",
+		open_agent: ">",
 	},
 };
 
 interface PaneLine {
 	text: string; // with ANSI
-	plain: string; // for search
+	plain: string; // for search and yank
+	/** index of the transcript item this line renders */
+	item?: number;
+	/** first line of a message (for { and }) */
+	start?: boolean;
+	/** code block id: fenced code in replies, or unfolded tool output */
+	block?: number;
+	/** a code block's language label (selected with the block, never copied) */
+	label?: boolean;
 }
 
 export class App implements Component {
@@ -133,11 +156,18 @@ export class App implements Component {
 
 	onQuit: () => void = () => {};
 	/** create an agent; `worktree: false` runs it in the current checkout */
-	newSession: (name: string, opts: { worktree: boolean }) => Session = () => {
+	newSession: (name: string, opts: { worktree: boolean; model?: string }) => Session = () => {
 		throw new Error("newSession factory not set");
 	};
 
 	private seq: KeySequencer;
+	private searchBackward = false;
+	/** VISUAL selection, as line indices into the transcript pane */
+	private visual = { anchor: 0, cursor: 0 };
+	/** a y/n question in the command line (dd, quitting with agents running) */
+	private confirm?: { question: string; onYes: () => void };
+	/** copies text to the system clipboard; returns how (replaced in tests) */
+	clipboard: (text: string) => string = (text) => copyToClipboard(text, (d) => this.terminal.write(d));
 
 	constructor(
 		private tui: TUI,
@@ -147,6 +177,7 @@ export class App implements Component {
 		public keymap: Keymap = new Keymap(),
 		public workspace: Workspace = { config: DEFAULT_WORKTREE },
 	) {
+		this.applyColorMode();
 		this.seq = new KeySequencer(keymap, {
 			mode: () => this.keyMode(),
 			run: (binding, keys) => this.runBinding(binding, keys),
@@ -207,6 +238,7 @@ export class App implements Component {
 				this.spinnerFrame = (this.spinnerFrame + 1) % 120;
 				this.tui.requestRender();
 			}, 120);
+			this.spinnerTimer.unref?.(); // animation only; the terminal keeps the app alive
 		} else if (!running && this.spinnerTimer) {
 			clearInterval(this.spinnerTimer);
 			this.spinnerTimer = undefined;
@@ -241,10 +273,31 @@ export class App implements Component {
 	// ------------------------------------------------------------------ input
 
 	private keyMode(): KeyMode {
-		return this.mode === "NORMAL" ? "normal" : this.mode === "INSERT" ? "insert" : "command";
+		if (this.mode === "NORMAL") return "normal";
+		if (this.mode === "INSERT") return "insert";
+		if (this.mode === "VISUAL") return "visual";
+		return "command";
+	}
+
+	private applyColorMode() {
+		this.painter.setColorMode(this.ui.termguicolors ? "truecolor" : "256");
+	}
+
+	/** Ask a y/n question in the command line, like vim's confirm prompts. */
+	private ask(question: string, onYes: () => void) {
+		this.seq.reset();
+		this.confirm = { question, onYes };
 	}
 
 	handleInput(data: string): void {
+		if (this.confirm) {
+			const { onYes } = this.confirm;
+			this.confirm = undefined;
+			this.message = "";
+			if (data === "y" || data === "Y") onYes();
+			this.tui.requestRender();
+			return;
+		}
 		if (data.startsWith("\x1b[200~")) {
 			// bracketed paste: insert as text, never as mappings
 			this.typeText(data.slice(6).replace(/\x1b\[201~$/, "").replace(/\r?\n/g, " "));
@@ -313,9 +366,75 @@ export class App implements Component {
 				this.cmdBuf = "";
 				return;
 			case "mode.search":
+			case "mode.search_back":
 				this.mode = "SEARCH";
+				this.searchBackward = name === "mode.search_back";
 				this.cmdBuf = "";
 				return;
+			case "mode.visual": {
+				const lines = this.buildPaneLines(this.paneWidth());
+				if (lines.length === 0) return;
+				const bottom = this.viewRange(lines.length).end - 1;
+				this.visual = { anchor: bottom, cursor: bottom };
+				this.mode = "VISUAL";
+				return;
+			}
+			case "cursor.down":
+				return this.moveCursor(1);
+			case "cursor.up":
+				return this.moveCursor(-1);
+			case "cursor.half_down":
+				return this.moveCursor(half);
+			case "cursor.half_up":
+				return this.moveCursor(-half);
+			case "cursor.top":
+				return this.moveCursor(-Number.MAX_SAFE_INTEGER);
+			case "cursor.bottom":
+				return this.moveCursor(Number.MAX_SAFE_INTEGER);
+			case "visual.swap":
+				this.visual = { anchor: this.visual.cursor, cursor: this.visual.anchor };
+				return this.revealLine(this.visual.cursor);
+			case "visual.inner_block": {
+				const lines = this.buildPaneLines(this.paneWidth());
+				const block = lines[this.visual.cursor]?.block;
+				if (block === undefined) {
+					this.setMessage("no code block under the cursor", "WarningMsg");
+					return;
+				}
+				const idx = lines.map((l, i) => (l.block === block && !l.label ? i : -1)).filter((i) => i >= 0);
+				this.visual = { anchor: idx[0], cursor: idx[idx.length - 1] };
+				return;
+			}
+			case "visual.yank": {
+				const lines = this.buildPaneLines(this.paneWidth());
+				const [a, b] = [Math.min(this.visual.anchor, this.visual.cursor), Math.max(this.visual.anchor, this.visual.cursor)];
+				this.yank(lines.slice(a, b + 1).map((l) => l.plain).join("\n"), b - a + 1);
+				this.mode = "NORMAL";
+				return;
+			}
+			case "message.next":
+			case "message.prev":
+				return this.jumpMessage(name === "message.next" ? 1 : -1);
+			case "yank.reply": {
+				const reply = [...(this.focusedSession?.items ?? [])].reverse().find((i) => i.kind === "agent" && i.text);
+				if (!reply) this.setMessage("no reply to yank yet", "WarningMsg");
+				else this.yank(reply.text, reply.text.split("\n").length);
+				return;
+			}
+			case "yank.block": {
+				const lines = this.buildPaneLines(this.paneWidth());
+				const { start, end } = this.viewRange(lines.length);
+				let block: number | undefined;
+				for (let i = end - 1; i >= 0 && block === undefined; i--) if (lines[i].block !== undefined && i >= start - 1) block = lines[i].block;
+				if (block === undefined) for (let i = lines.length - 1; i >= 0 && block === undefined; i--) block = lines[i].block;
+				if (block === undefined) {
+					this.setMessage("no code block to yank", "WarningMsg");
+					return;
+				}
+				const code = lines.filter((l) => l.block === block && !l.label).map((l) => l.plain.replace(/^ {2,4}/, ""));
+				this.yank(code.join("\n"), code.length);
+				return;
+			}
 			case "scroll.down":
 				return this.scrollBy(-1);
 			case "scroll.up":
@@ -349,8 +468,16 @@ export class App implements Component {
 			}
 			case "session.new":
 				return this.exec("new");
-			case "session.kill":
-				return this.exec("kill");
+			case "session.kill": {
+				const s = this.focusedSession;
+				if (!s) return;
+				const keep = s.worktree?.path ? " (its worktree is kept)" : "";
+				return this.ask(`Kill '${s.name}'${keep}? [y/N]`, () => this.exec("kill"));
+			}
+			case "session.pause":
+				return this.exec("pause");
+			case "session.resume":
+				return this.exec("resume");
 			case "session.abort": {
 				const s = this.focusedSession;
 				if (s?.state === "running") {
@@ -397,7 +524,11 @@ export class App implements Component {
 			case "app.redraw":
 				return this.repaint();
 			case "app.quit":
+				return this.exec("qa");
+			case "app.quit_force":
 				return this.onQuit();
+			case "app.dashboard":
+				return this.openDashboard();
 			case "app.quit_hint":
 				this.setMessage("Type  :q  and press <Enter> to exit vigent", "Comment");
 				return;
@@ -413,8 +544,10 @@ export class App implements Component {
 			const text = this.inputBuf.trim();
 			this.inputBuf = "";
 			this.mode = "NORMAL";
-			if (text && this.focusedSession) {
-				this.focusedSession.send(text);
+			const s = this.focusedSession;
+			if (text && s) {
+				const waiting = s.submit(text);
+				if (waiting > 0) this.setMessage(`queued: '${s.name}' gets it after the current run (${waiting} waiting)`, "Comment");
 				this.scrollOffset = 0;
 			}
 		} else if (this.mode === "COMMAND") {
@@ -442,17 +575,71 @@ export class App implements Component {
 			case "":
 				return;
 			case "q":
-			case "q!":
 			case "qa":
-			case "qa!":
 			case "quit":
+			case "qall":
+			case "x":
+			case "xa": {
+				const running = this.sessions.filter((x) => x.state === "running").length;
+				if (running > 0) {
+					this.setMessage(
+						`E37: ${running} agent${running === 1 ? " is" : "s are"} still running (add ! to quit anyway)`,
+						"ErrorMsg",
+					);
+					return;
+				}
 				this.onQuit();
+				return;
+			}
+			case "q!":
+			case "qa!":
+			case "quit!":
+			case "qall!":
+				this.onQuit();
+				return;
+			case "queue":
+				this.execQueue(rawArg.trimStart());
+				return;
+			case "pause":
+			case "resume": {
+				const s = this.focusedSession;
+				if (!s) return;
+				if (cmd === "pause") {
+					s.pause();
+					this.setMessage(`paused '${s.name}'${s.queue.length ? ` (${s.queue.length} queued)` : ""} · :resume to continue`, "WarningMsg");
+				} else if (s.state !== "paused") {
+					this.setMessage(`'${s.name}' isn't paused`, "Comment");
+				} else {
+					s.resume();
+					this.message = "";
+				}
+				return;
+			}
+			case "merge":
+				this.execMerge(arg);
+				return;
+			case "pr":
+				this.execPr();
+				return;
+			case "dash":
+			case "dashboard":
+				this.openDashboard();
+				return;
+			case "w":
+			case "w!":
+			case "write":
+			case "write!":
+				this.execWrite(arg, cmd.endsWith("!"));
 				return;
 			case "new":
 			case "new!": {
-				const name = arg || `agent-${this.sessions.length + 1}`;
+				const modelFlag = /(?:^|\s)--model[= ](\S+)/.exec(arg);
+				const name = arg.replace(/(?:^|\s)--model[= ]\S+/, "").trim() || `agent-${this.sessions.length + 1}`;
 				try {
-					const s = this.newSession(name, { worktree: cmd === "new" && this.workspace.config.enabled });
+					const s = this.newSession(name, {
+						worktree: cmd === "new" && this.workspace.config.enabled,
+						model: modelFlag?.[1],
+					});
 					this.addSession(s);
 					const wt = s.worktree;
 					if (wt?.path) {
@@ -504,6 +691,7 @@ export class App implements Component {
 			case "set":
 			case "se": {
 				const r = applySetCommand(this.ui, arg);
+				this.applyColorMode();
 				this.setMessage(r.message, r.error ? "ErrorMsg" : "Normal");
 				this.repaint();
 				return;
@@ -523,9 +711,9 @@ export class App implements Component {
 				this.execLet(arg);
 				return;
 			default: {
-				const map = /^([nic]?)(?:nore)?map$/.exec(cmd);
+				const map = /^([nicvx]?)(?:nore)?map$/.exec(cmd);
 				if (map) return this.execMap(map[1], rawArg);
-				const unmap = /^([nic]?)unmap$/.exec(cmd);
+				const unmap = /^([nicvx]?)unmap$/.exec(cmd);
 				if (unmap) return this.execUnmap(unmap[1], arg);
 				this.setMessage(`E492: Not an editor command: ${cmd}`, "ErrorMsg");
 			}
@@ -535,6 +723,175 @@ export class App implements Component {
 	private setMessage(text: string, group: string) {
 		this.message = text;
 		this.messageGroup = group;
+	}
+
+	// ---------------------------------------------------------------- review flow
+
+	/** `:queue <prompt>` sends it after the current run; `:queue` lists what's waiting. */
+	private execQueue(text: string) {
+		const s = this.focusedSession;
+		if (!s) {
+			this.setMessage("no agent (:new <task> starts one)", "ErrorMsg");
+			return;
+		}
+		if (!text.trim()) {
+			if (s.queue.length === 0) {
+				this.setMessage(`nothing queued for '${s.name}'`, "Comment");
+				return;
+			}
+			const lines: FloatLine[] = s.queue.map((q, i) => [
+				["LineNr", `${String(i + 1).padStart(2)} `],
+				["NormalFloat", q],
+			]);
+			this.openFloat(`Queued for ${s.name}`, lines, 80);
+			return;
+		}
+		const waiting = s.submit(text.trim());
+		this.setMessage(waiting > 0 ? `queued for '${s.name}' (${waiting} waiting)` : `sent to '${s.name}'`, "Comment");
+	}
+
+	/** `:merge` squash-merges the agent's branch into its base in your checkout (`:merge --no-squash` merges). */
+	private execMerge(arg: string) {
+		const s = this.focusedSession;
+		const wt = s?.worktree;
+		if (!s || !wt?.path || !this.workspace.root) {
+			this.setMessage(s ? `'${s.name}' has no worktree to merge` : "no agent", "ErrorMsg");
+			return;
+		}
+		if (s.state === "running") {
+			this.setMessage(`'${s.name}' is still running; wait for it or :pause it first`, "ErrorMsg");
+			return;
+		}
+		const r = mergeWorktree(this.workspace.root, wt, { squash: !/--no-squash\b/.test(arg) });
+		this.setMessage(r.ok ? `${r.message} · :kill! cleans up the worktree` : r.message, r.ok ? "ModeMsg" : "ErrorMsg");
+		s.refreshStat(0);
+	}
+
+	/** `:pr` pushes the agent's branch and opens a pull request. */
+	private execPr() {
+		const s = this.focusedSession;
+		const wt = s?.worktree;
+		if (!s || !wt?.path || !this.workspace.root) {
+			this.setMessage(s ? `'${s.name}' has no worktree to open a PR from` : "no agent", "ErrorMsg");
+			return;
+		}
+		if (s.state === "running") {
+			this.setMessage(`'${s.name}' is still running; wait for it or :pause it first`, "ErrorMsg");
+			return;
+		}
+		this.setMessage(`pushing ${wt.branch}…`, "Comment");
+		this.tui.requestRender();
+		const r = openPullRequest(this.workspace.root, wt);
+		this.setMessage(r.message, r.ok ? "ModeMsg" : "ErrorMsg");
+	}
+
+	/** `:w [file]`: the transcript as Markdown (`:w!` overwrites). */
+	private execWrite(arg: string, force: boolean) {
+		const s = this.focusedSession;
+		if (!s) {
+			this.setMessage("E32: No agent to write", "ErrorMsg");
+			return;
+		}
+		const file = path.resolve(arg || `${slugifyName(s.name)}.md`);
+		if (fs.existsSync(file) && !force) {
+			this.setMessage(`E13: File exists (add ! to override): ${this.shortPath(file)}`, "ErrorMsg");
+			return;
+		}
+		const md = transcriptMarkdown(s);
+		try {
+			fs.writeFileSync(file, md);
+		} catch (err) {
+			this.setMessage(`E212: Can't open file for writing: ${(err as Error).message}`, "ErrorMsg");
+			return;
+		}
+		this.setMessage(`"${this.shortPath(file)}" ${md.split("\n").length - 1}L, ${Buffer.byteLength(md)}B written`, "Normal");
+	}
+
+	/** `:dash`: every agent at a glance; Enter jumps to one. */
+	openDashboard() {
+		if (this.sessions.length === 0) {
+			this.setMessage("no agents yet (:new <task> starts one)", "Comment");
+			return;
+		}
+		const I = this.icons;
+		const lines: FloatLine[] = [];
+		const rows: number[] = [];
+		const stateGroup = (st: string) =>
+			st === "running" ? "String" : st === "waiting" ? "WarningMsg" : st === "error" ? "ErrorMsg" : "Comment";
+		this.sessions.forEach((s, i) => {
+			const st = s.worktree?.stat;
+			const glyph = s.state === "running" ? this.spinner() : I.state[s.state];
+			const last = [...s.items].reverse().find((x) => x.kind === "agent" || x.kind === "user");
+			const stat: [string, string][] = st && (st.added || st.removed)
+				? [["Added", ` +${st.added}`], ["Removed", ` ${I.minus}${st.removed}`]]
+				: [["Comment", ""]];
+			rows.push(lines.length);
+			lines.push([
+				["LineNr", `${String(i + 1).padStart(2)} `],
+				[stateGroup(s.state), `${glyph} `],
+				["Title", truncateToWidth(s.name, 26, "…").padEnd(27)],
+				[stateGroup(s.state), s.state.padEnd(8)],
+				["Comment", ` ${truncateToWidth(s.worktree ? `${I.worktree}${s.worktree.branch}` : s.model, 34, "…")}`],
+				...stat,
+				["Comment", s.queue.length ? `  ${I.queued}${s.queue.length}` : ""],
+			]);
+			lines.push([
+				["NormalFloat", "      "],
+				["Comment", last ? truncateToWidth(plainPreview(last.text), 90, "…") : "(no messages yet)"],
+			]);
+		});
+		const running = this.sessions.filter((s) => s.state === "running").length;
+		lines.push([]);
+		lines.push([["Comment", `${this.sessions.length} agents · ${running} running · j/k move · Enter open`]]);
+		this.openFloat("Dashboard", lines, Math.min(110, this.terminal.columns - 4), {
+			selectable: rows,
+			onSelect: (lineIdx) => this.focusSession(rows.indexOf(lineIdx)),
+			initial: rows[this.focusIdx],
+		});
+	}
+
+	// ---------------------------------------------------------------- visual & yank
+
+	/** First and last+1 pane lines on screen. */
+	private viewRange(total: number): { start: number; end: number } {
+		const h = this.contentHeight();
+		const start = Math.max(0, total - h - this.scrollOffset);
+		return { start, end: Math.min(total, start + h) };
+	}
+
+	/** Scroll just enough to show a pane line. */
+	private revealLine(idx: number) {
+		const total = this.buildPaneLines(this.paneWidth()).length;
+		const h = this.contentHeight();
+		const { start, end } = this.viewRange(total);
+		if (idx < start) this.scrollOffset = Math.max(0, total - h - idx);
+		else if (idx >= end) this.scrollOffset = Math.max(0, total - idx - 1);
+	}
+
+	private moveCursor(delta: number) {
+		const total = this.buildPaneLines(this.paneWidth()).length;
+		this.visual.cursor = Math.max(0, Math.min(total - 1, this.visual.cursor + delta));
+		this.revealLine(this.visual.cursor);
+	}
+
+	private yank(text: string, lineCount: number) {
+		const how = this.clipboard(text);
+		this.setMessage(`${lineCount} line${lineCount === 1 ? "" : "s"} yanked${how === "terminal" ? "" : ` (${how})`}`, "Normal");
+	}
+
+	/** `{` / `}`: put the previous / next message at the top of the pane. */
+	private jumpMessage(dir: 1 | -1) {
+		const lines = this.buildPaneLines(this.paneWidth());
+		const { start } = this.viewRange(lines.length);
+		const starts = lines.map((l, i) => (l.start ? i : -1)).filter((i) => i >= 0);
+		const target = dir > 0 ? starts.find((i) => i > start) : [...starts].reverse().find((i) => i < start);
+		if (target === undefined) {
+			if (dir > 0) this.scrollOffset = 0;
+			else this.scrollTop();
+			return;
+		}
+		const h = this.contentHeight();
+		this.scrollOffset = Math.max(0, Math.min(Math.max(0, lines.length - h), lines.length - h - target));
 	}
 
 	private shortPath(p: string): string {
@@ -559,7 +916,7 @@ export class App implements Component {
 			this.setMessage(`killed '${s.name}' · kept ${wt.branch} (remove it with :worktree remove ${wt.branch})`, "WarningMsg");
 			return;
 		}
-		const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch });
+		const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch, base: wt.base });
 		this.setMessage(`killed '${s.name}' · ${r.message}`, r.removed ? "WarningMsg" : "ErrorMsg");
 	}
 
@@ -630,8 +987,11 @@ export class App implements Component {
 					this.tui.requestRender();
 					return;
 				}
-				const lines: FloatLine[] = text.replace(/\n$/, "").split("\n").map((l) => [[diffGroup(l), l]]);
-				this.openFloat(`${wt.branch} vs ${wt.base ?? "base"}`, lines, this.terminal.columns - 4);
+				const raw = text.replace(/\n$/, "").split("\n");
+				const lines: FloatLine[] = raw.map((l) => [[diffGroup(l), l]]);
+				const jumps = raw.map((l, i) => (l.startsWith("@@") ? i : -1)).filter((i) => i >= 0);
+				const hunks = `${jumps.length} hunk${jumps.length === 1 ? "" : "s"} · ]c [c jump`;
+				this.openFloat(`${wt.branch} vs ${wt.base ?? "base"} · ${hunks}`, lines, this.terminal.columns - 4, { jumps });
 			})
 			.catch((err) => {
 				this.setMessage(`git diff failed: ${(err as Error).message.split("\n")[0]}`, "ErrorMsg");
@@ -697,7 +1057,7 @@ export class App implements Component {
 		}
 	}
 
-	private openFloat(title: string, lines: FloatLine[], width: number) {
+	private openFloat(title: string, lines: FloatLine[], width: number, opts: FloatOptions = {}) {
 		this.seq.reset();
 		let handle: { hide(): void } | undefined;
 		const float = new TextFloat(
@@ -711,6 +1071,7 @@ export class App implements Component {
 				this.repaint();
 			},
 			() => this.tui.requestRender(),
+			opts,
 		);
 		handle = this.tui.showOverlay(float, { width: Math.min(width, this.terminal.columns - 4), anchor: "center" });
 		this.tui.requestRender();
@@ -738,7 +1099,7 @@ export class App implements Component {
 	/** `:help`: every active key, generated from the keymap so it shows your mappings. */
 	openHelp() {
 		const lines: FloatLine[] = [];
-		const labels: Record<KeyMode, string> = { normal: "NORMAL", insert: "INSERT", command: "COMMAND LINE" };
+		const labels: Record<KeyMode, string> = { normal: "NORMAL", insert: "INSERT", visual: "VISUAL", command: "COMMAND LINE" };
 		for (const mode of KEY_MODES) {
 			if (lines.length > 0) lines.push([]);
 			lines.push([["Title", labels[mode]]]);
@@ -845,8 +1206,9 @@ export class App implements Component {
 
 	// ------------------------------------------------------------------ scroll & search
 
+	/** transcript rows: the screen minus winbar, statusline and command line */
 	private contentHeight(): number {
-		return Math.max(1, this.terminal.rows - 2);
+		return Math.max(1, this.terminal.rows - 3);
 	}
 
 	private scrollBy(delta: number) {
@@ -897,13 +1259,15 @@ export class App implements Component {
 			if (this.searchQuery) this.setMessage(`E486: Pattern not found: ${this.searchQuery}`, "ErrorMsg");
 			return;
 		}
-		this.matchIdx = (this.matchIdx + dir + this.matches.length) % this.matches.length;
+		const step = this.searchBackward ? -dir : dir;
+		this.matchIdx = (this.matchIdx + step + this.matches.length) % this.matches.length;
 		this.scrollToLine(this.matches[this.matchIdx]);
 		this.announceMatch();
 	}
 
 	private announceMatch() {
-		this.setMessage(`/${this.searchQuery}  match ${this.matchIdx + 1}/${this.matches.length}`, "Search");
+		const prefix = this.searchBackward ? "?" : "/";
+		this.setMessage(`${prefix}${this.searchQuery}  match ${this.matchIdx + 1}/${this.matches.length}`, "Search");
 	}
 
 	private scrollToLine(lineIdx: number) {
@@ -927,32 +1291,109 @@ export class App implements Component {
 
 	render(width: number): string[] {
 		const P = this.painter;
-		const rows = this.terminal.rows;
-		const contentH = Math.max(1, rows - 2);
+		const sideH = Math.max(1, this.terminal.rows - 2);
+		const paneH = this.contentHeight();
 		const sbW = this.sidebarWidth(width);
 		const paneW = this.paneWidth();
 
-		const sidebar = sbW > 0 ? this.renderSidebar(sbW, contentH) : [];
-		const paneLines = this.buildPaneLines(paneW);
-		const total = paneLines.length;
-		const start = Math.max(0, total - contentH - this.scrollOffset);
-		const view = paneLines.slice(start, start + contentH);
+		const sidebar = sbW > 0 ? this.renderSidebar(sbW, sideH) : [];
+		const intro = this.sessions.length === 0;
+		const paneLines = intro ? this.introLines(paneW, paneH) : this.buildPaneLines(paneW);
+		const { start } = intro ? { start: 0 } : this.viewRange(paneLines.length);
+		const view = paneLines.slice(start, start + paneH);
+		const [selA, selB] = [Math.min(this.visual.anchor, this.visual.cursor), Math.max(this.visual.anchor, this.visual.cursor)];
+		const visualBg = P.attr("Visual").bg;
 
 		const out: string[] = [];
 		const sep = P.p("WinSeparator", this.icons.sep);
 		const normalBg = P.s("Normal");
-		for (let r = 0; r < contentH; r++) {
+		for (let r = 0; r < sideH; r++) {
 			const left = sbW > 0 ? sidebar[r] + sep : "";
-			const vi = r - (contentH - view.length);
-			const matchLine = vi >= 0 && this.matches.includes(start + vi);
-			let text = vi >= 0 ? view[vi].text : "";
-			if (matchLine) text = P.s("Search") + view[vi].plain;
-			const pad = Math.max(0, paneW + 2 - 1 - visibleWidth(vi >= 0 ? view[vi].plain : ""));
-			out.push(left + normalBg + " " + text + normalBg + " ".repeat(pad) + RESET);
+			if (r === 0) {
+				out.push(left + this.renderWinbar(paneW + 2));
+				continue;
+			}
+			const vi = r - 1 - (paneH - view.length);
+			const line = vi >= 0 ? view[vi] : undefined;
+			const idx = start + vi;
+			let text = line?.text ?? "";
+			let bg = normalBg;
+			if (line && this.mode === "VISUAL" && idx >= selA && idx <= selB) {
+				// like nvim: the Visual background under the line's own colors
+				bg = P.on("Normal", visualBg);
+				text = bg + line.text.split(normalBg).join(bg);
+			} else if (line && this.matches.includes(idx)) {
+				text = P.s("Search") + line.plain;
+			}
+			const pad = Math.max(0, paneW + 2 - 1 - visibleWidth(line?.plain ?? ""));
+			out.push(left + bg + " " + text + bg + " ".repeat(pad) + RESET);
 		}
 		out.push(this.renderStatusline(width));
 		out.push(this.renderCmdline(width));
 		return out.map((l) => truncateToWidth(l, width));
+	}
+
+	/** Neovim-style 'winbar' over the transcript: which agent, its model, where it works. */
+	private renderWinbar(w: number): string {
+		const P = this.painter;
+		const bg = P.attr("WinBar").bg ?? P.attr("Normal").bg;
+		const s = this.focusedSession;
+		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
+		const model = s ? `  ${s.model}` : "";
+		const where = s?.worktree?.path ? this.shortPath(s.worktree.path) : s ? "this checkout" : "";
+		const right = where ? `${where} ` : "";
+		const room = Math.max(0, w - visibleWidth(left) - visibleWidth(model) - visibleWidth(right));
+		const status = s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "";
+		return (
+			P.on("WinBar", bg) +
+			left +
+			RESET +
+			P.on("Comment", bg) +
+			model +
+			P.on("WarningMsg", bg) +
+			status +
+			P.on("Normal", bg) +
+			" ".repeat(Math.max(0, room - visibleWidth(status))) +
+			P.on("Comment", bg) +
+			right +
+			RESET
+		);
+	}
+
+	/** Shown when no agent is running, like Neovim's intro screen. */
+	private introLines(paneW: number, paneH: number): PaneLine[] {
+		const P = this.painter;
+		const center = (plain: string) => " ".repeat(Math.max(0, Math.floor((paneW - visibleWidth(plain)) / 2)));
+		const rows: { text: string; plain: string }[] = [];
+		const add = (text: string, plain: string, indent = center(plain)) => rows.push({ text: indent + text, plain: indent + plain });
+		const title = `VIGENT v${VERSION}`;
+		add(P.p("Title", title), title);
+		add("", "");
+		for (const l of ["vim-native coding-agent orchestrator", "built on pi · every agent in its own git worktree"]) add(P.p("Comment", l), l);
+		add("", "");
+		const tips: [string, string][] = [
+			[":new fix flaky test<Enter>", "start an agent"],
+			[":colorscheme<Enter>", "pick a theme"],
+			[":help<Enter>", "every key, yours included"],
+			[":q<Enter>", "to exit"],
+		];
+		const cmdW = Math.max(...tips.map(([c]) => c.length));
+		const blockW = 5 + cmdW + 2 + Math.max(...tips.map(([, d]) => d.length));
+		const indent = center("x".repeat(blockW));
+		for (const [c, d] of tips) {
+			const plain = `type  ${c.padEnd(cmdW)}  ${d}`;
+			add(P.p("Comment", "type  ") + P.p("Special", c.padEnd(cmdW)) + P.p("Comment", `  ${d}`), plain, indent);
+		}
+		if (!this.workspace.root) {
+			add("", "");
+			const note = "(not a git repository: agents will share this folder)";
+			add(P.p("WarningMsg", note), note);
+		}
+		const top = Math.max(0, Math.floor((paneH - rows.length) / 2));
+		const normal = P.s("Normal");
+		const lines: PaneLine[] = rows.map((r) => ({ text: r.text.split(RESET).join(RESET + normal), plain: r.plain }));
+		const bottom = Math.max(0, paneH - top - lines.length);
+		return [...lines, ...Array.from({ length: bottom }, () => ({ text: "", plain: "" }))];
 	}
 
 	/**
@@ -1013,6 +1454,7 @@ export class App implements Component {
 						["VigentIndent", last ? I.last : I.tee],
 						[glyphGroup, `${glyph} `],
 						[focused ? "Title" : "VigentSidebar", s.name],
+						["Comment", s.queue.length > 0 ? ` ${I.queued}${s.queue.length}` : ""],
 					],
 					rowBg,
 				),
@@ -1057,56 +1499,61 @@ export class App implements Component {
 		const lines: PaneLine[] = [];
 		const normal = P.s("Normal");
 		// a RESET inside a line would drop the theme background; restore it after each one
-		const push = (text: string, plain?: string) =>
-			lines.push({ text: text.split(RESET).join(RESET + normal), plain: plain ?? stripAnsi(text) });
+		const push = (text: string, plain: string, meta: Omit<PaneLine, "text" | "plain"> = {}) =>
+			lines.push({ text: text.split(RESET).join(RESET + normal), plain, ...meta });
+		let nextBlock = 0;
 
-		if (!s) {
-			push("");
-			push(P.p("Title", "VIGENT") + P.p("Comment", " — vim-native agent orchestrator"));
-			push(P.p("Comment", "type  :new fix flaky checkout test  to start an agent in its own worktree"));
-		} else {
-			for (const item of s.items) {
-				switch (item.kind) {
-					case "user": {
-						push("");
-						for (const l of wrapTextWithAnsi(item.text, paneW - 2)) {
-							push(P.p("VigentUser", I.prompt) + P.s("Normal") + P.p("Keyword", l), I.prompt + stripAnsi(l));
-						}
-						break;
-					}
-					case "agent": {
-						push("");
-						const text = item.text + (item.streaming ? ` ${I.cursor}` : "");
-						for (const l of wrapTextWithAnsi(text, paneW)) push(P.s("Normal") + l + RESET, stripAnsi(l));
-						break;
-					}
-					case "tool": {
-						const t = item.tool!;
-						const fold = t.folded ? I.folded : I.open;
-						push(
-							P.p("NonText", ` ${fold} `) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
-							` ${fold} ${t.name} ${t.summary}`,
-						);
-						if (!t.folded && t.output) {
-							const outLines = t.output.split("\n");
-							const shown = outLines.slice(0, 12);
-							for (const ol of shown) {
-								for (const wl of wrapTextWithAnsi(ol, paneW - 4)) {
-									push("    " + P.p("VigentToolOutput", wl), "    " + stripAnsi(wl));
-								}
+		(s?.items ?? []).forEach((item, n) => {
+			switch (item.kind) {
+				case "user": {
+					push("", "");
+					wrapTextWithAnsi(item.text, paneW - 2).forEach((l, i) => {
+						push(P.p("VigentUser", I.prompt) + P.s("Normal") + P.p("Keyword", l), I.prompt + stripAnsi(l), {
+							item: n,
+							start: i === 0,
+						});
+					});
+					break;
+				}
+				case "agent": {
+					push("", "");
+					const text = item.text + (item.streaming ? ` ${I.cursor}` : "");
+					const md = renderMarkdown(text, paneW, P, I.bullet, nextBlock);
+					md.lines.forEach((l, i) =>
+						push(P.s("Normal") + l.text + RESET, l.plain, { item: n, start: i === 0, block: l.block, label: l.label }),
+					);
+					nextBlock += md.blocks;
+					break;
+				}
+				case "tool": {
+					const t = item.tool!;
+					const fold = t.folded ? I.folded : I.open;
+					push(
+						P.p("NonText", ` ${fold} `) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
+						` ${fold} ${t.name} ${t.summary}`,
+						{ item: n },
+					);
+					if (!t.folded && t.output) {
+						const block = nextBlock++;
+						const outLines = t.output.split("\n");
+						for (const ol of outLines.slice(0, 12)) {
+							for (const wl of wrapTextWithAnsi(ol, paneW - 4)) {
+								push(`    ${P.p("VigentToolOutput", wl)}`, `    ${stripAnsi(wl)}`, { item: n, block });
 							}
-							if (outLines.length > 12) push("    " + P.p("NonText", `… ${outLines.length - 12} more lines`));
 						}
-						break;
+						if (outLines.length > 12) {
+							push(`    ${P.p("NonText", `… ${outLines.length - 12} more lines`)}`, `    … ${outLines.length - 12} more lines`, { item: n });
+						}
 					}
-					case "info": {
-						push("");
-						for (const l of wrapTextWithAnsi(item.text, paneW)) push(P.p("Comment", l), stripAnsi(l));
-						break;
-					}
+					break;
+				}
+				case "info": {
+					push("", "");
+					wrapTextWithAnsi(item.text, paneW).forEach((l, i) => push(P.p("Comment", l), stripAnsi(l), { item: n, start: i === 0 }));
+					break;
 				}
 			}
-		}
+		});
 		this.paneCache = { lines, key };
 		return lines;
 	}
@@ -1142,13 +1589,21 @@ export class App implements Component {
 		const P = this.painter;
 		const bg = P.s("MsgArea") || P.s("Normal");
 		let content: string;
-		switch (this.mode) {
+		switch (this.confirm ? "CONFIRM" : this.mode) {
+			case "CONFIRM":
+				content = P.p("Question", this.confirm!.question) + P.s("Normal") + " " + P.p("PmenuSel", " ");
+				break;
 			case "COMMAND":
 				content = P.s("Normal") + ":" + this.cmdBuf + P.p("PmenuSel", " ");
 				break;
 			case "SEARCH":
-				content = P.s("Normal") + "/" + this.cmdBuf + P.p("PmenuSel", " ");
+				content = P.s("Normal") + (this.searchBackward ? "?" : "/") + this.cmdBuf + P.p("PmenuSel", " ");
 				break;
+			case "VISUAL": {
+				const n = Math.abs(this.visual.cursor - this.visual.anchor) + 1;
+				content = P.p("ModeMsg", "-- VISUAL LINE --") + P.p("Comment", `  ${n} line${n === 1 ? "" : "s"} · y yank · ib code block · Esc cancel`);
+				break;
+			}
 			case "INSERT":
 				content =
 					P.p("ModeMsg", "-- INSERT --") +
@@ -1177,7 +1632,15 @@ function stripAnsi(s: string): string {
 	return s.replace(/\x1b\[[0-9;]*m|\x1b_pi:c\x07/g, "");
 }
 
-const MODE_LETTER: Record<KeyMode, string> = { normal: "n", insert: "i", command: "c" };
+const VERSION: string = (() => {
+	try {
+		return JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version ?? "0";
+	} catch {
+		return "0";
+	}
+})();
+
+const MODE_LETTER: Record<KeyMode, string> = { normal: "n", insert: "i", visual: "x", command: "c" };
 
 function diffGroup(line: string): string {
 	if (line.startsWith("+++") || line.startsWith("---")) return "Title";
@@ -1189,7 +1652,10 @@ function diffGroup(line: string): string {
 }
 
 function mapModes(letter: string): KeyMode[] {
-	return letter === "i" ? ["insert"] : letter === "c" ? ["command"] : ["normal"];
+	if (letter === "i") return ["insert"];
+	if (letter === "c") return ["command"];
+	if (letter === "x" || letter === "v") return ["visual"];
+	return ["normal"];
 }
 
 function groupKeyIsDigits(keys: string[]): boolean {
@@ -1217,7 +1683,13 @@ const EX_HELP: [string, string][] = [
 	[":new [task]", "start an agent in its own worktree"],
 	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
 	[":new! [name]", "agent in this checkout, no worktree"],
-	[":diff", "what the focused agent changed"],
+	[":diff", "what the focused agent changed (]c [c hunks)"],
+	[":merge [--no-squash]", "squash-merge the agent's branch into yours"],
+	[":pr", "push the branch and open a pull request"],
+	[":queue <prompt>", "send after the current run (:queue lists)"],
+	[":pause  /  :resume", "hold the agent and its queue / continue"],
+	[":dash", "all agents at a glance"],
+	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],
 	[":worktree remove <branch>", "delete a worktree (safe; ! forces)"],
 	[":colorscheme [name]", "switch theme (no name: picker)"],
@@ -1228,8 +1700,27 @@ const EX_HELP: [string, string][] = [
 	[":map", "list your mappings"],
 	[":let mapleader = \",\"", "change the leader key"],
 	[":model id", "switch the focused agent's model"],
-	[":q", "quit"],
+	[":q  /  :q!", "quit (asks if agents are running) / quit anyway"],
 ];
+
+/** One line of a message for previews: markdown markers and code fences dropped. */
+function plainPreview(text: string): string {
+	return text
+		.replace(/^\s*(```|~~~)[\w+-]*\s*$/gm, "")
+		.replace(/\*\*|__|`/g, "")
+		.replace(/^\s*[-*+]\s+/gm, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function slugifyName(name: string): string {
+	return (
+		name
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "") || "transcript"
+	);
+}
 
 function describeAttr(a: Attr): string {
 	const parts: string[] = [];

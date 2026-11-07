@@ -78,24 +78,27 @@ Alternate full-screen views (like vim "windows" you toggle into):
 ### Default keybindings (all remappable)
 
 - Motion: `j/k`, `gg/G`, `Ctrl-d/u`, `{`/`}` (prev/next message)
-- Sessions: `]s`/`[s` next/prev, `1gs`…`9gs` jump by number, `dd` in sidebar
-  kills a session (with confirm), `Ctrl-^` alternate session
+- Sessions: `]s`/`[s` next/prev, `1`…`9` jump by number, `dd` kills the
+  focused agent (asks first), `Ctrl-^` alternate session
 - Leader (default `Space`): `<leader>n` new agent, `<leader>d` diff,
-  `<leader>m` merge, `<leader>q` queue a follow-up prompt, `<leader>t` theme picker
+  `<leader>m` merge, `<leader>p` pull request, `<leader>q` queue a follow-up,
+  `<leader>t` theme picker, `<leader>D` dashboard
 - Folds: `za` toggle tool-call output, `zM`/`zR` close/open all
+- Yank: `V`/`v` + `j`/`k` + `y`, `ib` = code block, `yy` = last reply, `yib` = nearest code block
 
 ### Ex commands
 
 ```
-:new <task>                             spawn an agent in its own worktree (:new! = no worktree)
-:kill [name]      :pause     :resume
-:diff [name]      :merge [name] [--squash]     :pr [name]
-:queue <prompt>                         enqueue follow-up for focused agent
+:new <task> [--model id]                spawn an agent in its own worktree (:new! = no worktree)
+:kill   :kill!    :pause     :resume    stop (keep / remove worktree), hold, continue
+:diff             :merge [--no-squash]  :pr          review and land the work (squash by default)
+:queue <prompt>                         follow-up for the focused agent
+:dash                                   every agent at a glance
 :model <id>                             switch model for focused session
-:theme <name>     :set <opt>=<val>      :map <lhs> <rhs>
-:tree                                   pi session tree (branch from any point)
-:w                                      export transcript (pi /share)
-:qa                                     quit (prompts if agents running)
+:colorscheme <name>   :hi   :set <opt>=<val>   :map <lhs> <rhs>
+:w [file]                               export transcript as Markdown
+:q   :q!                                quit (refuses while agents run) / quit anyway
+:tree                                   pi session tree (not yet)
 ```
 
 ## 4. Configuration — dotfile-first
@@ -140,7 +143,7 @@ sidebar_width = 32
 │  EventBus           — agent events → UI        │
 ├────────────────────────────────────────────────┤
 │  engine: pi SDK                                │
-│  createAgentSession() per agent                │   @mariozechner/pi-agent-core
+│  createAgentSession() per agent                │   @mariozechner/pi-coding-agent
 │  SessionManager (persisted session trees)      │   @mariozechner/pi-ai (providers)
 │  tools: read / write / edit / bash             │
 └────────────────────────────────────────────────┘
@@ -173,25 +176,27 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
 
 ## 7. Milestones
 
-- **M0 — engine spike.** Node/TS package; drive one pi session via SDK from a
-  plain script; print the event stream. Proves the embed works.
-- **M1 — TUI shell.** pi-tui app: sidebar + transcript + statusline +
-  composer; NORMAL/INSERT; one session; one hardcoded theme.
-- **M2 — orchestration.** Multiple concurrent sessions, worktree manager,
-  `:new/:kill`, session switching keys, prompt queue.
-- **M3 — vim depth.** COMMAND/SEARCH/VISUAL modes, folds, `[keys]` in config.toml,
-  theme engine + the 6 built-in colorschemes.
-- **M4 — review flow.** Diff view with hunk navigation, `:merge`, `:pr`,
-  dashboard view.
+- **M0 — engine spike.** ✅ pi sessions driven in-process through the SDK.
+- **M1 — TUI shell.** ✅ pi-tui app: sidebar, transcript (with a winbar),
+  statusline, command line, Neovim-style intro screen.
+- **M2 — orchestration.** ✅ Concurrent agents, a git worktree per agent,
+  `:new` / `:kill`, session switching, prompt queue, `:pause` / `:resume`.
+- **M3 — vim depth.** ✅ NORMAL / INSERT / VISUAL / COMMAND / SEARCH (`/` and
+  `?`), folds, `[keys]` in config.toml, theme engine with 8 built-ins and
+  import of any vim / nvim colorscheme, 256-color fallback.
+- **M4 — review flow.** ✅ `:diff` with `]c` / `[c`, `:merge` (squash by
+  default), `:pr`, `:dash`.
+- **Not yet.** `:tree` (pi's session tree), side-by-side diff, resuming
+  agents after a restart (their worktrees are kept and listed in `:worktrees`).
 - **Later.** Server/remote mode (phone follows a session), pi extensions
   passthrough, partial-hunk accept, session templates.
 
 ## 8. Open questions
 
 1. **Name the composer's editor behavior:** full modal editing inside the
-  composer too (mini-vim), or plain input with readline keys? (Lean: mini-vim,
-  it's the brand.)
+  composer too (mini-vim), or plain input with readline keys? (Today: readline
+  keys, `<C-w>` / `<C-u>`; mini-vim is still the lean.)
 2. **Lua or TOML for config?** TOML is lighter; an embedded scripting layer
   (quickjs/lua) could come later for power users.
 3. **Per-agent model mixing** (cheap model for docs agent, big model for
-  refactor agent) — supported by pi-ai already, just needs UI.
+  refactor agent) — done: `:new <task> --model <id>` and `:model <id>`.

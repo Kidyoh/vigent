@@ -46,7 +46,10 @@ keys (NORMAL mode):
   ctrl+d/u     half-page scroll                :colorscheme    pick a theme (live preview)
   ]s [s 1-9    switch sessions                 :hi Group ...   change a highlight group
   za zM zR     fold/unfold tool output         :set nonumber   toggle ui options
-  /pattern n N search transcript               :diff           what the agent changed
+  /pattern ?   search transcript               :diff           what the agent changed
+  V y  yy yib  select and copy, last reply     :merge  :pr     land the agent's work
+  {  }         previous / next message         :dash           all agents at a glance
+  dd           kill agent (asks first)         :queue <text>   follow-up after this run
   :worktrees   list agent worktrees            :nmap <lhs> <rhs> map keys (see :help)
   :help        every key, including yours      :q              quit
 
@@ -258,14 +261,15 @@ async function main(): Promise<number | undefined> {
 		root,
 		config: config.worktree,
 	});
-	app.newSession = (name, { worktree }): Session => {
+	app.newSession = (name, { worktree, model: perAgent }): Session => {
+		const m = perAgent ?? model;
 		if (demo) {
 			// demo mode never touches your repo: the worktree is only shown, not created
 			const shown = worktree ? { branch: branchName(name, config.worktree.branch) } : undefined;
-			return new DemoSession(name, model, shown);
+			return new DemoSession(name, m, shown);
 		}
 		const wt = worktree && root ? createWorktree(root, name, config.worktree) : undefined;
-		return new PiSession(name, model, { cwd: wt?.path ?? process.cwd(), worktree: wt });
+		return new PiSession(name, m, { cwd: wt?.path ?? process.cwd(), worktree: wt });
 	};
 
 	app.onQuit = () => {

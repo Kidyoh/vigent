@@ -18,7 +18,8 @@ test("vim key notation", () => {
 	assert.deepEqual(parseKeys("gg"), ["g", "g"]);
 	assert.deepEqual(parseKeys("<leader>t", "<Space>"), ["<Space>", "t"]);
 	assert.deepEqual(parseKeys("<Leader>t", ","), [",", "t"]);
-	assert.deepEqual(parseKeys("<leader>t"), ["\\", "t"], "vim's default leader is backslash");
+	assert.deepEqual(parseKeys("<leader>t"), ["<Space>", "t"], "vigent's default leader is Space");
+	assert.deepEqual(parseKeys("<leader>t", "\\"), ["\\", "t"], "vim's backslash still works");
 	assert.deepEqual(parseKeys("<S-a>"), ["A"]);
 	assert.deepEqual(parseKeys("<S-Tab>"), ["<S-Tab>"]);
 	assert.deepEqual(parseKeys("<A-x><M-x>"), ["<M-x>", "<M-x>"]);
