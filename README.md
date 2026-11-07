@@ -31,6 +31,10 @@ npm run demo      # scripted sessions, no API key needed
 npm test          # build and run the test suite
 ```
 
+### Releasing
+
+Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0 && git push origin v0.2.0`), or run the **Release** workflow from the Actions tab. It tests and publishes to npm with the `NPM_TOKEN` repository secret, and skips a version that's already published.
+
 ## Keys
 
 | Mode | Key | Action |
