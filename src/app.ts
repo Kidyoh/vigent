@@ -33,6 +33,7 @@ import {
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
+import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
 import { ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
@@ -191,6 +192,8 @@ export class App implements Component {
 	storage?: RiftriHealth;
 	/** checks riftri again (:checkhealth) */
 	checkStorage?: () => Promise<RiftriHealth>;
+	/** scripted agents, no model behind them (shown in the statusline) */
+	demo = false;
 	/** the engine :new uses without --engine */
 	defaultEngine: () => EngineId = () => "pi";
 
@@ -1718,7 +1721,7 @@ export class App implements Component {
 		const center = (plain: string) => " ".repeat(Math.max(0, Math.floor((paneW - visibleWidth(plain)) / 2)));
 		const rows: { text: string; plain: string }[] = [];
 		const add = (text: string, plain: string, indent = center(plain)) => rows.push({ text: indent + text, plain: indent + plain });
-		const title = `VIGENT v${VERSION}`;
+		const title = `VIGENT v${VERSION_TEXT}`;
 		add(P.p("Title", title), title);
 		add("", "");
 		for (const l of ["vim-native coding-agent orchestrator", "built on pi · every agent in its own git worktree"]) add(P.p("Comment", l), l);
@@ -1972,7 +1975,7 @@ export class App implements Component {
 	private renderStatusline(width: number): string {
 		const P = this.painter;
 		const s = this.focusedSession;
-		const modeBadge = P.p(MODE_GROUP[this.mode], ` ${this.mode} `);
+		const modeBadge = P.p(MODE_GROUP[this.mode], ` ${this.mode} `) + (this.demo ? P.p("VigentModeCommand", " DEMO ") : "");
 		const running = this.sessions.filter((x) => x.state === "running").length;
 		const leftText = s ? ` ${s.name} ` : " [no session] ";
 		const st = s?.worktree?.stat;
@@ -1981,7 +1984,7 @@ export class App implements Component {
 		const right = s
 			? ` ${s.model}  ${formatTokens(s.tokens)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
 			: "";
-		const plainLen = visibleWidth(` ${this.mode} `) + visibleWidth(leftText) + visibleWidth(worktree) + visibleWidth(right);
+		const plainLen = visibleWidth(` ${this.mode} `) + (this.demo ? 6 : 0) + visibleWidth(leftText) + visibleWidth(worktree) + visibleWidth(right);
 		const fill = Math.max(0, width - plainLen);
 		return (
 			modeBadge +
@@ -2046,13 +2049,6 @@ function stripAnsi(s: string): string {
 	return s.replace(/\x1b\[[0-9;]*m|\x1b_pi:c\x07/g, "");
 }
 
-const VERSION: string = (() => {
-	try {
-		return JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version ?? "0";
-	} catch {
-		return "0";
-	}
-})();
 
 const MODE_LETTER: Record<KeyMode, string> = { normal: "n", insert: "i", visual: "x", command: "c" };
 

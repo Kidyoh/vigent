@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
 import { type AgentMeta, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
+import { VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
 import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
@@ -29,6 +30,7 @@ import {
 const HELP = `vigent — vim-native agent orchestrator (pi engine)
 
 usage:
+  vigent --version                           which vigent this is (and the commit, from a clone)
   vigent [--demo] [--theme <name>] [--model <id>] [--engine pi|claude|codex|opencode]
 
 engines (what runs new agents; :checkhealth shows which are signed in):
@@ -195,6 +197,10 @@ function worktreeCommand(argv: string[]): number {
 async function main(): Promise<number | undefined> {
 	const argv = process.argv.slice(2);
 
+	if (argv.includes("--version") || argv.includes("-v") || argv[0] === "version") {
+		console.log(`vigent ${VERSION_TEXT}`);
+		return 0;
+	}
 	if (argv.includes("--help") || argv.includes("-h")) {
 		console.log(HELP);
 		return 0;
@@ -354,8 +360,14 @@ async function main(): Promise<number | undefined> {
 	};
 
 	if (demo) {
+		app.demo = true;
 		for (const s of createDemoSessions()) app.addSession(s, false);
 		app.focusIdx = 0;
+		if (!argv.includes("--demo")) {
+			warnings.unshift(
+				"demo mode: these agents are scripted. For real ones, install and sign in to Claude Code, Codex or OpenCode, or set ANTHROPIC_API_KEY, then restart (:checkhealth)",
+			);
+		}
 	} else if (root && config.worktree.enabled) {
 		// reopen the agents that were running when vigent last quit
 		const agents = restorableAgents(root, config.worktree);

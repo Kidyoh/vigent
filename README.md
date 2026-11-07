@@ -21,6 +21,8 @@ vigent --demo             # scripted agents, nothing needed
 vigent --help
 ```
 
+`vigent --version` shows which vigent runs (with the commit, when it runs from a clone). An older build may be missing a theme or command from these docs, for example `E185: Cannot find color scheme 'lazyvim'`. Update it with `git pull && npm install && npm run build` in your clone, or `npm install -g vigent@latest`.
+
 ### First agent
 
 Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using pi if it has an API key, or else the first signed-in CLI (Claude Code, Codex, OpenCode; `:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.
