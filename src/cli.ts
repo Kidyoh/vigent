@@ -4,8 +4,10 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
-import { loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
+import { type AgentMeta, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
+import { CliSession } from "./cli-engines.js";
+import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
@@ -18,13 +20,20 @@ import {
 	listWorktrees,
 	removeWorktree,
 	repoRoot,
+	type WorktreeInfo,
 	worktreesDir,
 } from "./worktree.js";
 
 const HELP = `vigent — vim-native agent orchestrator (pi engine)
 
 usage:
-  vigent [--demo] [--theme <name>] [--model <id>]
+  vigent [--demo] [--theme <name>] [--model <id>] [--engine pi|claude|codex|opencode]
+
+engines (what runs new agents; :checkhealth shows which are signed in):
+  pi        built in, uses ANTHROPIC_API_KEY / OPENAI_API_KEY / ... or pi's login
+  claude    your installed Claude Code CLI, with its own login
+  codex     your installed Codex CLI, with its own login
+  opencode  your installed OpenCode CLI, with its own login
 
 themes:
   vigent theme list                          built-in and installed themes
@@ -55,9 +64,10 @@ keys (NORMAL mode):
   :diff split  side-by-side diff               :tree           go back to any point and branch
   <Space>u     the conversation tree           :nmap <lhs> <rhs> map keys (see :help)
   :help        every key, including yours      :q              quit
+  :checkhealth engines: installed? signed in?  :new <task> --engine codex
 
-Runs in demo mode (scripted sessions, no network) when --demo is passed
-or no provider API key is found (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...).
+Runs in demo mode (scripted sessions, no network) when --demo is passed,
+or when pi has no API key and none of claude / codex / opencode is installed.
 Config: ~/.config/vigent/config.toml   Themes: ~/.config/vigent/themes/
 `;
 
@@ -239,11 +249,16 @@ async function main(): Promise<number | undefined> {
 	const { keymap, warnings: keyWarnings } = buildKeymap(config.leader, config.keys);
 	warnings.push(...keyWarnings);
 
-	const hasKey = Boolean(
-		process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
-	);
-	const demo = argv.includes("--demo") || !hasKey;
-	const model = flag(argv, "--model") ?? config.model ?? "claude-sonnet-4-5";
+	const engineArg = flag(argv, "--engine");
+	if (engineArg && !isEngineId(engineArg)) {
+		console.error(`vigent: unknown engine '${engineArg}' (pi, claude, codex or opencode)`);
+		return 1;
+	}
+	const chosenEngine = (engineArg ?? (config.engine === "auto" ? undefined : config.engine)) as EngineId | undefined;
+	const anyCli = (["claude", "codex", "opencode"] as const).some((id) => onPath(ENGINE_BINS[id]));
+	const demo = argv.includes("--demo") || (!chosenEngine && !piConnected() && !anyCli);
+	const modelArg = flag(argv, "--model");
+	const model = modelArg ?? config.model ?? "claude-sonnet-4-5";
 
 	const themeName = flag(argv, "--theme") ?? config.theme ?? "default";
 	let theme = BUILTIN_THEMES.default;
@@ -264,17 +279,56 @@ async function main(): Promise<number | undefined> {
 		root,
 		config: config.worktree,
 	});
-	app.newSession = (name, { worktree, model: perAgent }): Session => {
-		const m = perAgent ?? model;
+	app.defaultEngine = () => chosenEngine ?? defaultEngine(app.engines);
+	app.detectEngines = () => detectEngines();
+	// installed? signed in? Checked in the background: the CLIs take a moment to answer
+	detectEngines()
+		.then((engines) => app.setEngines(engines))
+		.catch(() => {});
+
+	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
+	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string) =>
+		new CliSession(name, engine, requested, {
+			cwd,
+			worktree: wt,
+			resumeId,
+			extraArgs: config.engines[engine]?.args,
+			onResumeId: (id) => {
+				if (!wt?.path) return;
+				const meta = loadAgentMeta(wt.path);
+				if (meta) saveAgentMeta(wt.path, { ...meta, resumeId: id });
+			},
+		});
+
+	app.newSession = (name, { worktree, model: perAgent, engine = app.defaultEngine() }): Session => {
 		if (demo) {
 			// demo mode never touches your repo: the worktree is only shown, not created
 			const shown = worktree ? { branch: branchName(name, config.worktree.branch) } : undefined;
-			return new DemoSession(name, m, shown);
+			return new DemoSession(name, perAgent ?? model, shown);
 		}
+		// a CLI uses its own default model unless one is asked for
+		const requested = engine === "pi" ? undefined : (perAgent ?? config.engines[engine]?.model ?? (modelArg && engineArg === engine ? modelArg : undefined));
+		const m = engine === "pi" ? (perAgent ?? model) : (requested ?? "");
 		const wt = worktree && root ? createWorktree(root, name, config.worktree) : undefined;
-		if (!wt?.path) return new PiSession(name, m, { cwd: process.cwd() });
-		saveAgentMeta(wt.path, { name, model: m, base: wt.base, createdAt: new Date().toISOString() });
-		return new PiSession(name, m, { cwd: wt.path, worktree: wt, sessionDir: sessionDir(wt.path) });
+		if (wt?.path) {
+			saveAgentMeta(wt.path, {
+				name,
+				model: m,
+				base: wt.base,
+				createdAt: new Date().toISOString(),
+				...(engine === "pi" ? {} : { engine, ...(requested ? { requestedModel: requested } : {}) }),
+			});
+		}
+		const cwd = wt?.path ?? process.cwd();
+		if (engine !== "pi") return cliSession(name, engine, requested, cwd, wt?.path ? wt : undefined);
+		if (!wt?.path) return new PiSession(name, m, { cwd });
+		return new PiSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path) });
+	};
+	/** Reopen a saved agent with the engine it was started with. */
+	const reopen = (meta: AgentMeta, worktree: WorktreeInfo): Session => {
+		const engine = meta.engine && isEngineId(meta.engine) ? meta.engine : "pi";
+		if (engine !== "pi") return cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId);
+		return new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!) });
 	};
 	app.attachSession = (wt) => {
 		if (demo || !wt.path) throw new Error("attaching needs a real agent (not --demo)");
@@ -284,8 +338,7 @@ async function main(): Promise<number | undefined> {
 			createdAt: new Date().toISOString(),
 		};
 		saveAgentMeta(wt.path, { ...meta, detached: undefined }); // reopened at the next start again
-		const worktree = { ...wt, base: wt.base ?? meta.base };
-		return new PiSession(meta.name, meta.model, { cwd: wt.path, worktree, sessionDir: sessionDir(wt.path) });
+		return reopen(meta, { ...wt, base: wt.base ?? meta.base });
 	};
 
 	app.onQuit = () => {
@@ -305,10 +358,7 @@ async function main(): Promise<number | undefined> {
 		// reopen the agents that were running when vigent last quit
 		for (const { meta, worktree } of restorableAgents(root, config.worktree)) {
 			try {
-				app.addSession(
-					new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!) }),
-					false,
-				);
+				app.addSession(reopen(meta, worktree), false);
 			} catch (err) {
 				warnings.push(`couldn't reopen '${meta.name}': ${(err as Error).message}`);
 			}

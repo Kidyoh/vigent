@@ -292,7 +292,7 @@ test(":new <task> --model picks a model for one agent", () => {
 	const made = [];
 	app.newSession = (name, opts) => (made.push({ name, ...opts }), new TestSession(name, opts.model ?? "default"));
 	ex("new! docs pass --model claude-haiku-4-5");
-	assert.deepEqual(made[0], { name: "docs pass", worktree: false, model: "claude-haiku-4-5" });
+	assert.deepEqual(made[0], { name: "docs pass", worktree: false, model: "claude-haiku-4-5", engine: "pi" });
 	assert.equal(app.focusedSession.model, "claude-haiku-4-5");
 });
 

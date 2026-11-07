@@ -1,0 +1,4 @@
+{"type":"step_start","timestamp":1794036785000,"sessionID":"ses_e4b13245fffeWLL1J14R855Rfg","part":{"id":"prt_1","type":"step-start"}}
+{"type":"tool_use","timestamp":1794036786000,"sessionID":"ses_e4b13245fffeWLL1J14R855Rfg","part":{"id":"prt_2","type":"tool","callID":"call_1","tool":"bash","state":{"status":"completed","input":{"command":"npm test","description":"Run the tests"},"output":"1 failing\n","title":"npm test"}}}
+{"type":"text","timestamp":1794036787000,"sessionID":"ses_e4b13245fffeWLL1J14R855Rfg","part":{"id":"prt_3","type":"text","text":"The cart test fails on an empty cart.","time":{"start":1794036786500,"end":1794036787000}}}
+{"type":"step_finish","timestamp":1794036787100,"sessionID":"ses_e4b13245fffeWLL1J14R855Rfg","part":{"id":"prt_4","type":"step-finish","tokens":{"input":900,"output":40,"reasoning":0,"cache":{"read":300,"write":0}},"cost":0}}

@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
+import { type EngineId, isEngineId } from "./engines.js";
 import { KEY_MODES, type KeyMode } from "./keys.js";
 import { type Attr, configDir, normalizeGroups } from "./theme.js";
 import { DEFAULT_WORKTREE, type WorktreeConfig } from "./worktree.js";
@@ -34,9 +35,20 @@ export interface UiOptions {
 	termguicolors: boolean;
 }
 
+/** [engines.claude] / [engines.codex] / [engines.opencode] */
+export interface EngineOptions {
+	/** replaces vigent's default extra arguments for that CLI */
+	args?: string[];
+	/** model for new agents on that engine (default: the CLI's own) */
+	model?: string;
+}
+
 export interface Config {
 	theme?: string;
 	model?: string;
+	/** engine for new agents: pi, claude, codex, opencode, or auto (default) */
+	engine?: EngineId | "auto";
+	engines: Partial<Record<Exclude<EngineId, "pi">, EngineOptions>>;
 	leader?: string;
 	ui: UiOptions;
 	highlights: Record<string, Attr>;
@@ -62,7 +74,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath()): { config: Config; warnings: string[] } {
-	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE } };
+	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {} };
 	const warnings: string[] = [];
 	if (!fs.existsSync(file)) return { config, warnings };
 
@@ -85,6 +97,33 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 					const field = key === "colorscheme" ? "theme" : key === "mapleader" ? "leader" : key;
 					config[field as "theme" | "model" | "leader"] = value;
 				} else warnings.push(`config: '${key}' should be a string`);
+				break;
+			case "engine":
+				if (typeof value === "string" && (value === "auto" || isEngineId(value))) config.engine = value;
+				else warnings.push("config: 'engine' should be \"auto\", \"pi\", \"claude\", \"codex\" or \"opencode\"");
+				break;
+			case "engines":
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					warnings.push("config: [engines] should be a table");
+					break;
+				}
+				for (const [id, opts] of Object.entries(value)) {
+					if (id === "pi" || !isEngineId(id)) {
+						warnings.push(`config: unknown engine [engines.${id}] (claude, codex or opencode)`);
+						continue;
+					}
+					if (!opts || typeof opts !== "object" || Array.isArray(opts)) {
+						warnings.push(`config: [engines.${id}] should be a table`);
+						continue;
+					}
+					const e: EngineOptions = {};
+					for (const [k, v] of Object.entries(opts)) {
+						if (k === "args" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.args = v;
+						else if (k === "model" && typeof v === "string") e.model = v;
+						else warnings.push(`config [engines.${id}]: ${k === "args" ? "'args' should be a list of strings" : k === "model" ? "'model' should be a string" : `unknown option '${k}'`}`);
+					}
+					config.engines[id as Exclude<EngineId, "pi">] = e;
+				}
 				break;
 			case "keys":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -255,8 +294,24 @@ export const CONFIG_TEMPLATE = `# vigent config: ~/.config/vigent/config.toml
 # with  vigent theme import  (your nvim/vim colorscheme) or  vigent theme new.
 theme = "default"
 
-# Model used for new agents.
+# Model used for new pi agents.
 # model = "claude-sonnet-4-5"
+
+# --- Engines ---------------------------------------------------------------
+# What runs new agents: "pi" (built in), or a coding-agent CLI you already
+# have installed and signed in: "claude" (Claude Code), "codex", "opencode".
+# "auto" picks pi if it has an API key, else the first signed-in CLI.
+# Per agent: :new fix the race --engine codex.   Status: :checkhealth
+engine = "auto"
+
+# Each CLI runs as it is, with its own login. Extra arguments and a model:
+# [engines.claude]
+# args = ["--permission-mode", "acceptEdits"]   # the default
+# model = "sonnet"
+# [engines.codex]
+# args = ["-c", 'sandbox_mode="workspace-write"']  # the default
+# [engines.opencode]
+# model = "anthropic/claude-sonnet-4-5"
 
 # --- Leader ----------------------------------------------------------------
 # What <leader> means in [keys]. Vim's default is "\\".

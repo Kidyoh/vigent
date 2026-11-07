@@ -6,6 +6,7 @@
  * - DemoSession replays a scripted transcript so the UI can be explored
  *   without API keys.
  */
+import type { EngineId } from "./engines.js";
 import { flattenTree, type TreeGlyphs, type TreeRow } from "./tree.js";
 import { diffStat, type WorktreeInfo } from "./worktree.js";
 
@@ -37,6 +38,8 @@ let nextId = 1;
 
 export abstract class Session {
 	id = nextId++;
+	/** what runs this agent */
+	engine: EngineId = "pi";
 	state: SessionState = "idle";
 	items: TranscriptItem[] = [];
 	tokens = 0;

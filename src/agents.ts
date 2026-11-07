@@ -1,7 +1,8 @@
 /**
  * Agents survive a restart.
  *
- * Each agent's name, model and pi conversation are saved inside git's own
+ * Each agent's name, model, engine and pi conversation (or the id of its
+ * Claude Code / Codex / OpenCode conversation) are saved inside git's own
  * record of its worktree (.git/worktrees/<name>/vigent/), not in your files.
  * When vigent starts it reopens every agent whose worktree is still there.
  * Removing the worktree (git worktree remove, :kill!) deletes this record
@@ -10,6 +11,7 @@
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { EngineId } from "./engines.js";
 import { listWorktrees, type WorktreeConfig, type WorktreeInfo } from "./worktree.js";
 
 export interface AgentMeta {
@@ -19,6 +21,12 @@ export interface AgentMeta {
 	createdAt: string;
 	/** stopped with :kill: kept on disk, not reopened at startup (:attach brings it back) */
 	detached?: boolean;
+	/** what runs the agent; missing = pi */
+	engine?: EngineId;
+	/** a CLI engine's conversation id, to continue it */
+	resumeId?: string;
+	/** the model asked for (CLI engines; missing = the CLI's own default) */
+	requestedModel?: string;
 }
 
 /** vigent's folder in git's per-worktree admin dir. */

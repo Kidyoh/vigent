@@ -33,6 +33,7 @@ import {
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
+import { ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
 import { splitView, unifiedView } from "./diffview.js";
 import { TREE_GLYPHS, type TreeRow } from "./tree.js";
@@ -87,6 +88,9 @@ interface Icons {
 	queued: string;
 	open_agent: string;
 	here: string;
+	ok: string;
+	warn: string;
+	off: string;
 }
 
 const ICONS: Record<UiOptions["icons"], Icons> = {
@@ -107,6 +111,9 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		queued: "⧗",
 		open_agent: "▸",
 		here: "●",
+		ok: "●",
+		warn: "◐",
+		off: "○",
 	},
 	ascii: {
 		spinner: ["|", "/", "-", "\\"],
@@ -125,6 +132,9 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		queued: "+",
 		open_agent: ">",
 		here: "*",
+		ok: "+",
+		warn: "~",
+		off: "-",
 	},
 };
 
@@ -168,9 +178,16 @@ export class App implements Component {
 	};
 
 	/** create an agent; `worktree: false` runs it in the current checkout */
-	newSession: (name: string, opts: { worktree: boolean; model?: string }) => Session = () => {
+	newSession: (name: string, opts: { worktree: boolean; model?: string; engine?: EngineId }) => Session = () => {
 		throw new Error("newSession factory not set");
 	};
+
+	/** pi, Claude Code, Codex, OpenCode: installed? signed in? (undefined until checked) */
+	engines?: EngineInfo[];
+	/** checks the engines again (:checkhealth) */
+	detectEngines?: () => Promise<EngineInfo[]>;
+	/** the engine :new uses without --engine */
+	defaultEngine: () => EngineId = () => "pi";
 
 	private seq: KeySequencer;
 	private searchBackward = false;
@@ -657,6 +674,11 @@ export class App implements Component {
 			case "tree":
 				this.openTree();
 				return;
+			case "checkhealth":
+			case "che":
+			case "engines":
+				this.openHealth();
+				return;
 			case "w":
 			case "w!":
 			case "write":
@@ -666,21 +688,38 @@ export class App implements Component {
 			case "new":
 			case "new!": {
 				const modelFlag = /(?:^|\s)--model[= ](\S+)/.exec(arg);
-				const name = arg.replace(/(?:^|\s)--model[= ]\S+/, "").trim() || `agent-${this.sessions.length + 1}`;
+				const engineFlag = /(?:^|\s)(?:--engine|-e)[= ](\S+)/.exec(arg);
+				const name =
+					arg
+						.replace(/(?:^|\s)--model[= ]\S+/, "")
+						.replace(/(?:^|\s)(?:--engine|-e)[= ]\S+/, "")
+						.trim() || `agent-${this.sessions.length + 1}`;
+				const engine = engineFlag?.[1] ?? this.defaultEngine();
+				if (!isEngineId(engine)) {
+					this.setMessage(`unknown engine '${engine}': pi, claude, codex or opencode`, "ErrorMsg");
+					return;
+				}
+				const info = this.engines?.find((e) => e.id === engine);
+				if (info && !info.installed) {
+					this.setMessage(`${info.name} isn't installed: ${info.install} · :checkhealth`, "ErrorMsg");
+					return;
+				}
 				try {
 					const s = this.newSession(name, {
 						worktree: cmd === "new" && this.workspace.config.enabled,
 						model: modelFlag?.[1],
+						engine,
 					});
 					this.addSession(s);
 					const wt = s.worktree;
+					const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
 					if (wt?.path) {
-						this.setMessage(`'${name}' on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}`, "ModeMsg");
+						this.setMessage(`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}`, "ModeMsg");
 					} else if (wt) {
-						this.setMessage(`'${name}' on ${wt.branch}`, "ModeMsg");
+						this.setMessage(`'${name}'${by} on ${wt.branch}`, "ModeMsg");
 					} else {
 						const why = cmd === "new!" || !this.workspace.config.enabled ? "" : " (not a git repo, so no worktree)";
-						this.setMessage(`'${name}' in this checkout${why}`, "ModeMsg");
+						this.setMessage(`'${name}'${by} in this checkout${why}`, "ModeMsg");
 					}
 				} catch (err: any) {
 					this.setMessage(String(err?.message ?? err), "ErrorMsg");
@@ -906,6 +945,55 @@ export class App implements Component {
 			})
 			.catch((err) => {
 				this.setMessage((err as Error).message, "ErrorMsg");
+				this.tui.requestRender();
+			});
+	}
+
+	/** Called when the engine checks finish. */
+	setEngines(engines: EngineInfo[]) {
+		this.engines = engines;
+		this.tui.requestRender();
+	}
+
+	/** `:checkhealth` (or `:engines`): which agent engines can run, and how to connect the rest. */
+	openHealth() {
+		const show = () => {
+			const engines = this.engines ?? [];
+			const I = this.icons;
+			const lines: FloatLine[] = [];
+			const def = this.defaultEngine();
+			lines.push([["Title", "vigent: agent engines"]]);
+			lines.push([["Comment", "Each CLI runs as installed, with its own login; vigent never reads credentials."]]);
+			for (const e of engines) {
+				lines.push([]);
+				const glyph = e.connected ? I.ok : e.installed ? I.warn : I.off;
+				const group = e.connected ? "String" : e.installed ? "WarningMsg" : "Comment";
+				lines.push([
+					[group, `${glyph} `],
+					["Title", e.name],
+					["Comment", e.version ? `  ${e.version}` : ""],
+					["Special", e.id === def ? "  (default for :new)" : ""],
+				]);
+				lines.push([["NormalFloat", "    "], [e.connected ? "NormalFloat" : group, `${e.connected ? "OK " : e.installed ? "WARNING " : ""}${e.detail}`]]);
+				if (!e.installed && e.install) lines.push([["Comment", "    install: "], ["Special", e.install]]);
+				else if (!e.connected && e.connect) lines.push([["Comment", "    connect: "], ["Special", e.connect]]);
+				if (e.connected) lines.push([["Comment", "    use: "], ["Special", `:new <task> --engine ${e.id}`]]);
+			}
+			lines.push([]);
+			lines.push([["Comment", "Connect in another terminal, then :checkhealth again."]]);
+			this.openFloat("checkhealth", lines, 84);
+		};
+		if (!this.detectEngines) return show();
+		this.setMessage("checking engines…", "Comment");
+		this.tui.requestRender();
+		this.detectEngines()
+			.then((engines) => {
+				this.engines = engines;
+				this.message = "";
+				show();
+			})
+			.catch((err) => {
+				this.setMessage(`checkhealth: ${(err as Error).message}`, "ErrorMsg");
 				this.tui.requestRender();
 			});
 	}
@@ -1484,7 +1572,7 @@ export class App implements Component {
 		const bg = P.attr("WinBar").bg ?? P.attr("Normal").bg;
 		const s = this.focusedSession;
 		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
-		const model = s ? `  ${s.model}` : "";
+		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}` : "";
 		const where = s?.worktree?.path ? this.shortPath(s.worktree.path) : s ? "this checkout" : "";
 		const right = where ? `${where} ` : "";
 		const room = Math.max(0, w - visibleWidth(left) - visibleWidth(model) - visibleWidth(right));
@@ -1528,6 +1616,21 @@ export class App implements Component {
 		for (const [c, d] of tips) {
 			const plain = `type  ${c.padEnd(cmdW)}  ${d}`;
 			add(P.p("Comment", "type  ") + P.p("Special", c.padEnd(cmdW)) + P.p("Comment", `  ${d}`), plain, indent);
+		}
+		if (this.engines) {
+			add("", "");
+			const def = this.defaultEngine();
+			const parts = this.engines.map((e) => `${e.connected ? this.icons.ok : e.installed ? this.icons.warn : this.icons.off} ${e.name}`);
+			const plain = parts.join("   ");
+			const indentE = center(plain);
+			let text = "";
+			this.engines.forEach((e, i) => {
+				const group = e.connected ? "String" : e.installed ? "WarningMsg" : "Comment";
+				text += (i ? "   " : "") + P.p(group, parts[i].slice(0, parts[i].indexOf(" ") + 1)) + P.p(e.id === def ? "Title" : "Comment", e.name);
+			});
+			add(text, plain, indentE);
+			const hint = ":checkhealth  to connect engines";
+			add(P.p("Comment", hint), hint);
 		}
 		if (!this.workspace.root) {
 			add("", "");
@@ -1621,7 +1724,40 @@ export class App implements Component {
 			}
 		});
 
-		while (lines.length < h) lines.push(row([["EndOfBuffer", this.ui.tilde ? "~" : ""]]));
+		// engines at the bottom, like a second neo-tree source
+		const engines = this.engines;
+		const block: string[] = [];
+		if (engines && h - lines.length >= engines.length + 3) {
+			const ready = engines.filter((e) => e.connected).length;
+			const title = " ENGINES";
+			const count = `${ready}/${engines.length} `;
+			block.push(
+				row([
+					["WinBar", title],
+					["VigentSidebar", " ".repeat(Math.max(1, w - visibleWidth(title) - visibleWidth(count)))],
+					["Comment", count],
+				]),
+			);
+			const def = this.defaultEngine();
+			for (const e of engines) {
+				const glyph = e.connected ? I.ok : e.installed ? I.warn : I.off;
+				const group = e.connected ? "String" : e.installed ? "WarningMsg" : "Comment";
+				const note = e.connected ? (e.id === def ? "default" : "") : e.id === "pi" ? "no API key" : e.installed ? (e.connect ?? "not signed in") : "not installed";
+				const left = `  ${glyph} ${e.name}`;
+				const room = w - visibleWidth(left) - 1;
+				const tail = note ? truncateToWidth(note, Math.max(0, room - 1), "…") : "";
+				block.push(
+					row([
+						[group, `  ${glyph} `],
+						[e.connected ? "VigentSidebar" : "Comment", e.name],
+						["VigentSidebar", " ".repeat(Math.max(1, room - visibleWidth(tail)))],
+						["Comment", tail],
+					]),
+				);
+			}
+		}
+		while (lines.length < h - block.length) lines.push(row([["EndOfBuffer", this.ui.tilde ? "~" : ""]]));
+		lines.push(...block);
 		return lines.slice(0, h);
 	}
 
@@ -1827,6 +1963,8 @@ const EX_HELP: [string, string][] = [
 	[":pause  /  :resume", "hold the agent and its queue / continue"],
 	[":dash", "all agents at a glance"],
 	[":tree", "the conversation's branches; go back and branch"],
+	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
+	[":checkhealth", "which engines are installed and signed in"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],
 	[":attach <branch>", "reopen an agent in a kept worktree"],

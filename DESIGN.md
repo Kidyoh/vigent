@@ -193,6 +193,12 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
 - **M6 — conversation tree.** ✅ `:tree` shows pi's session tree with every
   branch; going back to a prompt reopens it for editing, and the next prompt
   starts a new branch. Branches persist with the session.
+- **M7 — other engines.** ✅ Agents can run the Claude Code, Codex or
+  OpenCode CLI you already have, with its own login (`:new <task> --engine
+  codex`). vigent drives each CLI's JSON mode in the agent's worktree and
+  continues its conversation by id after a restart. The sidebar's ENGINES
+  block and `:checkhealth` show what is installed and signed in, and how to
+  connect the rest.
 - **Later.** Server/remote mode (phone follows a session), pi extensions
   passthrough, partial-hunk accept, session templates.
 

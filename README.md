@@ -1,6 +1,6 @@
 # vigent
 
-A vim-style, lightweight terminal app for running several coding agents at once, built on the [pi](https://github.com/badlogic/pi-mono) engine.
+A vim-style, lightweight terminal app for running several coding agents at once, built on the [pi](https://github.com/badlogic/pi-mono) engine. It can also drive the Claude Code, Codex and OpenCode CLIs you already have installed, with their own logins.
 
 ![vigent with the default Neovim theme](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/vigent-default-theme.png)
 
@@ -15,8 +15,9 @@ npm install -g vigent
 Requires Node.js 20 or newer and git. Then, inside any git repository:
 
 ```bash
-vigent            # with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY) set
-vigent --demo     # scripted agents, no API key needed
+vigent                    # pi with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY), or a signed-in CLI
+vigent --engine claude    # new agents run your installed Claude Code (also: codex, opencode, pi)
+vigent --demo             # scripted agents, nothing needed
 vigent --help
 ```
 
@@ -50,6 +51,30 @@ Copies go to the system clipboard through the terminal (OSC 52), so they work ov
 ![Neovim-style intro screen](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/intro.png)
 
 ![VISUAL mode on a markdown reply](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/visual-mode.png)
+
+## Engines: pi, Claude Code, Codex, OpenCode
+
+pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may already use: vigent runs them as installed, in the agent's worktree, so each one uses its own login and settings. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected.
+
+```vim
+:new fix the race --engine codex            " this agent runs Codex
+:new docs pass --engine claude --model opus " a model for that CLI
+:checkhealth                                " installed? signed in? how to connect the rest
+```
+
+The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks pi if it has an API key, otherwise the first signed-in CLI. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
+
+![:checkhealth with Claude Code signed in and Codex waiting for codex login](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/checkhealth.png)
+
+![a Claude Code agent reopened after a restart, continuing its conversation](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/claude-code-agent.png)
+
+| Engine | vigent runs | Default extra arguments |
+|---|---|---|
+| `claude` | `claude -p --output-format stream-json` | `--permission-mode acceptEdits` |
+| `codex` | `codex exec --json` (`exec resume` to continue) | `-c sandbox_mode="workspace-write"` |
+| `opencode` | `opencode run --format json --dir <worktree>` | none |
+
+Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
 ## Worktrees
 
@@ -180,6 +205,8 @@ src/
   color.ts           hex math, xterm-256 colors, vim color names
   config.ts          config.toml, ui options and :set
   session.ts         Session model; PiSession (real engine) and DemoSession
+  engines.ts         which engines are installed and signed in (:checkhealth)
+  cli-engines.ts     Claude Code / Codex / OpenCode adapters and CliSession
   demo.ts            scripted demo sessions
 test/                node:test suites (npm test)
 ```

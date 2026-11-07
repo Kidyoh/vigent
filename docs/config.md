@@ -63,7 +63,8 @@ branch = "{type}/{name}"        # "fix flaky test" -> fix/flaky-test
 | Key | Default | Meaning |
 |---|---|---|
 | `theme` | `"default"` | Colorscheme at startup. `colorscheme` is accepted as an alias. See [themes.md](themes.md). |
-| `model` | `"claude-sonnet-4-5"` | Model for new agents. `--model` on the command line wins. |
+| `model` | `"claude-sonnet-4-5"` | Model for new pi agents. `--model` on the command line wins. |
+| `engine` | `"auto"` | What runs new agents: `"pi"`, `"claude"`, `"codex"`, `"opencode"`, or `"auto"` (pi if it has an API key, else the first signed-in CLI). `--engine` on the command line wins; `:new <task> --engine <id>` picks one per agent. See [`[engines]`](#engines). |
 | `leader` | `"<Space>"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader` (vim's own default is `"\"`). `mapleader` is accepted as an alias. |
 
 ## `[ui]`
@@ -136,6 +137,30 @@ A first or last word of `feat`, `fix` (also `bugfix`, `hotfix`, `bug`), `docs`, 
 `:merge` and `:pr` first commit anything the agent left uncommitted, using a message built from the branch (`fix/flaky-checkout-test` → `fix: flaky checkout test`). `:merge` only runs when your checkout is on the base branch with no uncommitted changes, and a conflict is rolled back so your checkout is left as it was. A squash merge makes a new commit, so git doesn't count the branch as merged. vigent checks the content instead, so `:kill!` afterwards deletes the branch too. `:pr` uses `gh` when it's installed and signed in; otherwise it pushes and prints the GitHub compare URL.
 
 From the shell: `vigent worktree list`, `vigent worktree remove <branch> [--force]`, `vigent worktree prune`.
+
+## `[engines]`
+
+Claude Code, Codex and OpenCode run as installed, each with its own login; vigent never reads their credentials. `:checkhealth` (or `:engines`) shows which are installed and signed in, and the command to connect the rest. One table per CLI:
+
+```toml
+[engines.claude]
+args = ["--permission-mode", "acceptEdits"]   # the default
+model = "opus"                                # default: Claude Code's own
+
+[engines.codex]
+args = ["-c", 'sandbox_mode="workspace-write"']  # the default
+# model = "gpt-5"
+
+[engines.opencode]
+model = "anthropic/claude-sonnet-4-5"         # provider/model
+```
+
+| Option | Meaning |
+|---|---|
+| `args` | Extra arguments for every run of that CLI. They **replace** the defaults above, so keep a permission or sandbox setting in them. vigent always adds its own JSON-output and resume flags, and the prompt last. |
+| `model` | Model for new agents on that engine. Without it, the CLI uses its own default. `:new <task> --engine claude --model sonnet` overrides it for one agent. |
+
+`claude -p` can't stop and ask before a tool runs, so with the default `acceptEdits` Claude Code may edit files in the worktree, and other tools follow the permission rules in your Claude Code settings. Use `"--permission-mode", "bypassPermissions"` only where the agent is sandboxed.
 
 ## `[keys]`
 

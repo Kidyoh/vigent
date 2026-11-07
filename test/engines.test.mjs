@@ -1,0 +1,298 @@
+import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { after, test } from "node:test";
+import { CLI_ADAPTERS, CliSession } from "../dist/cli-engines.js";
+import { defaultEngine, detectEngines, onPath } from "../dist/engines.js";
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vigent-engines-"));
+after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+const fixture = (name) => path.join(import.meta.dirname, "fixtures", name);
+const events = (engine, name) => {
+	const parse = CLI_ADAPTERS[engine].parser();
+	return fs
+		.readFileSync(fixture(name), "utf8")
+		.trim()
+		.split("\n")
+		.flatMap((l) => parse(JSON.parse(l)));
+};
+
+/** A fake CLI: a node script on PATH. */
+function fakeBin(dir, name, body) {
+	fs.mkdirSync(dir, { recursive: true });
+	const file = path.join(dir, name);
+	fs.writeFileSync(file, `#!/usr/bin/env node\n${body}\n`);
+	fs.chmodSync(file, 0o755);
+	return file;
+}
+
+/** Wait until the session settles (idle or error) after a send. */
+function settle(s) {
+	return new Promise((resolve) => {
+		const off = s.onChange(() => {
+			if (s.state === "idle" || s.state === "error") {
+				off();
+				resolve();
+			}
+		});
+	});
+}
+
+test("Claude Code: stream-json from a real run becomes the transcript", () => {
+	const evs = events("claude", "claude-tool.jsonl");
+	assert.deepEqual(evs[0], { type: "session", id: "3b248a3e-43fd-4fd1-98b5-f36e06e02d85" });
+	assert.deepEqual(evs[1], { type: "model", model: "claude-fable-5" });
+	const tool = evs.find((e) => e.type === "tool");
+	assert.equal(tool.name, "Write");
+	assert.equal(tool.summary, "/work/hello.txt");
+	assert.match(evs.find((e) => e.type === "tool_result").output, /File created successfully/);
+	assert.deepEqual(evs.filter((e) => e.type === "text_delta").map((e) => e.text), ["done"]);
+	assert.deepEqual(evs.filter((e) => e.type === "text").map((e) => e.text), ["done"]);
+	assert.deepEqual(evs.at(-1), { type: "done", ok: true });
+	assert.ok(evs.find((e) => e.type === "usage").tokens > 0);
+
+	// a subagent's messages stay out of the transcript
+	const parse = CLI_ADAPTERS.claude.parser();
+	assert.deepEqual(parse({ type: "assistant", parent_tool_use_id: "toolu_1", message: { content: [{ type: "text", text: "inner" }] } }), []);
+	assert.deepEqual(parse({ type: "result", subtype: "error_max_turns", is_error: true, result: "hit the turn limit" }).at(-1), {
+		type: "done",
+		ok: false,
+		error: "hit the turn limit",
+	});
+});
+
+test("Codex: exec --json items become tools and replies; retries are not errors", () => {
+	const evs = events("codex", "codex-tool.jsonl");
+	assert.deepEqual(
+		evs.map((e) => (e.type === "tool" ? `tool:${e.name}:${e.summary}` : e.type === "text" ? `text:${e.text}` : e.type)),
+		["session", "tool:bash:npm test", "tool_result", "tool:edit:src/cart.js", "tool_result", "text:Fixed the off-by-one in `cart.js`.", "usage", "done"],
+	);
+	assert.equal(evs[2].output, "1 failing\n(exit 1)");
+
+	const failed = events("codex", "codex-unauthorized.jsonl");
+	assert.equal(failed.length, 2, "the Reconnecting... retries are skipped");
+	assert.equal(failed[1].ok, false);
+	assert.match(failed[1].error, /^unexpected status 401 Unauthorized/);
+});
+
+test("OpenCode: run --format json", () => {
+	const evs = events("opencode", "opencode-tool.jsonl");
+	assert.deepEqual(evs[0], { type: "session", id: "ses_e4b13245fffeWLL1J14R855Rfg" });
+	assert.deepEqual(evs[1], { type: "tool", id: "call_1", name: "bash", summary: "npm test" });
+	assert.equal(evs[2].output, "1 failing\n");
+	assert.deepEqual(evs[3], { type: "text", text: "The cart test fails on an empty cart." });
+	assert.deepEqual(evs[4], { type: "usage", tokens: 1240 });
+	const err = events("opencode", "opencode-error.jsonl");
+	assert.equal(err[1].type, "error");
+	assert.match(err[1].message, /security token included in the request is invalid/);
+});
+
+test("each CLI's command line: fresh, resumed, with a model; the prompt always comes last", () => {
+	const cwd = "/repo-worktrees/fix-race";
+	assert.deepEqual(CLI_ADAPTERS.claude.args("-fix it", { cwd }), [
+		"-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+		"--permission-mode", "acceptEdits", "--", "-fix it",
+	]);
+	assert.deepEqual(CLI_ADAPTERS.claude.args("go", { cwd, model: "opus", resumeId: "abc", extraArgs: ["--permission-mode", "plan"] }).slice(5), [
+		"--permission-mode", "plan", "--model", "opus", "--resume", "abc", "--", "go",
+	]);
+	assert.deepEqual(CLI_ADAPTERS.codex.args("go", { cwd }), ["exec", "--json", "--skip-git-repo-check", "-c", 'sandbox_mode="workspace-write"', "--", "go"]);
+	assert.deepEqual(CLI_ADAPTERS.codex.args("go", { cwd, resumeId: "t1", model: "gpt-5" }), [
+		"exec", "resume", "--json", "--skip-git-repo-check", "-c", 'sandbox_mode="workspace-write"', "-m", "gpt-5", "t1", "--", "go",
+	]);
+	assert.deepEqual(CLI_ADAPTERS.opencode.args("go", { cwd, resumeId: "ses_1", model: "anthropic/claude-sonnet-4-5" }), [
+		"run", "--format", "json", "--dir", cwd, "-m", "anthropic/claude-sonnet-4-5", "--session", "ses_1", "--", "go",
+	]);
+});
+
+test("detection: installed? signed in? (runs only the CLIs' version and status commands)", async () => {
+	const bin = path.join(tmp, "detect-bin");
+	fakeBin(bin, "claude", `
+const a = process.argv.slice(2).join(" ");
+if (a === "--version") console.log("2.1.319 (Claude Code)");
+else if (a === "auth status --json") console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }));`);
+	fakeBin(bin, "codex", `
+const a = process.argv.slice(2).join(" ");
+if (a === "--version") console.log("codex-cli 0.167.0");
+else if (a === "login status") { console.error("Not logged in"); process.exit(1); }`);
+	const home = path.join(tmp, "home");
+	fs.mkdirSync(home, { recursive: true });
+	const env = { PATH: `${bin}${path.delimiter}${path.dirname(process.execPath)}`, HOME: home };
+
+	const engines = await detectEngines(env, 5000);
+	const by = Object.fromEntries(engines.map((e) => [e.id, e]));
+	assert.deepEqual(engines.map((e) => e.id), ["pi", "claude", "codex", "opencode"]);
+	assert.equal(by.pi.connected, false);
+	assert.match(by.pi.connect, /ANTHROPIC_API_KEY/);
+	assert.deepEqual(
+		[by.claude.installed, by.claude.connected, by.claude.version, by.claude.detail],
+		[true, true, "2.1.319", "signed in (Claude account)"],
+	);
+	assert.deepEqual([by.codex.installed, by.codex.connected, by.codex.connect], [true, false, "codex login"]);
+	assert.deepEqual([by.opencode.installed, by.opencode.connected, by.opencode.detail], [false, false, "not installed"]);
+	assert.equal(by.opencode.install, "npm install -g opencode-ai");
+
+	assert.equal(defaultEngine(engines), "claude", "the first signed-in engine");
+	assert.equal(defaultEngine(undefined, env), "claude", "before the checks finish: the first one installed");
+	assert.equal(defaultEngine(undefined, { ...env, OPENAI_API_KEY: "x" }), "pi", "pi when it has a key");
+	assert.equal(onPath("codex", env), true);
+	assert.equal(onPath("opencode", env), false);
+
+	const pi = (await detectEngines({ ...env, PATH: "" , GEMINI_API_KEY: "x" }, 5000))[0];
+	assert.deepEqual([pi.connected, pi.detail], [true, "built in · using GEMINI_API_KEY"]);
+});
+
+test("a CLI agent: streams the reply, keeps the conversation id, resumes with it", async () => {
+	const log = path.join(tmp, "claude-argv.log");
+	const claude = fakeBin(path.join(tmp, "run-bin"), "claude", `
+const fs = require("fs");
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
+process.stdout.write(fs.readFileSync(${JSON.stringify(fixture("claude-tool.jsonl"))}, "utf8"));`);
+	const cwd = fs.mkdtempSync(path.join(tmp, "wt-"));
+	const ids = [];
+	const s = new CliSession("racer", "claude", undefined, { cwd, bin: claude, onResumeId: (id) => ids.push(id) });
+	assert.equal(s.engine, "claude");
+	assert.equal(s.model, "Claude Code", "until the CLI says which model it uses");
+
+	s.send("write hello.txt");
+	await settle(s);
+	assert.equal(s.state, "idle");
+	assert.equal(s.model, "claude-fable-5");
+	assert.deepEqual(
+		s.items.map((i) => `${i.kind}:${i.tool ? `${i.tool.name} ${i.tool.summary}` : i.text}`),
+		["user:write hello.txt", "tool:Write /work/hello.txt", "agent:done"],
+	);
+	assert.match(s.items[1].tool.output, /File created/);
+	assert.ok(s.tokens > 0);
+	assert.deepEqual(ids, ["3b248a3e-43fd-4fd1-98b5-f36e06e02d85"]);
+
+	s.send("again");
+	await settle(s);
+	const calls = fs.readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
+	assert.equal(calls.length, 2);
+	assert.equal(fs.realpathSync(calls[0].cwd), fs.realpathSync(cwd), "runs in the agent's worktree");
+	assert.ok(!calls[0].argv.includes("--resume"));
+	assert.deepEqual(calls[1].argv.slice(-4), ["--resume", "3b248a3e-43fd-4fd1-98b5-f36e06e02d85", "--", "again"]);
+	assert.equal(s.tree(), undefined, "the CLI keeps the conversation; there's no :tree for it");
+	s.dispose();
+});
+
+test("a CLI agent that fails says why; one that's stopped goes idle", async () => {
+	const dir = path.join(tmp, "fail-bin");
+	const codex = fakeBin(dir, "codex", `
+process.stdout.write(require("fs").readFileSync(${JSON.stringify(fixture("codex-unauthorized.jsonl"))}, "utf8"));
+process.exit(1);`);
+	const s = new CliSession("c", "codex", "gpt-5", { cwd: tmp, bin: codex });
+	s.send("hi");
+	await settle(s);
+	assert.equal(s.state, "error");
+	assert.match(s.items.at(-1).text, /^error: Codex: unexpected status 401 Unauthorized/);
+	assert.equal(s.model, "gpt-5");
+
+	const crash = fakeBin(dir, "opencode", `console.error("Error: no provider configured"); process.exit(2);`);
+	const o = new CliSession("o", "opencode", undefined, { cwd: tmp, bin: crash });
+	o.send("hi");
+	await settle(o);
+	assert.equal(o.items.at(-1).text, "error: OpenCode: Error: no provider configured");
+
+	const missing = new CliSession("m", "claude", undefined, { cwd: tmp, bin: path.join(dir, "nope") });
+	missing.send("hi");
+	await settle(missing);
+	assert.match(missing.items.at(-1).text, /isn't installed .*:checkhealth/);
+
+	const slow = fakeBin(dir, "claude", `
+console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "s1", model: "m" }));
+setTimeout(() => {}, 60000);`);
+	const a = new CliSession("a", "claude", undefined, { cwd: tmp, bin: slow });
+	a.send("long task");
+	await new Promise((r) => setTimeout(r, 300));
+	assert.equal(a.state, "running");
+	a.abort();
+	assert.equal(a.state, "idle");
+	await new Promise((r) => setTimeout(r, 200));
+	assert.equal(a.state, "idle", "the stopped run doesn't turn into an error");
+	assert.equal(a.resumeId, "s1");
+});
+
+test("the app: engines in the sidebar and intro, :checkhealth, :new --engine", async () => {
+	const { App } = await import("../dist/app.js");
+	const { DEFAULT_UI } = await import("../dist/config.js");
+	const { Keymap } = await import("../dist/keys.js");
+	const { Session } = await import("../dist/session.js");
+	const { BUILTIN_THEMES, Painter } = await import("../dist/theme.js");
+	const overlays = [];
+	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide() {} }) };
+	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
+	const plain = (lines) => lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+	const engines = [
+		{ id: "pi", name: "pi", installed: true, connected: false, detail: "built in · no API key found", connect: "export ANTHROPIC_API_KEY=…" },
+		{ id: "claude", name: "Claude Code", installed: true, connected: true, version: "2.1.319", detail: "signed in (Claude account)" },
+		{ id: "codex", name: "Codex", installed: true, connected: false, version: "0.167.0", detail: "not signed in", connect: "codex login" },
+		{ id: "opencode", name: "OpenCode", installed: false, connected: false, detail: "not installed", install: "npm install -g opencode-ai" },
+	];
+	app.defaultEngine = () => "claude";
+	app.setEngines(engines);
+	const made = [];
+	app.newSession = (name, opts) => {
+		made.push({ name, ...opts });
+		const s = new (class extends Session {
+			send() {}
+			abort() {}
+		})(name, "Claude Code");
+		s.engine = opts.engine;
+		return s;
+	};
+	const ex = (cmd) => [":", ...cmd, "\r"].forEach((k) => app.handleInput(k));
+
+	let screen = plain(app.render(120));
+	assert.match(screen, /ENGINES +1\/4/);
+	assert.match(screen, /● Claude Code +default/);
+	assert.match(screen, /◐ Codex +codex login/);
+	assert.match(screen, /○ OpenCode +not installed/);
+	assert.match(screen, /◐ pi {3}● Claude Code {3}◐ Codex {3}○ OpenCode/, "the intro screen lists them too");
+	assert.match(screen, /◐ pi +no API key/);
+
+	ex("checkhealth");
+	const health = plain(overlays.at(-1).render(100));
+	assert.match(health, /● Claude Code {2}2\.1\.319 {2}\(default for :new\)/);
+	assert.match(health, /OK signed in \(Claude account\)/);
+	assert.match(health, /connect: codex login/);
+	assert.match(health, /install: npm install -g opencode-ai/);
+	assert.match(health, /never reads credentials/);
+
+	ex("new fix the race --engine opencode");
+	assert.match(app.message, /OpenCode isn't installed: npm install -g opencode-ai/);
+	ex("new fix the race --engine gemini");
+	assert.match(app.message, /unknown engine 'gemini'/);
+	ex("new fix the race --engine codex --model gpt-5");
+	assert.deepEqual(made.at(-1), { name: "fix the race", worktree: true, model: "gpt-5", engine: "codex" });
+	assert.match(app.message, /'fix the race' · Codex in this checkout/);
+	ex("new add retries");
+	assert.equal(made.at(-1).engine, "claude", "the default engine");
+
+	screen = plain(app.render(120));
+	assert.match(screen, /▸ add retries {2}Claude Code/, "winbar names the engine");
+});
+
+test("config: engine and [engines.<cli>]", async () => {
+	const { loadConfig } = await import("../dist/config.js");
+	const file = path.join(tmp, "config.toml");
+	fs.writeFileSync(
+		file,
+		`engine = "codex"
+[engines.claude]
+args = ["--permission-mode", "plan"]
+model = "opus"
+[engines.codex]
+model = 5
+[engines.gemini]
+`,
+	);
+	const { config, warnings } = loadConfig(file);
+	assert.equal(config.engine, "codex");
+	assert.deepEqual(config.engines.claude, { args: ["--permission-mode", "plan"], model: "opus" });
+	assert.deepEqual(warnings, ["config [engines.codex]: 'model' should be a string", "config: unknown engine [engines.gemini] (claude, codex or opencode)"]);
+	fs.writeFileSync(file, `engine = "gpt"\n`);
+	assert.match(loadConfig(file).warnings[0], /'engine' should be "auto", "pi"/);
+});
