@@ -55,6 +55,8 @@ export function fromPalette(name: string, p: Palette): Theme {
 	return {
 		name,
 		background: light ? "light" : "dark",
+		// kept so `vigent theme new --from <this>` can start from the exact colors
+		palette: { ...p, bg_dark: bgDark, bg_alt: bgAlt, selection, muted, subtle, orange, accent },
 		groups: {
 			Normal: { fg: p.fg, bg: p.bg },
 			NormalFloat: { fg: p.fg, bg: bgDark },

@@ -14,6 +14,7 @@ import { buildKeymap, KEY_MODES } from "./keys.js";
 import { formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
 import { DemoSession, PiSession, type Session } from "./session.js";
 import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./theme.js";
+import { themeNewTemplate } from "./theme-new.js";
 import {
 	branchName,
 	createWorktree,
@@ -43,7 +44,8 @@ themes:
   vigent theme import ./theme.vim            import a colorscheme file (no editor needed)
       --vim | --nvim      use this editor     --light | --dark   set 'background' first
       --clean             skip your editor config
-  vigent theme new <name> [--from <theme>]   create a theme file to customize
+  vigent theme new <name> [--from <theme>]   create a theme file to customize, pre-filled with that theme's colors
+      --palette           build it from a palette only     --transparent   use the terminal's background
   vigent theme path                          show where themes and config live
   vigent worktree list                       agent worktrees in this repo
   vigent worktree remove <branch> [--force]  delete one (safe unless --force)
@@ -78,44 +80,6 @@ function flag(argv: string[], name: string): string | undefined {
 	return i >= 0 ? argv[i + 1] : undefined;
 }
 
-function themeNewTemplate(name: string, from: string): string {
-	return `# ${name} — a vigent theme. Edit and reload with :colorscheme ${name}
-# Docs: https://github.com/farming-labs/vigent/blob/main/docs/themes.md
-name = "${name}"
-
-# Start from any built-in or installed theme, then change what you like.
-extends = "${from}"
-
-# Or describe the theme with a palette instead (remove 'extends' above).
-# Only bg, fg and the six accents are required; the rest is derived.
-# [palette]
-# bg = "#1a1b26"
-# fg = "#c0caf5"
-# red = "#f7768e"
-# yellow = "#e0af68"
-# green = "#9ece6a"
-# cyan = "#7dcfff"
-# blue = "#7aa2f7"
-# magenta = "#bb9af7"
-# bg_dark = "#16161e"     # sidebar / floats
-# bg_alt = "#292e42"      # cursorline, statusline
-# selection = "#283457"
-# muted = "#565f89"       # comments
-# subtle = "#3b4261"      # line numbers, separators
-# orange = "#ff9e64"
-# accent = "#ff9e64"      # current line number
-
-# Any highlight group, by its nvim name. A table, a :hi string, or a group to link to.
-[groups]
-# Normal = { fg = "#c0caf5", bg = "#1a1b26" }
-# Comment = "guifg=#565f89 gui=italic"
-# VigentSidebar = { bg = "#16161e" }
-# VigentModeNormal = { fg = "#1a1b26", bg = "#7aa2f7", bold = true }
-# VigentModeInsert = { fg = "#1a1b26", bg = "#9ece6a", bold = true }
-# CursorLineNr = "Title"
-`;
-}
-
 async function themeCommand(argv: string[]): Promise<number> {
 	const sub = argv[0];
 	if (sub === "list") {
@@ -131,7 +95,7 @@ async function themeCommand(argv: string[]): Promise<number> {
 	if (sub === "new") {
 		const name = argv[1];
 		if (!name || name.startsWith("-")) {
-			console.error("usage: vigent theme new <name> [--from <theme>]");
+			console.error("usage: vigent theme new <name> [--from <theme>] [--palette] [--transparent | --no-transparent]");
 			return 1;
 		}
 		const from = flag(argv, "--from") ?? "default";
@@ -142,7 +106,13 @@ async function themeCommand(argv: string[]): Promise<number> {
 			return 1;
 		}
 		fs.mkdirSync(themesDir(), { recursive: true });
-		fs.writeFileSync(file, themeNewTemplate(name, from));
+		fs.writeFileSync(
+			file,
+			themeNewTemplate(name, from, {
+				palette: argv.includes("--palette"),
+				transparent: argv.includes("--transparent") ? true : argv.includes("--no-transparent") ? false : undefined,
+			}),
+		);
 		console.log(`created ${file}`);
 		console.log(`use it with: vigent --theme ${name}  (or :colorscheme ${name})`);
 		return 0;

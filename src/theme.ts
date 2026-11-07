@@ -39,7 +39,37 @@ export interface Theme {
 	name: string;
 	background?: "dark" | "light";
 	groups: Record<string, Attr>;
+	/** draw on the terminal's own background (like tokyonight's `transparent = true`) */
+	transparent?: boolean;
+	/** the palette it was built from, when it was */
+	palette?: Palette;
 }
+
+/**
+ * Groups that paint a background behind text. A transparent theme drops their
+ * background so the terminal's (and its blur or wallpaper) shows through;
+ * selections, the cursorline, popup menus and mode badges keep theirs.
+ */
+export const TRANSPARENT_GROUPS = new Set([
+	"Normal",
+	"NormalNC",
+	"NormalFloat",
+	"FloatBorder",
+	"FloatTitle",
+	"MsgArea",
+	"StatusLine",
+	"StatusLineNC",
+	"WinBar",
+	"WinBarNC",
+	"WinSeparator",
+	"LineNr",
+	"CursorLineNr",
+	"SignColumn",
+	"EndOfBuffer",
+	"VigentSidebar",
+	"NeoTreeNormal",
+	"NvimTreeNormal",
+]);
 
 export const RESET = "\x1b[0m";
 
@@ -54,8 +84,10 @@ export function sgr(attr: Attr, mode: ColorMode = "truecolor"): string {
 	if (attr.reverse) parts.push("7");
 	const fg = parseHex(attr.fg);
 	if (fg) parts.push(mode === "256" ? `38;5;${nearest256(attr.fg!)}` : `38;2;${fg[0]};${fg[1]};${fg[2]}`);
+	else if (attr.fg === "NONE") parts.push("39"); // the terminal's own color, replacing whatever came before
 	const bg = parseHex(attr.bg);
 	if (bg) parts.push(mode === "256" ? `48;5;${nearest256(attr.bg!)}` : `48;2;${bg[0]};${bg[1]};${bg[2]}`);
+	else if (attr.bg === "NONE") parts.push("49"); // transparent: the terminal's own background
 	return parts.length === 0 ? "" : `\x1b[${parts.join(";")}m`;
 }
 
@@ -128,6 +160,19 @@ export class Painter {
 	generation = 0;
 	/** 24-bit color, or the nearest of 256 for terminals without it (vim's 'termguicolors') */
 	colorMode: ColorMode = "truecolor";
+	/** `:set transparent` / `notransparent`; "auto" follows the theme */
+	transparency: boolean | "auto" = "auto";
+
+	setTransparency(t: boolean | "auto") {
+		if (t === this.transparency) return;
+		this.transparency = t;
+		this.flush();
+	}
+
+	/** Is the terminal's background showing through right now? */
+	get transparent(): boolean {
+		return this.transparency === "auto" ? Boolean(this.theme.transparent) : this.transparency;
+	}
 
 	setColorMode(mode: ColorMode) {
 		if (mode === this.colorMode) return;
@@ -184,6 +229,13 @@ export class Painter {
 			if (group !== "Normal" && a.fg === undefined && !a.reverse) {
 				const fg = this.normal().fg;
 				if (fg) a = { ...a, fg };
+			}
+			// transparent: background groups, and anything painted on Normal's background, use the terminal's
+			if (this.transparent && a.bg !== undefined && a.bg !== "NONE") {
+				const normalBg = this.normal().bg;
+				if (TRANSPARENT_GROUPS.has(group) || (normalBg && a.bg.toLowerCase() === normalBg.toLowerCase())) {
+					a = { ...a, bg: "NONE" };
+				}
 			}
 			this.attrCache.set(group, a);
 		}
@@ -280,13 +332,15 @@ export function themesDir(): string {
 }
 
 const THEME_EXTS = [".toml", ".json", ".vim"];
-const SPEC_KEYS = ["name", "background", "extends", "palette", "groups", "highlights"];
+const SPEC_KEYS = ["name", "background", "extends", "transparent", "palette", "groups", "highlights"];
 
 /** A theme file: extend another theme, define a palette, and/or set groups. */
 export interface ThemeSpec {
 	name?: string;
 	background?: "dark" | "light";
 	extends?: string;
+	/** use the terminal's background (sidebar, floats and statusline too) */
+	transparent?: boolean;
 	palette?: Partial<Palette>;
 	groups?: Record<string, unknown>;
 	highlights?: Record<string, unknown>;
@@ -354,12 +408,16 @@ export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set
 	const name = spec.name ?? fallbackName;
 	let groups: Record<string, Attr> = {};
 	let background = spec.background;
+	let transparent = typeof spec.transparent === "boolean" ? spec.transparent : undefined;
+	let palette: Palette | undefined;
 
 	if (spec.extends) {
 		if (seen.has(spec.extends)) throw new Error(`theme '${name}' extends itself through '${spec.extends}'`);
 		const base = loadTheme(spec.extends, new Set([...seen, name]));
 		groups = { ...base.groups };
 		background ??= base.background;
+		transparent ??= base.transparent;
+		palette = base.palette;
 	}
 	if (spec.palette) {
 		const missing = (["bg", "fg", "red", "yellow", "green", "cyan", "blue", "magenta"] as const).filter(
@@ -369,9 +427,12 @@ export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set
 		const t = fromPalette(name, spec.palette as Palette);
 		groups = { ...groups, ...t.groups };
 		background ??= t.background;
+		palette = t.palette;
 	}
 	groups = { ...groups, ...normalizeGroups(spec.groups), ...normalizeGroups(spec.highlights) };
-	return { name, background, groups };
+	// groups set after the palette may have changed its colors; only keep it when they didn't
+	const exactPalette = palette && !spec.groups && !spec.highlights ? palette : undefined;
+	return { name, background, groups, ...(transparent ? { transparent } : {}), ...(exactPalette ? { palette: exactPalette } : {}) };
 }
 
 /** Load a built-in theme, a theme file from ~/.config/vigent/themes, or a path. */
@@ -395,6 +456,68 @@ export function listThemes(): string[] {
 		// no user themes dir yet
 	}
 	return [...names].sort((a, b) => (a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b)));
+}
+
+/** The palette a theme's colors come from, read back from its groups (for `vigent theme new`). */
+export function extractPalette(theme: Theme): Palette {
+	if (theme.palette) return { ...theme.palette };
+	const p = new Painter({ ...theme, transparent: false });
+	const fg = (...groups: string[]) => {
+		for (const g of groups) {
+			const c = p.attr(g).fg;
+			if (parseHex(c)) return c!;
+		}
+		return p.attr("Normal").fg ?? "#c0c0c0";
+	};
+	const bg = (fallback: string, ...groups: string[]) => {
+		for (const g of groups) {
+			const c = p.attr(g).bg;
+			if (parseHex(c)) return c!;
+		}
+		return fallback;
+	};
+	const base = bg("#1a1b26", "Normal");
+	return {
+		bg: base,
+		fg: fg("Normal"),
+		red: fg("ErrorMsg", "DiagnosticError", "Removed"),
+		yellow: fg("WarningMsg", "Type"),
+		green: fg("String", "Added"),
+		cyan: fg("Special", "Function"),
+		blue: fg("Function", "Directory", "Title"),
+		magenta: fg("Statement", "Keyword", "Identifier"),
+		bg_dark: bg(base, "VigentSidebar", "NormalFloat"),
+		bg_alt: bg(base, "CursorLine", "StatusLine"),
+		selection: bg(base, "Visual"),
+		muted: fg("Comment"),
+		subtle: fg("LineNr", "NonText"),
+		orange: fg("Constant", "WarningMsg"),
+		accent: fg("CursorLineNr", "Title"),
+	};
+}
+
+/** A theme file (TOML) for `:theme save`: what's on screen, as small as it can be. */
+export function themeFileFor(name: string, painter: Painter, builtinBase: boolean): string {
+	const lines = [`# ${name}: saved from vigent with :theme save. Edit freely; reload with :colorscheme ${name}`, `name = "${name}"`];
+	const groups: Record<string, Attr> = builtinBase ? { ...painter.overrides } : { ...painter.theme.groups, ...painter.overrides };
+	if (builtinBase) lines.push(`extends = "${painter.theme.name}"`);
+	else if (painter.theme.background) lines.push(`background = "${painter.theme.background}"`);
+	if (painter.transparent !== Boolean(builtinBase && painter.theme.transparent) || (!builtinBase && painter.transparent)) {
+		lines.push(`transparent = ${painter.transparent}`);
+	}
+	lines.push("", "[groups]");
+	for (const [group, attr] of Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))) {
+		lines.push(`${/^[A-Za-z0-9_-]+$/.test(group) ? group : JSON.stringify(group)} = ${tomlAttr(attr)}`);
+	}
+	return `${lines.join("\n")}\n`;
+}
+
+function tomlAttr(a: Attr): string {
+	if (a.link) return JSON.stringify(a.link);
+	const parts: string[] = [];
+	for (const k of ["fg", "bg"] as const) if (a[k]) parts.push(`${k} = ${JSON.stringify(a[k])}`);
+	for (const k of ["bold", "italic", "underline", "reverse"] as const) if (a[k] !== undefined) parts.push(`${k} = ${a[k]}`);
+	return `{ ${parts.join(", ")} }`;
 }
 
 export { BUILTIN_THEMES };

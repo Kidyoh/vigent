@@ -175,10 +175,11 @@ vigent speaks Neovim's highlight groups (`Normal`, `StatusLine`, `CursorLine`, �
 vigent theme import                 # whatever colorscheme your nvim/vim config uses
 vigent theme import kanagawa        # any colorscheme your editor can load (plugins included)
 vigent theme import ./molokai.vim   # a .vim file, no editor needed
-vigent theme new mine --from nord   # start your own theme
+vigent theme new mine --from nord   # start your own theme, pre-filled with nord's colors
+vigent --theme lazyvim              # LazyVim's look, on your terminal's own (transparent) background
 ```
 
-Inside vigent, `:colorscheme` opens a picker with live preview. `:hi Group guifg=… guibg=…` changes any color on the spot, and `:set` toggles UI options. To keep changes, put them in `~/.config/vigent/config.toml` (`vigent config init` writes a starter file):
+Inside vigent, `:colorscheme` opens a picker with live preview. `:hi Group guifg=… guibg=…` changes any color on the spot, `:set transparent` lets your terminal's background (its blur, opacity or wallpaper) show through any theme, and `:theme save mine` keeps what's on screen as your own theme file. To keep settings, put them in `~/.config/vigent/config.toml` (`vigent config init` writes a starter file):
 
 ```toml
 theme = "tokyonight"
@@ -186,13 +187,16 @@ theme = "tokyonight"
 [ui]
 sidebar_width = 34
 icons = "unicode"      # or "ascii"
+transparent = true     # the terminal's background, with any theme
 
 [highlights]           # applied on top of any theme
 Normal = { bg = "NONE" }
 CursorLine = "guibg=#2a2f3a"
 ```
 
-Built in: `default` (Neovim's default look), `gruvbox`, `tokyonight`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
+Built in: `default` (Neovim's default look), `lazyvim` (LazyVim's tokyonight-moon look, transparent), `tokyonight`, `tokyonight-moon`, `gruvbox`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
+
+![the lazyvim theme over a translucent terminal: sidebar, transcript and floats show the background through](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/lazyvim-transparent.png)
 
 ![colorscheme picker with live preview](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/colorscheme-picker.png)
 

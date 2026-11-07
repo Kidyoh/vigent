@@ -12,13 +12,32 @@ vigent uses **Neovim's highlight group names** (`Normal`, `StatusLine`, `CursorL
 | Pick a theme interactively | `:colorscheme` inside vigent (live preview) |
 | Set my default theme | `theme = "…"` in `~/.config/vigent/config.toml` |
 | Tweak a few colors | `[highlights]` in config.toml, or `:hi Group guifg=… guibg=…` |
-| Make my own theme | `vigent theme new mytheme --from tokyonight` |
+| Make my own theme | `vigent theme new mytheme --from tokyonight` (pre-filled with its colors) |
+| Keep the colors I tweaked live | `:theme save mytheme` |
+| See my terminal's background (blur, wallpaper) | `vigent --theme lazyvim`, or `:set transparent` with any theme |
 
 Files live in `~/.config/vigent/` (or `$XDG_CONFIG_HOME/vigent/`). `vigent theme path` prints the exact location.
 
 ## Built-in themes
 
-`default` (Neovim's default dark theme), `gruvbox`, `tokyonight`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
+`default` (Neovim's default dark theme), `lazyvim`, `tokyonight`, `tokyonight-moon`, `gruvbox`, `catppuccin`, `catppuccin-latte`, `nord`, `rose-pine`, `kanagawa`.
+
+`lazyvim` is the look LazyVim starts with: tokyonight's "moon" palette with its highlight choices (orange current line number, blue rounded float borders, cyan italic keywords, blue / green / magenta / yellow mode badges), drawn on the terminal's own background. `tokyonight-moon` is the same theme with solid backgrounds.
+
+## Transparent backgrounds
+
+A transparent theme leaves the background to your terminal, so a translucent or blurred terminal, or one with a wallpaper, shows through vigent. These groups use the terminal's background: `Normal`, the sidebar, floats and their borders, the statusline, the winbar, line numbers and separators, plus any group that only repeated `Normal`'s background. Selections (`Visual`), the cursorline, search matches, popup menus and the mode badges keep their colors, so you can still see where you are.
+
+```vim
+:set transparent        " with any theme
+:set notransparent      " solid, even for a transparent theme like lazyvim
+:set transparent!       " toggle what's on screen
+:set transparent&       " back to what the theme says
+```
+
+To keep it, set `transparent = true` under `[ui]` in config.toml (every theme), or in a theme file (that theme). A theme that `extends` a transparent one is transparent too, unless it says `transparent = false`.
+
+![lazyvim with a float open, over a translucent terminal](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/lazyvim-transparent.png)
 
 ## Importing vim and Neovim colorschemes
 
@@ -99,11 +118,28 @@ The UI options can also be changed live with vim-style `:set`:
 
 ## Writing your own theme
 
+There are two quick ways in.
+
+**From the command line**, start a file from any theme:
+
 ```bash
-vigent theme new midnight --from tokyonight
+vigent theme new midnight --from tokyonight     # extends tokyonight; its palette is in the file, commented out
+vigent theme new midnight --from lazyvim --palette       # built from the palette alone: edit 8 colors, get a whole theme
+vigent theme new glass --from nord --transparent         # nord on the terminal's background
 ```
 
-This creates `~/.config/vigent/themes/midnight.toml`. A theme file can do any combination of three things.
+The file it writes (`~/.config/vigent/themes/midnight.toml`) is commented and already holds the base theme's real colors: background, text, the six accents, and the optional sidebar, cursorline, selection, comment and line-number colors. Change a few, then `:colorscheme midnight` (the picker previews it live).
+
+**From inside vigent**, tweak colors with `:hi` and `:set transparent` until you like what you see, then:
+
+```vim
+:theme save midnight     " ~/.config/vigent/themes/midnight.toml, and switch to it
+:theme save! midnight    " overwrite it after more tweaks
+```
+
+On top of a built-in theme the saved file stays small: `extends` plus only the groups you changed. Saved from one of your own themes, it holds every group, so it never depends on the file it replaces. Make it your default with `theme = "midnight"` in config.toml.
+
+A theme file can do any combination of these:
 
 **Extend** another theme and change a few groups:
 
@@ -116,7 +152,14 @@ VigentSidebar = { bg = "#0a0a10" }
 CursorLineNr = "Title"
 ```
 
-**Describe a palette** and let vigent derive every group from it. Only `bg`, `fg` and the six accents are required:
+**Use the terminal's background** (see [Transparent backgrounds](#transparent-backgrounds)):
+
+```toml
+extends = "kanagawa"
+transparent = true
+```
+
+**Describe a palette** and let vigent derive every group from it. Only `bg`, `fg` and the six accents are required. With `extends` as well, the palette recolors the base theme, and `[groups]` still wins over both:
 
 ```toml
 name = "midnight"

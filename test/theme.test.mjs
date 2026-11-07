@@ -57,7 +57,8 @@ test("sidebar uses tree plugin colors, else a shaded Normal background", () => {
 test("overrides merge onto the theme and survive theme switches", () => {
 	const p = new Painter(imported, { Normal: { bg: "NONE" } });
 	assert.deepEqual(p.attr("Normal"), { fg: "#bcbcbc", bg: "NONE" });
-	assert.equal(sgr(p.attr("Normal")), "\x1b[38;2;188;188;188m"); // NONE emits no background
+	// NONE is the terminal's own background (49), which also clears one a previous segment set
+	assert.equal(sgr(p.attr("Normal")), "\x1b[38;2;188;188;188;49m");
 	p.setTheme(BUILTIN_THEMES.gruvbox);
 	assert.equal(p.attr("Normal").bg, "NONE");
 });

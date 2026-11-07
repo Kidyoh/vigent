@@ -34,6 +34,8 @@ export interface UiOptions {
 	timeoutlen: number;
 	/** 24-bit color (vim's 'termguicolors'); off maps colors to the nearest of 256 */
 	termguicolors: boolean;
+	/** use the terminal's background: true, false, or "auto" (what the theme says) */
+	transparent: boolean | "auto";
 }
 
 /** [engines.claude] / [engines.codex] / [engines.opencode] */
@@ -67,6 +69,7 @@ export const DEFAULT_UI: UiOptions = {
 	timeoutlen: 1000,
 	// macOS Terminal.app can't show 24-bit color
 	termguicolors: process.env.TERM_PROGRAM !== "Apple_Terminal",
+	transparent: "auto",
 };
 
 export function configPath(): string {
@@ -210,6 +213,8 @@ const ALIASES: Record<string, keyof UiOptions> = {
 	tm: "timeoutlen",
 	termguicolors: "termguicolors",
 	tgc: "termguicolors",
+	transparent: "transparent",
+	transp: "transparent",
 };
 
 /** Set one option from a config value. Returns an error message, or undefined on success. */
@@ -234,6 +239,11 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 			if (value !== "unicode" && value !== "ascii") return `'${name}' should be "unicode" or "ascii"`;
 			ui.icons = value;
 			return;
+		case "transparent":
+			if (value === true || value === false || value === "auto") ui.transparent = value;
+			else if (value === "true" || value === "false") ui.transparent = value === "true";
+			else return `'${name}' should be true, false or "auto" (follow the theme)`;
+			return;
 		case "timeoutlen": {
 			const n = Number(value);
 			if (!Number.isInteger(n) || n < 0 || n > 10000) return `'${name}' should be milliseconds from 0 to 10000`;
@@ -247,7 +257,12 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
  * Apply a vim-style `:set` argument: `number`, `nonumber`, `number!`,
  * `invnumber`, `sidebar_width=40`, `number?`. Returns the message to show.
  */
-export function applySetCommand(ui: UiOptions, arg: string): { message: string; error?: boolean } {
+export function applySetCommand(
+	ui: UiOptions,
+	arg: string,
+	/** what's on screen now, for toggling an option that follows the theme */
+	now: { transparent?: boolean } = {},
+): { message: string; error?: boolean } {
 	const show = (k: keyof UiOptions) => {
 		const v = ui[k];
 		return typeof v === "boolean" ? (v ? `  ${k}` : `no${k}`) : `  ${k}=${v}`;
@@ -272,15 +287,27 @@ export function applySetCommand(ui: UiOptions, arg: string): { message: string; 
 		}
 		if ((m = /^([\w]+)!$/.exec(part)) || (m = /^inv([\w]+)$/.exec(part))) {
 			const key = ALIASES[m[1]];
+			if (key === "transparent") {
+				// following the theme: flip what's on screen
+				ui.transparent = !(ui.transparent === "auto" ? Boolean(now.transparent) : ui.transparent);
+				continue;
+			}
 			if (!key || typeof ui[key] !== "boolean") return { message: `E518: Unknown option: ${part}`, error: true };
 			(ui as unknown as Record<string, boolean>)[key] = !ui[key];
+			continue;
+		}
+		if ((m = /^([\w]+)&$/.exec(part))) {
+			// vim's :set option& : back to the default
+			const key = ALIASES[m[1]];
+			if (!key) return { message: `E518: Unknown option: ${m[1]}`, error: true };
+			(ui as unknown as Record<string, unknown>)[key] = DEFAULT_UI[key];
 			continue;
 		}
 		const m2 = /^no([\w]+)$/.exec(part);
 		const off = Boolean(m2 && ALIASES[m2[1]]);
 		const key = ALIASES[off ? m2![1] : part];
 		if (!key) return { message: `E518: Unknown option: ${part}`, error: true };
-		if (typeof ui[key] !== "boolean") {
+		if (typeof ui[key] !== "boolean" && key !== "transparent") {
 			shown.push(show(key));
 			continue;
 		}
@@ -294,8 +321,8 @@ export const CONFIG_TEMPLATE = `# vigent config: ~/.config/vigent/config.toml
 # Check it any time with:  vigent config check
 
 # --- Theme -----------------------------------------------------------------
-# Built-in: default, gruvbox, tokyonight, catppuccin, catppuccin-latte, nord,
-# rose-pine, kanagawa. Or any theme in ~/.config/vigent/themes, e.g. one made
+# Built-in: default, lazyvim (transparent), tokyonight, tokyonight-moon, gruvbox,
+# catppuccin, catppuccin-latte, nord, rose-pine, kanagawa. Or any theme in ~/.config/vigent/themes, e.g. one made
 # with  vigent theme import  (your nvim/vim colorscheme) or  vigent theme new.
 theme = "default"
 
@@ -331,6 +358,7 @@ tilde = true           # ~ on empty sidebar rows
 icons = "unicode"      # "ascii" for fonts without box-drawing characters
 timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 # termguicolors = false  # for terminals without 24-bit color: use the nearest of 256
+# transparent = true    # use the terminal's background with any theme ("auto": the theme decides)
 
 # --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
 # Applied on top of whichever theme is active. A value is a table, a vim

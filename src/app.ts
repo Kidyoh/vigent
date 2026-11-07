@@ -43,7 +43,7 @@ import { renderMarkdown } from "./markdown.js";
 import { PICKER_ICONS, ThemePicker } from "./picker.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { Session, SessionState } from "./session.js";
-import { type Attr, listThemes, loadTheme, type Painter, RESET, sgr, type Theme } from "./theme.js";
+import { type Attr, BUILTIN_THEMES, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
 import {
 	DEFAULT_WORKTREE,
@@ -316,6 +316,7 @@ export class App implements Component {
 
 	private applyColorMode() {
 		this.painter.setColorMode(this.ui.termguicolors ? "truecolor" : "256");
+		this.painter.setTransparency(this.ui.transparent ?? "auto");
 	}
 
 	/** Ask a y/n question in the command line, like vim's confirm prompts. */
@@ -758,6 +759,11 @@ export class App implements Component {
 					this.openThemePicker();
 					return;
 				}
+				const save = /^save(!?)\s+(\S+)$/.exec(arg) ?? (/^save(!?)$/.test(arg) ? [arg, arg.endsWith("!") ? "!" : "", ""] : null);
+				if (cmd === "theme" && save) {
+					this.saveTheme(save[2], save[1] === "!");
+					return;
+				}
 				try {
 					this.setTheme(loadTheme(arg));
 					this.setMessage(`colorscheme ${this.painter.theme.name}`, "ModeMsg");
@@ -774,7 +780,7 @@ export class App implements Component {
 				return;
 			case "set":
 			case "se": {
-				const r = applySetCommand(this.ui, arg);
+				const r = applySetCommand(this.ui, arg, { transparent: this.painter.transparent });
 				this.applyColorMode();
 				this.setMessage(r.message, r.error ? "ErrorMsg" : "Normal");
 				this.repaint();
@@ -963,6 +969,35 @@ export class App implements Component {
 	setEngines(engines: EngineInfo[]) {
 		this.engines = engines;
 		this.tui.requestRender();
+	}
+
+	/**
+	 * `:theme save <name>`: what's on screen (the theme, your :hi changes,
+	 * transparency) as ~/.config/vigent/themes/<name>.toml, then switch to it.
+	 */
+	private saveTheme(name: string, force: boolean) {
+		if (!name || !/^[\w.-]+$/.test(name)) {
+			this.setMessage("usage: :theme save <name>  (letters, digits, - _ .)", "ErrorMsg");
+			return;
+		}
+		if (BUILTIN_THEMES[name]) {
+			this.setMessage(`'${name}' is a built-in theme; save under another name`, "ErrorMsg");
+			return;
+		}
+		const file = path.join(themesDir(), `${name}.toml`);
+		if (fs.existsSync(file) && !force) {
+			this.setMessage(`E13: ${this.shortPath(file)} exists (add ! to overwrite)`, "ErrorMsg");
+			return;
+		}
+		try {
+			const builtinBase = Boolean(BUILTIN_THEMES[this.painter.theme.name]) && BUILTIN_THEMES[this.painter.theme.name] === this.painter.theme;
+			fs.mkdirSync(themesDir(), { recursive: true });
+			fs.writeFileSync(file, themeFileFor(name, this.painter, builtinBase));
+			this.setTheme(loadTheme(name));
+			this.setMessage(`saved ${this.shortPath(file)} · :colorscheme ${name} (or theme = "${name}" in config.toml)`, "ModeMsg");
+		} catch (err) {
+			this.setMessage(`couldn't save the theme: ${(err as Error).message}`, "ErrorMsg");
+		}
 	}
 
 	/** `:checkhealth` (or `:engines`): which agent engines can run, and how to connect the rest. */
@@ -2039,6 +2074,8 @@ const EX_HELP: [string, string][] = [
 	[":attach <branch>", "reopen an agent in a kept worktree"],
 	[":worktree remove <branch>", "delete a worktree (safe; ! forces)"],
 	[":colorscheme [name]", "switch theme (no name: picker)"],
+	[":theme save <name>", "save the theme on screen, :hi changes included"],
+	[":set transparent", "use the terminal's background (notransparent, transparent&)"],
 	[":hi Group guifg=.. guibg=..", "change a highlight group"],
 	[":hi link A B  /  :hi clear", "link groups / undo :hi"],
 	[":set option / nooption", "change options (:set lists them)"],

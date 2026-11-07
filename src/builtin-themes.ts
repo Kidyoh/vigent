@@ -153,6 +153,63 @@ export const TOKYONIGHT = fromPalette("tokyonight", {
 	cyan: "#7dcfff", blue: "#7aa2f7", magenta: "#bb9af7", accent: "#ff9e64",
 });
 
+// ---------------------------------------------------------------------------
+// tokyonight "moon": the colorscheme LazyVim starts with. `lazyvim` is the same
+// palette drawn on the terminal's own background, LazyVim's transparent look.
+// ---------------------------------------------------------------------------
+const moon = {
+	bg: "#222436", bg_dark: "#1e2030", bg_highlight: "#2f334d", visual: "#2d3f76", border: "#589ed7",
+	fg: "#c8d3f5", fg_dark: "#828bb8", comment: "#636da6", gutter: "#3b4261", dark5: "#737aa2", black: "#1b1d2b",
+	red: "#ff757f", orange: "#ff966c", yellow: "#ffc777", green: "#c3e88d", teal: "#4fd6be",
+	cyan: "#86e1fc", blue: "#82aaff", blue0: "#3e68d7", blue1: "#65bcff", magenta: "#c099ff",
+};
+const moonBadge = (bg: string) => ({ fg: moon.black, bg, bold: true });
+
+export const TOKYONIGHT_MOON: Theme = (() => {
+	const t = fromPalette("tokyonight-moon", {
+		bg: moon.bg, bg_dark: moon.bg_dark, bg_alt: moon.bg_highlight, selection: moon.visual,
+		fg: moon.fg, muted: moon.comment, subtle: moon.gutter,
+		red: moon.red, orange: moon.orange, yellow: moon.yellow, green: moon.green,
+		cyan: moon.cyan, blue: moon.blue, magenta: moon.magenta, accent: moon.orange,
+	});
+	Object.assign(t.groups, {
+		NormalFloat: { fg: moon.fg, bg: moon.bg_dark },
+		FloatBorder: { fg: moon.border, bg: moon.bg_dark },
+		FloatTitle: { fg: moon.border, bg: moon.bg_dark, bold: true },
+		WinSeparator: { fg: moon.gutter, bold: true },
+		StatusLine: { fg: moon.fg_dark, bg: moon.bg_dark },
+		StatusLineNC: { fg: moon.gutter, bg: moon.bg_dark },
+		CursorLineNr: { fg: moon.orange, bold: true },
+		Keyword: { fg: moon.cyan, italic: true },
+		Type: { fg: moon.blue1 },
+		Special: { fg: moon.blue1 },
+		Search: { fg: moon.fg, bg: moon.blue0 },
+		CurSearch: { fg: moon.black, bg: moon.orange },
+		DiffAdd: { bg: "#273849" },
+		DiffDelete: { bg: "#3a273a" },
+		DiffChange: { bg: "#252a3f" },
+		Added: { fg: "#b8db87" },
+		Removed: { fg: "#e26a75" },
+		Changed: { fg: "#7ca1f2" },
+		Pmenu: { fg: moon.fg, bg: moon.bg_dark },
+		PmenuSel: { bg: "#363c58", bold: true },
+		NeoTreeNormal: { fg: moon.fg, bg: moon.bg_dark },
+		VigentSidebar: { link: "NeoTreeNormal" },
+		VigentIndent: { fg: moon.gutter },
+		VigentModeNormal: moonBadge(moon.blue),
+		VigentModeInsert: moonBadge(moon.green),
+		VigentModeVisual: moonBadge(moon.magenta),
+		VigentModeCommand: moonBadge(moon.yellow),
+		VigentUser: { fg: moon.blue, bold: true },
+		VigentTool: { fg: moon.blue1 },
+		VigentToolOutput: { fg: moon.dark5 },
+		VigentSpinner: { fg: moon.orange },
+	});
+	return t;
+})();
+
+export const LAZYVIM: Theme = { ...TOKYONIGHT_MOON, name: "lazyvim", transparent: true };
+
 export const CATPPUCCIN = fromPalette("catppuccin", {
 	bg: "#1e1e2e", bg_dark: "#181825", bg_alt: "#313244", selection: "#45475a",
 	fg: "#cdd6f4", muted: "#6c7086", subtle: "#585b70",
@@ -192,6 +249,8 @@ export const BUILTIN_THEMES: Record<string, Theme> = {
 	default: NVIM_DEFAULT,
 	gruvbox: GRUVBOX,
 	tokyonight: TOKYONIGHT,
+	"tokyonight-moon": TOKYONIGHT_MOON,
+	lazyvim: LAZYVIM,
 	catppuccin: CATPPUCCIN,
 	"catppuccin-latte": CATPPUCCIN_LATTE,
 	nord: NORD,
