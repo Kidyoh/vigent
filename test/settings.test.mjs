@@ -132,10 +132,35 @@ test("25 built-in themes, each with its own colors, and the picker shows them", 
 	const text = plain(picker.render(64));
 	assert.match(text, /● default +dark/);
 	assert.match(text, /lazyvim +dark transparent/);
-	for (const k of "dracula") picker.handleInput(k);
+	assert.match(text, /\/ to search/);
+	assert.match(text, /j\/k move · Enter pick · q close/);
+	const start = app.painter.theme.name;
+	picker.handleInput("d"); // letters don't search until /
+	assert.equal(app.painter.theme.name, start);
+	picker.handleInput("j");
+	assert.notEqual(app.painter.theme.name, start, "j moves and previews");
+	picker.handleInput("k");
+	assert.equal(app.painter.theme.name, start, "k moves back");
+	for (const k of "/dracula") picker.handleInput(k);
+	assert.match(plain(picker.render(64)), /type to filter · Esc done/);
 	const filtered = picker.render(64).join("\n");
 	assert.ok(filtered.includes("48;2;40;42;54"), "dracula's own background in its swatch");
 	assert.match(plain(picker.render(64)), /dracula/);
 	picker.handleInput("\r");
 	assert.equal(app.painter.theme.name, "dracula");
+});
+
+test(":colorscheme: Esc ends a search, drops the filter, then closes and puts the old theme back", () => {
+	const { app, overlays, ex } = makeApp();
+	const before = app.painter.theme.name;
+	ex("colorscheme");
+	const picker = overlays.at(-1);
+	for (const k of "/nord") picker.handleInput(k);
+	assert.equal(app.painter.theme.name, "nord", "the first match previews");
+	picker.handleInput("\x1b");
+	assert.match(plain(picker.render(64)), /\/nord/, "out of the search, the filter stays");
+	picker.handleInput("\x1b");
+	assert.match(plain(picker.render(64)), /\/ to search/, "the filter is gone");
+	picker.handleInput("q");
+	assert.equal(app.painter.theme.name, before, "q closes and restores");
 });

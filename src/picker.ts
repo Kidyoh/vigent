@@ -35,8 +35,15 @@ export const PICKER_ICONS: Record<"unicode" | "ascii" | "nerd", PickerIcons> = {
 
 const VISIBLE = 14;
 
+/**
+ * `:colorscheme`, vim-style with live preview: `j`/`k` (↓/↑, Ctrl-n/p, Tab)
+ * move and preview, `g`/`G` jump, Enter keeps it, `q`/Esc puts the old one
+ * back. `/` starts a search: type to filter, Esc ends it.
+ */
 export class ThemePicker implements Component {
 	private query = "";
+	/** typing goes to the search (after `/`) */
+	private searching = false;
 	private index = 0;
 	private scroll = 0;
 
@@ -69,42 +76,53 @@ export class ThemePicker implements Component {
 
 	handleInput(data: string): void {
 		const key = parseKey(data) ?? "";
-		switch (key) {
-			case "escape":
-			case "ctrl+c":
-				this.onDone(null);
-				return;
-			case "enter":
-			case "return": {
-				const items = this.filtered();
-				this.onDone(items[this.index] ?? null);
-				return;
-			}
-			case "down":
-			case "tab":
-			case "ctrl+n":
-			case "ctrl+j":
-				this.move(1);
-				break;
-			case "up":
-			case "shift+tab":
-			case "ctrl+p":
-			case "ctrl+k":
-				this.move(-1);
-				break;
-			case "backspace":
-				this.query = this.query.slice(0, -1);
-				this.resetSelection();
-				break;
-			case "ctrl+u":
+		if (key === "ctrl+c") return this.onDone(null);
+		if (key === "enter" || key === "return") {
+			this.onDone(this.filtered()[this.index] ?? null);
+			return;
+		}
+		if (["down", "tab", "ctrl+n", "ctrl+j"].includes(key)) this.move(1);
+		else if (["up", "shift+tab", "ctrl+p", "ctrl+k"].includes(key)) this.move(-1);
+		else if (this.searching) {
+			if (key === "escape") this.searching = false; // the filter stays; j/k move through it
+			else if (key === "backspace") {
+				if (this.query) {
+					this.query = this.query.slice(0, -1);
+					this.resetSelection();
+				} else this.searching = false;
+			} else if (key === "ctrl+u") {
 				this.query = "";
 				this.resetSelection();
-				break;
-			default:
-				if (data.length >= 1 && !data.startsWith("\x1b") && data >= " ") {
-					this.query += data;
-					this.resetSelection();
-				}
+			} else if (data.length >= 1 && !data.startsWith("\x1b") && data >= " ") {
+				this.query += data;
+				this.resetSelection();
+			}
+		} else {
+			switch (data) {
+				case "j":
+					this.move(1);
+					break;
+				case "k":
+					this.move(-1);
+					break;
+				case "g":
+					this.move(-this.index);
+					break;
+				case "G":
+					this.move(this.filtered().length - 1 - this.index);
+					break;
+				case "/":
+					this.searching = true;
+					break;
+				case "q":
+					return this.onDone(null);
+				default:
+					if (key === "escape") {
+						if (!this.query) return this.onDone(null);
+						this.query = ""; // first Esc drops the filter, the next one closes
+						this.resetSelection();
+					}
+			}
 		}
 		this.requestRender();
 	}
@@ -141,7 +159,8 @@ export class ThemePicker implements Component {
 
 		const items = this.filtered();
 		const title = " Colorschemes ";
-		const count = ` ${items.length === 0 ? 0 : this.index + 1}/${items.length} `;
+		const keys = this.searching ? "type to filter · Esc done" : "j/k move · Enter pick · q close";
+		const count = ` ${items.length === 0 ? 0 : this.index + 1}/${items.length} · ${keys} `;
 		const top =
 			border(I.tl + I.h) +
 			P.on("FloatTitle", bg) +
@@ -150,13 +169,18 @@ export class ThemePicker implements Component {
 			border(I.h.repeat(Math.max(0, inner - 1 - visibleWidth(title))) + I.tr);
 
 		const lines = [top];
-		const prompt = `${I.prompt} ${this.query}`;
-		lines.push(
-			row(
-				P.on("Title", bg) + ` ${I.prompt} ` + RESET + P.on("NormalFloat", bg) + this.query + P.on("PmenuSel", undefined) + " " + RESET,
-				visibleWidth(prompt) + 2,
-			),
-		);
+		if (this.searching) {
+			const prompt = `${I.prompt} ${this.query}`;
+			lines.push(
+				row(
+					P.on("Title", bg) + ` ${I.prompt} ` + RESET + P.on("NormalFloat", bg) + this.query + P.on("PmenuSel", undefined) + " " + RESET,
+					visibleWidth(prompt) + 2,
+				),
+			);
+		} else {
+			const hint = truncateToWidth(this.query ? `/${this.query}` : "/ to search", Math.max(0, inner - 4), "…");
+			lines.push(row(P.on("Comment", bg) + ` ${I.prompt} ${hint}` + RESET, visibleWidth(hint) + 3));
+		}
 		lines.push(border(I.lt + I.h.repeat(inner) + I.rt));
 
 		const shown = items.slice(this.scroll, this.scroll + VISIBLE);
