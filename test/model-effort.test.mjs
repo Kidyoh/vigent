@@ -194,3 +194,45 @@ test("the picker: Esc ends a search, then drops the filter, then closes", async 
 	p.handleInput("q");
 	assert.equal(hidden.length, 1, "q closes");
 });
+
+test(":engine picks the engine new agents run on, shows what's ready, and leaves open agents alone", async () => {
+	const overlays = [];
+	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide() {} }) };
+	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
+	app.defaultEngine = () => (app.preferredEngine === "auto" ? "pi" : app.preferredEngine);
+	app.setEngines([
+		{ id: "pi", name: "pi", installed: true, connected: true, detail: "" },
+		{ id: "claude", name: "Claude Code", installed: true, connected: true, detail: "" },
+		{ id: "codex", name: "Codex", installed: true, connected: false, detail: "", connect: "codex login" },
+		{ id: "opencode", name: "OpenCode", installed: false, connected: false, detail: "" },
+	]);
+	const ex = (cmd) => [":", ...cmd, "\r"].forEach((k) => app.handleInput(k));
+
+	ex("engine");
+	await tick();
+	const picker = overlays.at(-1);
+	const screen = plain(picker.render(80));
+	assert.match(screen, /Engine for new agents/);
+	assert.match(screen, /● auto +pick for me \(now pi\)/);
+	assert.match(screen, /claude +Claude Code · ready/);
+	assert.match(screen, /codex +Codex · not signed in: codex login/);
+	assert.match(screen, /opencode +OpenCode · not installed/);
+	picker.handleInput("j");
+	picker.handleInput("j");
+	picker.handleInput("\r");
+	assert.equal(app.preferredEngine, "claude");
+	assert.match(app.message, /new agents run on Claude Code/);
+
+	// an open pi agent keeps pi; the message says how to get one on the new engine
+	const s = new CliSession("old", "claude", undefined, { cwd: tmp, bin: "/nonexistent" });
+	s.engine = "pi";
+	app.addSession(s, true);
+	ex("engine codex");
+	assert.equal(app.preferredEngine, "codex");
+	assert.match(app.message, /new agents run on Codex \(not signed in: run codex login\)/);
+	assert.match(app.message, /'old' stays on pi; :new <task> starts one on Codex/);
+	ex("engine gpt");
+	assert.match(app.message, /engines: auto, pi, claude, codex, opencode/);
+	assert.equal(app.preferredEngine, "codex");
+	s.dispose();
+});

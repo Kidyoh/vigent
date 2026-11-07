@@ -82,7 +82,7 @@ pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may alre
 :checkhealth                                " installed? signed in? how to connect the rest
 ```
 
-The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks pi if it has an API key, otherwise the first signed-in CLI. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
+The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks pi if it has an API key, otherwise the first signed-in CLI. **`:engine`** (`<Space>E`, or `E` on the dashboard) switches it while vigent runs: a menu lists auto, pi, Claude Code, Codex and OpenCode with which are ready, and `:engine claude` sets it directly. Agents already open keep their engine, since their conversation lives there; `:new <task>` starts one on the new engine. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
 
 ![:checkhealth with Claude Code signed in and Codex waiting for codex login](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/checkhealth.png)
 

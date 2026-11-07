@@ -346,6 +346,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>s` | `:settings<CR>` (theme, look, engine, worktrees and keys in one float) |
 | `<leader>M` | `:model<CR>` (pick the focused agent's model) |
 | `<leader>e` | `:effort<CR>` (pick its reasoning effort) |
+| `<leader>E` | `:engine<CR>` (pick the engine new agents run on) |
 
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
 

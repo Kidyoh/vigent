@@ -37,7 +37,7 @@ import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
-import { ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
+import { defaultEngine as defaultEngineFor, ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
 import { splitView, unifiedView } from "./diffview.js";
 import { TREE_GLYPHS, type TreeRow } from "./tree.js";
@@ -814,6 +814,11 @@ export class App implements Component {
 				if (arg) this.chooseModel(arg);
 				else this.openModelPicker();
 				return;
+			case "engine":
+			case "eng":
+				if (arg) this.chooseEngine(arg);
+				else this.openEnginePicker();
+				return;
 			case "effort":
 			case "think":
 				if (arg) this.chooseEffort(arg);
@@ -1055,6 +1060,38 @@ export class App implements Component {
 			});
 	}
 
+	/** `:engine`: which engine new agents run on, with what's ready on this machine. */
+	openEnginePicker() {
+		const ids = ["auto", "pi", "claude", "codex", "opencode"] as const;
+		const items = ids.map((id) => ({ value: id, note: this.engineNote(id) }));
+		this.openChoices("Engine for new agents", items, this.preferredEngine, false, (v) => this.chooseEngine(v));
+	}
+
+	/** "Claude Code · ready", "Codex · not signed in: codex login", "auto: … (now Claude Code)" */
+	private engineNote(id: EngineId | "auto"): string {
+		if (id === "auto") return `pick for me (now ${ENGINE_NAMES[defaultEngineFor(this.engines)]})`;
+		const e = this.engines?.find((x) => x.id === id);
+		if (!e) return ENGINE_NAMES[id];
+		const status = e.connected ? "ready" : !e.installed ? "not installed" : e.connect ? `not signed in: ${e.connect}` : "not signed in";
+		return `${ENGINE_NAMES[id]} · ${status}`;
+	}
+
+	/** `:engine <name>`: new agents run on it. Agents already open keep theirs (their conversation lives there). */
+	chooseEngine(value: string) {
+		if (value !== "auto" && !isEngineId(value)) {
+			this.setMessage("engines: auto, pi, claude, codex, opencode", "ErrorMsg");
+			return;
+		}
+		this.preferredEngine = value;
+		const now = this.defaultEngine();
+		const e = this.engines?.find((x) => x.id === now);
+		const warn = e && !e.connected ? ` (${e.installed ? `not signed in${e.connect ? `: run ${e.connect}` : ""}` : "not installed"})` : "";
+		const s = this.focusedSession;
+		const open = s && s.engine !== now ? ` · '${s.name}' stays on ${ENGINE_NAMES[s.engine]}; :new <task> starts one on ${ENGINE_NAMES[now]}` : "";
+		this.setMessage(`new agents run on ${ENGINE_NAMES[now]}${value === "auto" ? " (auto)" : ""}${warn}${open} · :settings, w keeps it`, warn ? "WarningMsg" : "ModeMsg");
+		this.repaint();
+	}
+
 	/** `:model`: pick from what the engine offers, or type any name. */
 	openModelPicker(t = this.modelTarget()) {
 		const current = t.session
@@ -1161,7 +1198,7 @@ export class App implements Component {
 				change: (d) => {
 					this.preferredEngine = cycle<EngineId | "auto">(["auto", "pi", "claude", "codex", "opencode"], this.preferredEngine, d);
 				},
-				hint: "auto: pi with an API key, else the first signed-in CLI · :checkhealth shows which are ready",
+				hint: "auto: pi with an API key, else the first signed-in CLI · :engine picks it from anywhere",
 			},
 			{
 				section: "Agents",
@@ -2073,6 +2110,9 @@ export class App implements Component {
 			case "e":
 				this.openEffortPicker();
 				return true;
+			case "E":
+				this.openEnginePicker();
+				return true;
 			case "c":
 				this.openHealth();
 				return true;
@@ -2572,6 +2612,7 @@ const EX_HELP: [string, string][] = [
 	[":checkhealth", "which engines are installed and signed in"],
 	[":model [name]", "pick the agent's model (no agent: for new agents)"],
 	[":effort [level]", "pick its reasoning effort: low … max (pi: thinking level)"],
+	[":engine [name]", "pick the engine new agents run on: auto, pi, claude, codex, opencode"],
 	[":settings", "theme, look, engine, worktrees and keys in one place (w saves)"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],
@@ -2655,6 +2696,7 @@ const DASHBOARD: [string, string, string, string][] = [
 	["s", "⚙", "Settings", NERD.gear],
 	["m", "◆", "Model", NERD.chip],
 	["e", "↯", "Effort", NERD.bolt],
+	["E", "⚑", "Engine: pi, Claude Code, Codex, OpenCode", NERD.wrench],
 	["c", "✓", "Check engines", NERD.check],
 	["?", "⌘", "Keys", NERD.keyboard],
 	["q", "×", "Quit", NERD.power],
