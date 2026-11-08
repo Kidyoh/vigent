@@ -175,7 +175,7 @@ export default function HomePage() {
           <span className="cm">&lt;</span>
         </L>
         <L>
-          Try them on vigent above: click one, or press <span className="kw">t</span> (<span className="kw">j</span>/<span className="kw">k</span> to preview, Enter to keep).
+          Try them on vigent above: move the cursor to the line below and press <span className="kw">Enter</span> (or <span className="kw">t</span> anywhere), then <span className="kw">j</span>/<span className="kw">k</span> to preview and Enter to keep. Or click one.
         </L>
         <L className="swatches">
           {Object.entries(THEMES).map(([name, t]) => (

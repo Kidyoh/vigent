@@ -38,6 +38,15 @@ function lineText(el: HTMLElement): string {
   return t.innerText.replace(/\s+/g, " ").trim();
 }
 
+/** What Enter does on a line, if anything (shown when the cursor gets there). */
+function enterHint(el: HTMLElement): string | undefined {
+  if (el.querySelector("[data-colorscheme]")) return "Enter: pick a colorscheme (j/k preview each one, Enter keeps it, q goes back)";
+  if (el.querySelector("[data-yank], .install")) return "Enter or yy: copy the install command";
+  const a = el.querySelector("a[href]");
+  if (a) return `Enter: open ${a.textContent?.trim() || "the link"}`;
+  return undefined;
+}
+
 /**
  * The statusline and command line, and the keys that make the page feel like
  * Vim: a line cursor that j/k move (with counts, gg/G, Ctrl-d/u), yy copies
@@ -142,8 +151,14 @@ export function VimChrome({ file }: { file: string }) {
     const n = Math.max(0, Math.min(all.length - 1, i));
     all[cursor.current]?.classList.remove("cursor");
     all[n].classList.add("cursor");
+    const was = cursor.current;
     cursor.current = n;
     setLine(n + 1);
+    // say what Enter does on lines where it does something
+    if (n !== was && anchor.current === null) {
+      const hint = enterHint(all[n]);
+      if (hint) setMsg({ text: hint });
+    }
     paintSelection(all);
     if (!scroll) return;
     // like Vim: the first line shows the top of the buffer, the last one the ~ after it
@@ -380,6 +395,23 @@ export function VimChrome({ file }: { file: string }) {
       if (k === "t" && !pending) {
         e.preventDefault();
         return colorscheme();
+      }
+      // Enter acts on the cursor's line: the theme list opens the picker, the install line copies, a link opens
+      if (k === "Enter" && !pending) {
+        const el = lines()[cursor.current];
+        if (el?.querySelector("[data-colorscheme]")) {
+          e.preventDefault();
+          return colorscheme();
+        }
+        if (el?.querySelector("[data-yank], .install")) {
+          e.preventDefault();
+          return yank(INSTALL);
+        }
+        const a = el?.querySelector<HTMLAnchorElement>("a[href]");
+        if (a && !(e.target as Element).closest?.("a, button")) {
+          e.preventDefault();
+          return a.click();
+        }
       }
       if (k === "j" || k === "ArrowDown") {
         e.preventDefault();

@@ -44,6 +44,13 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const before = useRef("default");
   const box = useRef<HTMLDivElement>(null);
+  /** where the page was when the picker opened (e.g. the Themes section), to come back to */
+  const returnTo = useRef<number | null>(null);
+  const comeBack = () => {
+    const y = returnTo.current;
+    returnTo.current = null;
+    if (y !== null && Math.abs(scrollY - y) > 40) scrollTo({ top: y, behavior: "instant" });
+  };
 
   // remember the last pick for this visitor
   const [ready, setReady] = useState(false);
@@ -64,18 +71,22 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
 
   const openPicker = () => {
     before.current = theme;
+    returnTo.current = scrollY;
     setOpen(true);
-    box.current?.scrollIntoView({ block: "center" });
+    // jump, don't glide: the picker is often far above the Themes section
+    box.current?.scrollIntoView({ block: "center", behavior: "instant" });
   };
   const keep = (name: string) => {
     setTheme(name);
     setOpen(false);
     applySiteTheme(name, true);
     document.dispatchEvent(new CustomEvent("vigent:say", { detail: `colorscheme ${name}` }));
+    comeBack();
   };
   const cancel = () => {
     setTheme(before.current);
     setOpen(false);
+    comeBack();
   };
 
   // the page (and :colorscheme) asks for the picker
