@@ -47,6 +47,39 @@ function enterHint(el: HTMLElement): string | undefined {
   return undefined;
 }
 
+/** smartcase, as in LazyVim: case-insensitive unless the search has a capital */
+const fold = (term: string, text: string) => (/[A-Z]/.test(term) ? text : text.toLowerCase());
+/** a line's text as the search sees it */
+const textOf = (el: HTMLElement) => (el.innerText || el.textContent || "").replace(/\s+/g, " ");
+
+/**
+ * Highlight every match of `term` in the buffer (hlsearch): lines with a
+ * match get .match, and the text itself a CSS highlight where the browser has them.
+ */
+function paintMatches(term?: string) {
+  const all = lines();
+  all.forEach((l) => l.classList.toggle("match", !!term && fold(term, textOf(l)).includes(fold(term, term))));
+  const reg = (globalThis as any).CSS?.highlights;
+  const HL = (globalThis as any).Highlight;
+  if (!reg || !HL) return;
+  if (!term) return reg.delete("search");
+  const needle = fold(term, term);
+  const ranges: Range[] = [];
+  for (const l of all) {
+    const walk = document.createTreeWalker(l, NodeFilter.SHOW_TEXT);
+    for (let node = walk.nextNode() as Text | null; node; node = walk.nextNode() as Text | null) {
+      const hay = fold(term, node.data);
+      for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + needle.length)) {
+        const r = new Range();
+        r.setStart(node, at);
+        r.setEnd(node, at + needle.length);
+        ranges.push(r);
+      }
+    }
+  }
+  reg.set("search", new HL(...ranges));
+}
+
 /**
  * The statusline and command line, and the keys that make the page feel like
  * Vim: a line cursor that j/k move (with counts, gg/G, Ctrl-d/u), yy copies
@@ -54,7 +87,13 @@ function enterHint(el: HTMLElement): string | undefined {
  */
 export function VimChrome({ file }: { file: string }) {
   const [cmd, setCmd] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ text: string; err?: boolean }>({ text: "j/k move the cursor · yy copies the line · : for commands" });
+  const [msg, setMsg] = useState<{ text: string; err?: boolean }>({ text: "j/k move the cursor · / searches · yy copies the line · : for commands" });
+  /** what the command line is for: a : command, or a / (forward) or ? (backward) search */
+  const [kind, setKind] = useState<":" | "/" | "?">(":");
+  /** the last search, for n / N */
+  const lastSearch = useRef<{ term: string; dir: 1 | -1 } | null>(null);
+  /** where the cursor was when / was typed: Esc puts it back */
+  const searchStart = useRef(0);
   const [pos, setPos] = useState("Top");
   const [line, setLine] = useState(1);
   const [toast, setToast] = useState<{ ok: boolean; text: string; id: number } | null>(null);
@@ -145,7 +184,7 @@ export function VimChrome({ file }: { file: string }) {
   const colorscheme = (name?: string) => document.dispatchEvent(new CustomEvent("vigent:colorscheme", { detail: name }));
 
   /** Put the cursor on line `i` (0-based) and keep it on screen. */
-  const moveTo = (i: number, scroll = true) => {
+  const moveTo = (i: number, scroll: boolean | "center" = true) => {
     const all = lines();
     if (!all.length) return;
     const n = Math.max(0, Math.min(all.length - 1, i));
@@ -164,7 +203,48 @@ export function VimChrome({ file }: { file: string }) {
     // like Vim: the first line shows the top of the buffer, the last one the ~ after it
     if (n === 0) scrollTo(0, 0);
     else if (n === all.length - 1) scrollTo(0, document.documentElement.scrollHeight);
-    else all[n].scrollIntoView({ block: "nearest" });
+    else all[n].scrollIntoView({ block: scroll === "center" ? "center" : "nearest" });
+  };
+
+  /**
+   * The next line with `term` after line `from` (before it when dir is -1),
+   * wrapping around the buffer like 'wrapscan'.
+   */
+  const findLine = (term: string, dir: 1 | -1, from: number) => {
+    const all = lines();
+    const needle = fold(term, term);
+    const hits = all.flatMap((l, i) => (fold(term, textOf(l)).includes(needle) ? [i] : []));
+    if (!hits.length) return null;
+    const ahead = dir > 0 ? hits.find((i) => i > from) : [...hits].reverse().find((i) => i < from);
+    const i = ahead ?? (dir > 0 ? hits[0] : hits[hits.length - 1]);
+    return { i, wrapped: ahead === undefined, nth: hits.indexOf(i) + 1, total: hits.length };
+  };
+  /** Search from the cursor, move to the match and say where it is, like Vim with 'shortmess' -S. */
+  const searchTo = (term: string, dir: 1 | -1, from = cursor.current) => {
+    const prefix = dir > 0 ? "/" : "?";
+    const r = findLine(term, dir, from);
+    if (!r) {
+      setMsg({ text: `E486: Pattern not found: ${term}`, err: true });
+      return false;
+    }
+    moveTo(r.i, "center");
+    const wrap = r.wrapped ? (dir > 0 ? "  search hit BOTTOM, continuing at TOP" : "  search hit TOP, continuing at BOTTOM") : "";
+    setMsg({ text: `${prefix}${term}  [${r.nth}/${r.total}]${wrap}`, err: false });
+    return true;
+  };
+  /** while typing after / or ?: jump to the first match as you type (incsearch) and highlight them all */
+  const previewSearch = (term: string) => {
+    paintMatches(term || undefined);
+    if (!term) return moveTo(searchStart.current);
+    const r = findLine(term, kind === "?" ? -1 : 1, searchStart.current);
+    moveTo(r ? r.i : searchStart.current, "center");
+  };
+  /** n / N: the last search again, the same way or the other way */
+  const searchNext = (reverse: boolean) => {
+    const last = lastSearch.current;
+    if (!last) return setMsg({ text: "E35: No previous regular expression", err: true });
+    paintMatches(last.term);
+    searchTo(last.term, reverse ? (-last.dir as 1 | -1) : last.dir);
   };
 
   const yank = (text: string, count = 1) => {
@@ -215,6 +295,10 @@ export function VimChrome({ file }: { file: string }) {
       return;
     }
     if (word === "yy" || word === "yank") return yankLine();
+    if (/^noh(l(s(e(a(r(c(h)?)?)?)?)?)?)?$/.test(word)) {
+      paintMatches();
+      return setMsg({ text: "" });
+    }
     if (word === "colorscheme" || word === "colo") return colorscheme(c.split(/\s+/)[1]);
     if (/^q(a|uit|all)?!?$/.test(word)) return setMsg({ text: `Nothing to quit here. In your terminal: ${INSTALL}` });
     setMsg({ text: `E492: Not an editor command: ${c}`, err: true });
@@ -372,11 +456,23 @@ export function VimChrome({ file }: { file: string }) {
       const n = Math.max(1, Number(count) || 1);
       const hadCount = count !== "";
       count = "";
-      if (k === ":") {
+      if (k === ":" || k === "/" || k === "?") {
         e.preventDefault();
         pending = "";
+        searchStart.current = cursor.current;
+        setKind(k);
         setCmd("");
         return;
+      }
+      if (k === "n" || k === "N") {
+        e.preventDefault();
+        pending = "";
+        return searchNext(k === "N");
+      }
+      // Esc clears the search highlight, as in LazyVim
+      if (k === "Escape" && anchor.current === null && !pending) {
+        paintMatches();
+        return setMsg({ text: "" });
       }
       if (k === "V" || k === "v") {
         pending = "";
@@ -444,6 +540,21 @@ export function VimChrome({ file }: { file: string }) {
 
   const close = (text?: string) => {
     setCmd(null);
+    if (kind !== ":") {
+      const term = text?.trim();
+      if (term) {
+        // the search stays highlighted until :noh or Esc
+        const dir = kind === "?" ? -1 : 1;
+        lastSearch.current = { term, dir };
+        paintMatches(term);
+        if (!searchTo(term, dir, searchStart.current)) moveTo(searchStart.current);
+        return;
+      }
+      // cancelled: the cursor goes back, the last search's highlight with it
+      moveTo(searchStart.current);
+      paintMatches(lastSearch.current?.term);
+      return setMsg({ text: "" });
+    }
     if (text !== undefined) run(text);
     else setMsg({ text: "" });
   };
@@ -474,24 +585,34 @@ export function VimChrome({ file }: { file: string }) {
           <span className="cm hide-sm">[help][RO]</span>
           <span className="fill" />
           <span className="cm hide-sm">
-            {hasIndex ? "j/k move · ]] section · <Space>e index · t theme · : commands" : "j/k move · yy copy · V select · t theme · : commands"}
+            {hasIndex ? "j/k move · / search · ]] section · <Space>e index · : commands" : "j/k move · / search · yy copy · V select · t theme · : commands"}
           </span>
           <span className="pos">
             {line}:1 · {pos}
           </span>
         </div>
-        <div className="cmd" onClick={() => cmd === null && setCmd("")}>
+        <div
+          className="cmd"
+          onClick={() => {
+            if (cmd !== null) return;
+            setKind(":");
+            setCmd("");
+          }}
+        >
           {cmd !== null ? (
             <>
-              <span className="colon">:</span>
+              <span className="colon">{kind}</span>
               <input
                 ref={input}
                 id="cmdinput"
-                aria-label="Command"
+                aria-label={kind === ":" ? "Command" : "Search"}
                 autoComplete="off"
                 spellCheck={false}
                 value={cmd}
-                onChange={(e) => setCmd(e.target.value)}
+                onChange={(e) => {
+                  setCmd(e.target.value);
+                  if (kind !== ":") previewSearch(e.target.value);
+                }}
                 onBlur={() => close()}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {

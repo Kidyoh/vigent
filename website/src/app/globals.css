@@ -83,6 +83,9 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .l.vsel { background: var(--vsel); }
 .l.vsel::before { color: var(--bright); }
 .sl .mode.visual { background: var(--magenta); }
+/* / search: lines with a match, and the matches themselves (hlsearch) */
+.l.match::before { color: var(--yellow); }
+::highlight(search) { background-color: var(--yellow); color: var(--bg); }
 .l > * { min-width: 0; }
 .t { overflow-wrap: anywhere; }
 .tilde::before { counter-increment: none; content: "~"; text-align: left; color: var(--faint); padding-left: .5ch; }
