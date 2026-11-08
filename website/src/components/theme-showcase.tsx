@@ -1,10 +1,10 @@
 "use client";
 
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { applySiteTheme, STORE } from "../lib/site-theme";
 import { type ThemeColors, THEMES } from "../lib/themes";
 
 const NAMES = Object.keys(THEMES);
-const STORE = "vigent-site-colorscheme";
 
 /** The drawing's colors as CSS variables, from one of vigent's themes. */
 function vars(t: ThemeColors): CSSProperties {
@@ -65,6 +65,7 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
   live.current = { ...live.current, open, shown, query, current };
 
   // remember the last pick for this visitor
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORE);
@@ -72,7 +73,13 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
     } catch {
       // storage off: start on default
     }
+    setReady(true);
   }, []);
+
+  // the whole site wears the colorscheme too, previews included; Esc puts the old one back
+  useEffect(() => {
+    if (ready) applySiteTheme(theme);
+  }, [ready, theme]);
 
   const openPicker = (preview?: string) => {
     before.current = theme;
@@ -89,11 +96,7 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
     setTheme(name);
     live.current.open = false;
     setOpen(false);
-    try {
-      localStorage.setItem(STORE, name);
-    } catch {
-      // not remembered, still applied
-    }
+    applySiteTheme(name, true);
     document.dispatchEvent(new CustomEvent("vigent:say", { detail: `colorscheme ${name}` }));
   };
   const cancel = () => {
