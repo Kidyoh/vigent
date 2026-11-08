@@ -26,7 +26,7 @@ pi then shows as not installed; the same command without `--omit=optional` adds 
 Requires Node.js 20 or newer and git. On Node 22.1 or newer, vigent keeps Node's compile cache, which makes later starts faster. Then, inside any git repository:
 
 ```bash
-vigent                    # pi with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY), or a signed-in CLI
+vigent                    # your signed-in CLI (Claude Code, Codex, OpenCode), or pi with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY)
 vigent --engine claude    # new agents run your installed Claude Code (also: codex, opencode, pi)
 vigent --demo             # scripted agents, nothing needed
 vigent --help
