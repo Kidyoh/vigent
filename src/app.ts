@@ -107,6 +107,8 @@ interface Icons {
 	unread: string;
 	/** :serve is on: a phone can follow */
 	serve: string;
+	/** a lightweight (copy-on-write) worktree */
+	light: string;
 	ok: string;
 	warn: string;
 	off: string;
@@ -132,6 +134,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		here: "●",
 		unread: "◆",
 		serve: "⇄ ",
+		light: "✦",
 		ok: "●",
 		warn: "◐",
 		off: "○",
@@ -155,6 +158,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		here: NERD.circle,
 		unread: NERD.bell,
 		serve: "\uf10b ",
+		light: "\uf0e7",
 		ok: NERD.check,
 		warn: NERD.warning,
 		off: NERD.circleO,
@@ -178,6 +182,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		here: "*",
 		unread: "!",
 		serve: "~ ",
+		light: "*",
 		ok: "+",
 		warn: "~",
 		off: "-",
@@ -1569,7 +1574,7 @@ export class App implements Component {
 			if (wt?.riftri) this.refreshStorage();
 			const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
 			if (wt?.path) {
-				const how = wt.riftri ? ` · riftri ${wt.riftri}` : wt.riftriSkipped ? " · full copy (riftri declined: :checkhealth)" : "";
+				const how = wt.riftri ? " · lightweight copy" : wt.riftriSkipped ? " · full copy (:checkhealth says why)" : "";
 				this.setMessage(
 					`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}${how}`,
 					wt.riftriSkipped ? "WarningMsg" : "ModeMsg",
@@ -2656,7 +2661,7 @@ export class App implements Component {
 		const s = this.focusedSession;
 		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
 		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}${s.effort ? ` · ${s.effort}` : ""}` : "";
-		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? " · riftri" : ""}` : s ? "this checkout" : "";
+		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? ` ${this.icons.light}` : ""}` : s ? "this checkout" : "";
 		const ext = s && "extensionStatus" in s ? [...(s as PiSession).extensionStatus.values()].join(" · ") : "";
 		const status = (s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "") + (ext ? `  ${ext}` : "");
 		// the path gives way first (from its start: the end names the worktree), always two spaces before it
