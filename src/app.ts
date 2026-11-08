@@ -41,6 +41,7 @@ import { HunkReview } from "./hunk-review.js";
 import { listFiles, MENTION, mentionable } from "./attach.js";
 import { allTemplates, fillTemplate, needsTask, type Template } from "./templates.js";
 import type { PiUiHost } from "./pi-ui.js";
+import { type ServeHandle, type ServeHost, type ServeOptions, startServer } from "./serve.js";
 import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
@@ -104,6 +105,8 @@ interface Icons {
 	here: string;
 	/** an agent finished (or failed) while you looked elsewhere */
 	unread: string;
+	/** :serve is on: a phone can follow */
+	serve: string;
 	ok: string;
 	warn: string;
 	off: string;
@@ -128,6 +131,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		open_agent: "▸",
 		here: "●",
 		unread: "◆",
+		serve: "⇄ ",
 		ok: "●",
 		warn: "◐",
 		off: "○",
@@ -150,6 +154,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		open_agent: "▸",
 		here: NERD.circle,
 		unread: NERD.bell,
+		serve: "\uf10b ",
 		ok: NERD.check,
 		warn: NERD.warning,
 		off: NERD.circleO,
@@ -172,6 +177,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		open_agent: ">",
 		here: "*",
 		unread: "!",
+		serve: "~ ",
 		ok: "+",
 		warn: "~",
 		off: "-",
@@ -295,6 +301,7 @@ export class App implements Component {
 
 	addSession(s: Session, focus = true) {
 		if ("extensionStatus" in s) (s as PiSession).uiHost = this.piUiHost(s);
+		queueMicrotask(() => this.server?.sync());
 		this.sessions.push(s);
 		this.lastState.set(s, s.state);
 		s.onChange(() => {
@@ -794,6 +801,9 @@ export class App implements Component {
 			case "pi":
 			case "extensions":
 				this.openPiResources();
+				return;
+			case "serve":
+				void this.execServe(arg);
 				return;
 			case "tree":
 				this.openTree();
@@ -1837,6 +1847,64 @@ export class App implements Component {
 		});
 	}
 
+	/** the `:serve` server, while it runs */
+	server?: ServeHandle;
+	/** starts it (replaced in tests) */
+	startServer: (host: ServeHost, opts: ServeOptions) => Promise<ServeHandle> = startServer;
+
+	/** `:serve [local] [port]` starts it (or shows where it is), `:serve stop` stops it. */
+	async execServe(arg: string) {
+		const words = arg.split(/\s+/).filter(Boolean);
+		if (words[0] === "stop") {
+			if (!this.server) return this.setMessage(":serve isn't running", "Comment");
+			await this.server.close();
+			this.server = undefined;
+			this.notify(":serve stopped", "Comment");
+			return;
+		}
+		if (this.server) return this.openServeInfo();
+		const port = Number(words.find((w) => /^\d+$/.test(w)) ?? 8377);
+		const local = words.includes("local");
+		try {
+			this.server = await this.startServer(this.serveHost(), { port, host: local ? "127.0.0.1" : "0.0.0.0" });
+		} catch (err: any) {
+			const why = err?.code === "EADDRINUSE" ? `port ${port} is taken (:serve ${port + 1})` : String(err?.message ?? err);
+			return this.notify(`:serve couldn't start: ${why}`, "ErrorMsg");
+		}
+		this.openServeInfo();
+	}
+
+	private serveHost(): ServeHost {
+		return {
+			sessions: () => this.sessions,
+			project: () => path.basename(this.workspace.root ?? process.cwd()),
+			palette: () => extractPalette(this.painter.theme),
+			isUnread: (s) => this.unread.has(s),
+			startAgent: (task) => this.startAgent(agentNameFrom(task)),
+			notify: (text) => this.notify(text, "ModeMsg"),
+		};
+	}
+
+	/** Where to open it and the access code. */
+	openServeInfo() {
+		const sv = this.server;
+		if (!sv) return;
+		const lines: FloatLine[] = [];
+		lines.push([["Comment", "On your phone, open"]]);
+		for (const u of sv.urls.slice(0, sv.urls.length > 1 ? -1 : undefined)) lines.push([["Title", `  ${u}`]]);
+		lines.push([["Comment", "and type the access code"]]);
+		lines.push([["String", `  ${sv.code}`]]);
+		lines.push([]);
+		lines.push([["Comment", "Or open it with the code in the link:"]]);
+		lines.push([["NormalFloat", `  ${sv.urls[0]}#${sv.code}`]]);
+		lines.push([]);
+		if (sv.host === "127.0.0.1") lines.push([["WarningMsg", "This machine only (:serve local). :serve stop, then :serve, for your phone."]]);
+		else lines.push([["Comment", "Same Wi-Fi as this machine, or a VPN like Tailscale. Plain HTTP:"], ["WarningMsg", " not on public Wi-Fi."]]);
+		lines.push([["Comment", "The page lists your agents, follows a reply as it streams, and sends prompts."]]);
+		lines.push([["Comment", ":serve shows this again · :serve stop ends it (and the code)"]]);
+		this.openFloat("Follow from your phone", lines, Math.min(84, this.terminal.columns - 4));
+	}
+
 	/** `:cost`: what each agent has used (tokens, and money where the engine reports it) and the total. */
 	openUsage() {
 		if (this.sessions.length === 0) {
@@ -1930,6 +1998,7 @@ export class App implements Component {
 		s.abort();
 		s.dispose();
 		this.sessions.splice(this.focusIdx, 1);
+		this.server?.sync();
 		this.focusIdx = Math.max(0, Math.min(this.focusIdx, this.sessions.length - 1));
 		const wt = s.worktree;
 		if (!wt?.path || !this.workspace.root) {
@@ -2875,8 +2944,10 @@ export class App implements Component {
 		const changes = st && (st.added || st.removed) ? ` +${st.added} ${this.icons.minus}${st.removed}` : "";
 		const worktree = s?.worktree ? `${this.icons.worktree}${s.worktree.branch}${changes} ` : "";
 		const right = s
-			? ` ${s.model}  ${formatUsage(s)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
-			: "";
+			? ` ${this.server ? this.icons.serve : ""}${s.model}  ${formatUsage(s)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
+			: this.server
+				? ` ${this.icons.serve}serving `
+				: "";
 		const plainLen = visibleWidth(` ${this.mode} `) + (this.demo ? 6 : 0) + visibleWidth(leftText) + visibleWidth(worktree) + visibleWidth(right);
 		const fill = Math.max(0, width - plainLen);
 		return (
@@ -3006,6 +3077,7 @@ const EX_HELP: [string, string][] = [
 	[":dash", "all agents at a glance"],
 	[":cost", "tokens and money each agent has used, and the total"],
 	[":pi", "a pi agent's extensions, commands, skills and prompt templates"],
+	[":serve  /  :serve stop", "follow and prompt your agents from your phone (local: this machine only)"],
 	[":tree", "the conversation's branches; go back and branch"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],

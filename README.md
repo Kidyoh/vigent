@@ -52,6 +52,16 @@ The statusline shows what the agent on screen has used, like `74.8k tok · $0.50
 
 ![:cost](docs/screenshots/cost.png)
 
+### From your phone
+
+**`:serve`** lets you follow your agents from your phone, or start `vigent --serve` to have it on from the beginning. vigent shows an address on your network and an 8-character access code. Open the address on your phone and type the code, or open the link that already has the code in it.
+
+The page uses your theme's colors. It lists your agents with their state, branch, changes and cost, and follows a reply as it streams. You can send a follow-up (it waits its turn if the agent is busy), stop an agent, or start a new one.
+
+![following agents from a phone](docs/screenshots/serve-phone.png)
+
+The code is new each time, and every request needs it. Prompts and stops need it in a header, so no other web page can send them through your browser. After 10 wrong codes the server stops answering. It's plain HTTP, so use it on your own Wi-Fi or over a VPN like Tailscale, not on public Wi-Fi. `:serve local` listens on this machine only, for an SSH tunnel. `:serve 9000` picks the port (the default is 8377). `:serve stop` ends it and retires the code.
+
 ### First agent
 
 Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using pi if it has an API key, or else the first signed-in CLI (Claude Code, Codex, OpenCode; `:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.

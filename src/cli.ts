@@ -34,6 +34,7 @@ const HELP = `vigent — vim-native agent orchestrator (pi engine)
 usage:
   vigent --version                           which vigent this is (and the commit, from a clone)
   vigent [folder] [--demo] [--theme <name>] [--model <id>] [--engine pi|claude|codex|opencode]
+  vigent --serve [--local]                   also follow your agents from your phone (:serve)
 
 engines (what runs new agents; :checkhealth shows which are signed in):
   pi        built in, uses ANTHROPIC_API_KEY / OPENAI_API_KEY / ... or pi's login
@@ -452,6 +453,8 @@ async function main(): Promise<number | undefined> {
 		});
 	}
 	tui.requestRender(true);
+	// follow from your phone from the start (same as :serve)
+	if (argv.includes("--serve")) void app.execServe(argv.includes("--local") ? "local" : "");
 	return undefined;
 }
 
