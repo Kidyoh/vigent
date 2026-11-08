@@ -41,6 +41,7 @@ import { HunkReview } from "./hunk-review.js";
 import { listFiles, MENTION, mentionable } from "./attach.js";
 import { allTemplates, fillTemplate, needsTask, type Template } from "./templates.js";
 import type { PiUiHost } from "./pi-ui.js";
+import { type AllowChoice, type CliSession, type Denial, describeDenial } from "./cli-engines.js";
 import { type ServeHandle, type ServeHost, type ServeOptions, startServer } from "./serve.js";
 import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
@@ -310,6 +311,7 @@ export class App implements Component {
 
 	addSession(s: Session, focus = true) {
 		if ("extensionStatus" in s) (s as PiSession).uiHost = this.piUiHost(s);
+		if (s.engine === "claude" && "asksToAllow" in s) (s as CliSession).approver = (blocked, rules) => this.askToAllow(s, blocked, rules);
 		queueMicrotask(() => this.server?.sync());
 		this.sessions.push(s);
 		this.lastState.set(s, s.state);
@@ -1819,6 +1821,31 @@ export class App implements Component {
 			},
 			setStatus: (key, text) => (s as PiSession).setExtensionStatus?.(key, text),
 		};
+	}
+
+	/**
+	 * Claude Code refused an agent some tools ([engines.claude] ask = true):
+	 * allow them for one retry, always (saved to config.toml), or leave them blocked.
+	 */
+	askToAllow(s: Session, blocked: Denial[], rules: string[]): Promise<AllowChoice> {
+		return new Promise((resolve) => {
+			if (s !== this.focusedSession || !this.terminalFocused) this.alert(alertSequence(`vigent: '${s.name}' needs a permission`, this.ui.notify));
+			const what = [...new Set(blocked.map(describeDenial))].join(" · ");
+			const list = rules.join(", ");
+			this.openChoices(
+				`'${s.name}' was blocked · ${what}`,
+				[
+					{ value: "allow once", note: `${list}, for this retry` },
+					{ value: "always allow", note: `${list}, saved to [engines.claude] allow` },
+					{ value: "no", note: "leave it blocked" },
+				],
+				"",
+				false,
+				(v) => resolve(v === "allow once" ? "once" : v === "always allow" ? "always" : undefined),
+				{ onCancel: () => resolve(undefined), rows: 3 },
+			);
+			this.tui.requestRender();
+		});
 	}
 
 	/** `:pi`: what pi loaded for the focused agent. Enter on a command, skill or prompt starts a prompt with it. */

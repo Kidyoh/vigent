@@ -118,6 +118,8 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
+**Permissions:** with `-p`, Claude Code can't stop to ask before running a command it isn't allowed, so it refuses it (for example `gh` or `cargo` under `acceptEdits`). vigent shows what was refused. You can allow commands up front with `[engines.claude] allow = ["Bash(gh:*)"]`. Or opt in with `ask = true`: vigent then asks **allow once / always allow / no** and runs the agent again with the permission ([details](https://github.com/farming-labs/vigent/blob/main/docs/config.md#when-claude-code-is-refused-a-tool)).
+
 ### pi extensions, skills and prompt templates
 
 A pi agent loads what pi itself would load. That covers extensions from `~/.pi/agent/extensions/` and `.pi/extensions/`, and the packages you installed with pi. It also covers skills, prompt templates, and the project's `AGENTS.md`.

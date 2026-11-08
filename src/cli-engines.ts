@@ -29,7 +29,15 @@ export type CliEvent =
 	| { type: "tool_result"; id?: string; output: string }
 	| { type: "usage"; tokens: number; cost?: number }
 	| { type: "error"; message: string }
+	/** tools the CLI's permission settings refused to run (Claude Code's permission_denials) */
+	| { type: "denied"; tools: Denial[] }
 	| { type: "done"; ok: boolean; error?: string };
+
+/** A tool call the CLI refused because its permission settings don't allow it. */
+export interface Denial {
+	name: string;
+	input?: any;
+}
 
 export interface CliRunOptions {
 	model?: string;
@@ -42,6 +50,8 @@ export interface CliRunOptions {
 	extraArgs?: string[];
 	/** files attached with `@path` (OpenCode takes them with -f) */
 	files?: string[];
+	/** Claude Code permission rules allowed for this run (--allowedTools) */
+	allowedTools?: string[];
 }
 
 export interface CliAdapter {
@@ -71,6 +81,7 @@ export const claudeAdapter: CliAdapter = {
 			"--verbose",
 			"--include-partial-messages",
 			...(o.extraArgs ?? this.defaultArgs),
+			...(o.allowedTools?.length ? ["--allowedTools", ...o.allowedTools] : []),
 			...(o.model ? ["--model", o.model] : []),
 			...(o.effort ? ["--effort", o.effort] : []),
 			...(o.resumeId ? ["--resume", o.resumeId] : []),
@@ -116,6 +127,14 @@ export const claudeAdapter: CliAdapter = {
 					const cost = typeof e.total_cost_usd === "number" ? e.total_cost_usd : undefined;
 					if (tokens || cost !== undefined) out.push({ type: "usage", tokens, ...(cost !== undefined ? { cost } : {}) });
 					if (e.session_id) out.push({ type: "session", id: e.session_id });
+					if (Array.isArray(e.permission_denials) && e.permission_denials.length) {
+						out.push({
+							type: "denied",
+							tools: e.permission_denials
+								.filter((d: any) => d && typeof d.tool_name === "string")
+								.map((d: any) => ({ name: d.tool_name, input: d.tool_input })),
+						});
+					}
 					const ok = !e.is_error && e.subtype === "success";
 					out.push({ type: "done", ok, ...(ok ? {} : { error: String(e.result ?? e.errors?.join?.("; ") ?? e.subtype ?? "failed") }) });
 					break;
@@ -312,7 +331,16 @@ export interface CliSessionOptions {
 	env?: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
 	/** called when the CLI reports its conversation id, so it can be saved */
 	onResumeId?: (id: string) => void;
+	/** permission rules every run may use ([engines.claude] allow); asked at each run */
+	allow?: () => string[] | undefined;
+	/** when the CLI refuses a tool, ask to allow it and retry ([engines.claude] ask; opt-in) */
+	ask?: boolean;
+	/** "always allow" was picked: keep these rules ([engines.claude] allow) */
+	onAlwaysAllow?: (rules: string[]) => void;
 }
+
+/** What you pick when an agent was refused a tool: allow it for one retry, for good, or not. */
+export type AllowChoice = "once" | "always" | undefined;
 
 export class CliSession extends Session {
 	declare engine: CliEngineId;
@@ -323,6 +351,8 @@ export class CliSession extends Session {
 	private aborted = false;
 	/** the model the user asked for; undefined = the CLI's own default */
 	private requestedModel?: string;
+	/** asks you whether to allow tools the CLI refused (set by the app when [engines.claude] ask is on) */
+	approver?: (blocked: Denial[], rules: string[]) => Promise<AllowChoice>;
 
 	constructor(name: string, engine: CliEngineId, model: string | undefined, private opts: CliSessionOptions) {
 		super(name, model ?? ENGINE_NAMES[engine], opts.worktree);
@@ -362,6 +392,16 @@ export class CliSession extends Session {
 
 	send(text: string): void {
 		this.pushUser(text);
+		this.run(text);
+	}
+
+	/** whether a refused tool can be asked about (opt-in, and only Claude Code reports them) */
+	get asksToAllow(): boolean {
+		return !!this.opts.ask && this.engine === "claude";
+	}
+
+	/** One run of the CLI; `once` are permission rules for this run only. */
+	private run(text: string, once: string[] = []): void {
 		this.setState("running");
 		this.aborted = false;
 		const attached = expandPrompt(text, this.adapter.id, this.cwd);
@@ -373,6 +413,7 @@ export class CliSession extends Session {
 			effort: this.effort,
 			resumeId: this.resumeId,
 			extraArgs: this.opts.extraArgs,
+			allowedTools: [...new Set([...(this.opts.allow?.() ?? []), ...once])],
 		});
 		let child: ChildProcess;
 		try {
@@ -391,6 +432,7 @@ export class CliSession extends Session {
 		let stderr = "";
 		let result: Extract<CliEvent, { type: "done" }> | undefined;
 		let lastError: string | undefined;
+		let denied: Denial[] = [];
 		const tools = new Map<string, TranscriptItem>();
 
 		const handle = (ev: CliEvent) => {
@@ -445,6 +487,9 @@ export class CliSession extends Session {
 				case "error":
 					lastError = ev.message;
 					break;
+				case "denied":
+					denied = ev.tools;
+					break;
 				case "done":
 					result = ev;
 					break;
@@ -490,6 +535,7 @@ export class CliSession extends Session {
 				return;
 			}
 			const ok = result ? result.ok : code === 0 && !lastError;
+			if (denied.length && this.blocked(denied)) return;
 			if (ok) {
 				this.setState("idle");
 				return;
@@ -501,6 +547,36 @@ export class CliSession extends Session {
 				(signal ? `stopped by ${signal}` : `exited with code ${code}`);
 			this.fail(`${this.engineName}: ${why}`);
 		});
+	}
+
+	/**
+	 * The CLI refused some tools. Say which; with [engines.claude] ask on, ask
+	 * whether to allow them and run again. True when it's now asking you.
+	 */
+	private blocked(denied: Denial[]): boolean {
+		const what = [...new Set(denied.map((d) => this.relative(describeDenial(d))))];
+		const rules = [...new Set(denied.map(allowRule))];
+		this.pushInfo(`blocked by ${this.engineName}'s permissions: ${what.join(" · ")}`);
+		if (!this.asksToAllow || !this.approver) {
+			if (this.engine === "claude") this.pushInfo(`to allow it, in config.toml: [engines.claude] allow = ${JSON.stringify(rules)} (or ask = true, to be asked each time)`);
+			return false;
+		}
+		this.setState("waiting");
+		this.approver(denied, rules).then(
+			(choice) => {
+				if (this.state !== "waiting") return; // aborted, or a new prompt was sent meanwhile
+				if (!choice) {
+					this.pushInfo("left blocked");
+					this.setState("idle");
+					return;
+				}
+				if (choice === "always") this.opts.onAlwaysAllow?.(rules);
+				this.pushInfo(`${choice === "always" ? "always allowed" : "allowed once"}: ${rules.join(", ")} · retrying`);
+				this.run(`You now have permission to use ${rules.join(", ")}. Retry what was blocked, then carry on with the task.`, rules);
+			},
+			() => this.setState("idle"),
+		);
+		return true;
 	}
 
 	/** paths inside the agent's folder, shown relative to it */
@@ -558,6 +634,29 @@ function safeRealpath(p: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** A refused tool call, short: the command for Bash, the tool name and its target otherwise. */
+export function describeDenial(d: Denial): string {
+	if (d.name === "Bash" && typeof d.input?.command === "string") return d.input.command.replace(/\s+/g, " ").trim().slice(0, 80);
+	const s = summarize(d.input);
+	return s ? `${d.name} ${s}`.slice(0, 80) : d.name;
+}
+
+/**
+ * The Claude Code permission rule that allows a refused call: `Bash(gh:*)`
+ * for a command (its program, any arguments), the tool's name otherwise.
+ */
+export function allowRule(d: Denial): string {
+	if (d.name === "Bash" && typeof d.input?.command === "string") {
+		// skip leading VAR=value assignments; the program is the first word
+		const words = d.input.command.trim().split(/\s+/).filter((w: string) => w);
+		const prog = words.find((w: string) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+		const m = prog && /^[^\s;&|()<>`$'"]+/.exec(prog);
+		if (m) return `Bash(${m[0]}:*)`;
+		return "Bash";
+	}
+	return d.name;
 }
 
 function contentOf(message: any): any[] {

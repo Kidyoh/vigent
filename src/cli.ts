@@ -11,6 +11,7 @@ import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
 import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
+import { setTomlValue } from "./config-edit.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
 import { formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
@@ -314,6 +315,22 @@ async function main(): Promise<number | undefined> {
 		.then((engines) => app.setEngines(engines))
 		.catch(() => {});
 
+	/** "always allow": add the rules to [engines.<id>] allow, here and in config.toml. Returns why it couldn't save. */
+	const alwaysAllow = (engine: Exclude<EngineId, "pi">, rules: string[]): string | undefined => {
+		const e = (config.engines[engine] ??= {});
+		e.allow = [...new Set([...(e.allow ?? []), ...rules])];
+		const file = configPath();
+		try {
+			const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : CONFIG_TEMPLATE;
+			const list = `[${e.allow.map((r) => JSON.stringify(r)).join(", ")}]`;
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			fs.writeFileSync(file, setTomlValue(text, `engines.${engine}`, "allow", list));
+			return undefined;
+		} catch (err) {
+			return `allowed for now, but couldn't save to ${file}: ${(err as Error).message}`;
+		}
+	};
+
 	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
 	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string) =>
 		new CliSession(name, engine, requested, {
@@ -324,6 +341,13 @@ async function main(): Promise<number | undefined> {
 			extraArgs: config.engines[engine]?.args,
 			// e.g. Claude Code without ANTHROPIC_API_KEY when it has a Claude account (see detectClaude)
 			env: () => engineEnv(app.engines?.find((e) => e.id === engine)),
+			// Claude Code's permission rules: [engines.claude] allow, and ask (opt-in) to allow a refused tool and retry
+			allow: () => config.engines[engine]?.allow,
+			ask: config.engines[engine]?.ask,
+			onAlwaysAllow: (rules) => {
+				const why = alwaysAllow(engine, rules);
+				if (why) app.notify(why);
+			},
 			onResumeId: (id) => {
 				if (!wt?.path) return;
 				const meta = loadAgentMeta(wt.path);

@@ -165,6 +165,8 @@ Claude Code, Codex and OpenCode run as installed, each with its own login; vigen
 [engines.claude]
 args = ["--permission-mode", "acceptEdits"]   # the default
 model = "opus"                                # default: Claude Code's own
+allow = ["Bash(gh:*)", "Bash(cargo:*)"]       # commands it may run without asking
+ask = true                                    # off unless set: ask when it's refused a tool
 
 [engines.codex]
 args = ["-c", 'sandbox_mode="workspace-write"']  # the default
@@ -179,6 +181,21 @@ model = "anthropic/claude-sonnet-4-5"         # provider/model
 | `args` | Extra arguments for every run of that CLI. They **replace** the defaults above, so keep a permission or sandbox setting in them. vigent always adds its own JSON-output and resume flags, and the prompt last. |
 | `model` | Model for new agents on that engine. Without it, the CLI uses its own default. `:new <task> --engine claude --model sonnet` overrides it for one agent. |
 | `effort` | Reasoning effort for new agents on that engine: `low` to `max` for Claude Code, `minimal` to `xhigh` for Codex, `minimal` to `max` for OpenCode, `off` to `xhigh` for pi (its thinking level). Without it, the engine decides. |
+
+| `allow` | Claude Code only. Permission rules every run may use, passed as `--allowedTools`: `"Bash(gh:*)"` allows `gh` with any arguments, `"WebFetch"` a whole tool. Same syntax as Claude Code's own `permissions.allow`. |
+| `ask` | Claude Code only, **off unless you set it**. See below. |
+
+### When Claude Code is refused a tool
+
+vigent runs Claude Code with `-p`, where it can't stop and ask you. So a command its permission settings don't allow (say `gh pr view` or `cargo test` under `acceptEdits`) is refused, and the agent carries on without it. vigent shows what was refused in the transcript, along with the `allow` line that would permit it.
+
+With `ask = true`, vigent asks you instead, in a picker that names the agent and what was blocked:
+
+- **allow once:** runs the agent again (same conversation) with those rules, for that run only.
+- **always allow:** the same, and adds the rules to `allow` in config.toml, so every Claude Code agent may use them from then on.
+- **no** (or Esc): leaves it blocked.
+
+The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the tool's name for anything else. If an agent you aren't looking at asks, the bell rings. Codex doesn't need this, because it runs in a workspace-write sandbox. pi doesn't either: it has no permission gate unless an extension adds one (see pi extensions in the README).
 
 `[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`; a bare name means Anthropic's) and `effort` too.
 

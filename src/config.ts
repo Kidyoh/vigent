@@ -54,6 +54,10 @@ export interface EngineOptions {
 	model?: string;
 	/** reasoning effort for new agents on that engine (pi: thinking level) */
 	effort?: string;
+	/** Claude Code permission rules every run may use, e.g. "Bash(gh:*)" (--allowedTools) */
+	allow?: string[];
+	/** Claude Code: when a tool is refused, ask to allow it and retry (off unless set) */
+	ask?: boolean;
 }
 
 export interface Config {
@@ -139,6 +143,11 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 						if (k === "args" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.args = v;
 						else if (k === "model" && typeof v === "string") e.model = v;
 						else if (k === "effort" && typeof v === "string" && (EFFORTS[id as EngineId] as string[]).includes(v)) e.effort = v;
+						else if ((k === "allow" || k === "ask") && id !== "claude") warnings.push(`config [engines.${id}]: '${k}' is for [engines.claude] (Claude Code's permission rules)`);
+						else if (k === "allow" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.allow = v;
+						else if (k === "ask" && typeof v === "boolean") e.ask = v;
+						else if (k === "allow") warnings.push(`config [engines.${id}]: 'allow' should be a list of permission rules, e.g. ["Bash(gh:*)"]`);
+						else if (k === "ask") warnings.push(`config [engines.${id}]: 'ask' should be true or false`);
 						else if (k === "effort") warnings.push(`config [engines.${id}]: 'effort' should be one of ${EFFORTS[id as EngineId].join(", ")}`);
 						else warnings.push(`config [engines.${id}]: ${k === "args" ? "'args' should be a list of strings" : k === "model" ? "'model' should be a string" : `unknown option '${k}'`}`);
 					}
@@ -369,6 +378,8 @@ engine = "auto"
 # [engines.claude]
 # args = ["--permission-mode", "acceptEdits"]   # the default
 # model = "sonnet"
+# allow = ["Bash(gh:*)", "Bash(cargo:*)"]   # commands Claude Code may run without asking
+# ask = true   # when it's refused a command: allow once / always / no, then retry
 # [engines.codex]
 # args = ["-c", 'sandbox_mode="workspace-write"']  # the default
 # [engines.opencode]
