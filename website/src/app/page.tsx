@@ -3,7 +3,8 @@ import { Heading, HelpLink, KeyRow, L, Rule, Tilde } from "../components/buffer"
 import { Screen } from "../components/screen";
 import { Tabline } from "../components/tabline";
 import { VimChrome } from "../components/vim-chrome";
-import { INSTALL, LOGO, SWATCHES } from "../lib/site";
+import { INSTALL, LOGO } from "../lib/site";
+import { THEMES } from "../lib/themes";
 
 // nothing here reads the request, so it renders once at build time
 export const dynamic = "force-static";
@@ -52,6 +53,7 @@ export default function HomePage() {
               yy copy
             </button>
             <span className="cm">then</span> <span className="str">vigent .</span>
+
           </L>
           <L className="facts">
             <div className="fact">
@@ -167,14 +169,17 @@ export default function HomePage() {
         <L>
           <span className="cm">&lt;</span>
         </L>
+        <L>
+          Try them on vigent above: click one, or press <span className="kw">t</span> (<span className="kw">j</span>/<span className="kw">k</span> to preview, Enter to keep).
+        </L>
         <L className="swatches">
-          {SWATCHES.map(([name, colors]) => (
-            <span className="sw" key={name}>
-              {colors.map((c) => (
-                <i key={c} style={{ background: c }} />
+          {Object.entries(THEMES).map(([name, t]) => (
+            <button type="button" className="sw" key={name} data-colorscheme={name} title={`Show vigent in ${name}`}>
+              {[t.bg ?? "transparent", t.user, t.str, t.spin].filter(Boolean).map((c, i) => (
+                <i key={i} style={{ background: c }} />
               ))}
               {name}
-            </span>
+            </button>
           ))}
         </L>
         <L />

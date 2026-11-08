@@ -20,7 +20,6 @@ const ROUTES: Record<string, string> = {
   effort: "/docs#model",
   config: "/docs#config",
   settings: "/docs#config",
-  colorscheme: "/docs#themes",
   docs: "/docs",
   help: "/docs",
   h: "/docs",
@@ -58,6 +57,12 @@ export function VimChrome({ file }: { file: string }) {
     clearTimeout(toastTimer.current);
     setToast({ ok, text, id: Date.now() });
     toastTimer.current = setTimeout(() => setToast(null), 2600);
+  };
+
+  /** Ask the drawing of vigent for its colorscheme picker (on a page without it, go to the one that has it). */
+  const colorscheme = (name?: string) => {
+    if (document.querySelector(".screen")) document.dispatchEvent(new CustomEvent("vigent:colorscheme", { detail: name }));
+    else location.href = "/#top";
   };
 
   /** Put the cursor on line `i` (0-based) and keep it on screen. */
@@ -123,6 +128,7 @@ export function VimChrome({ file }: { file: string }) {
       return;
     }
     if (word === "yy" || word === "yank") return yankLine();
+    if (word === "colorscheme" || word === "colo") return colorscheme(c.split(/\s+/)[1]);
     if (/^q(a|uit|all)?!?$/.test(word)) return setMsg({ text: `Nothing to quit here. In your terminal: ${INSTALL}` });
     setMsg({ text: `E492: Not an editor command: ${c}`, err: true });
   };
@@ -151,6 +157,8 @@ export function VimChrome({ file }: { file: string }) {
     const onClick = (e: MouseEvent) => {
       const el = e.target as Element;
       if (el.closest?.("[data-yank]")) return yank(INSTALL);
+      const scheme = el.closest?.("[data-colorscheme]");
+      if (scheme) return colorscheme(scheme.getAttribute("data-colorscheme") ?? undefined);
       if (el.closest?.("a, button, input")) return;
       const l = el.closest?.("main.buffer .l:not(.tilde)");
       if (l) moveTo(lines().indexOf(l as HTMLElement), false);
@@ -161,6 +169,13 @@ export function VimChrome({ file }: { file: string }) {
       removeEventListener("hashchange", onHash);
       document.removeEventListener("click", onClick);
     };
+  }, []);
+
+  // other parts of the page report in the command line (":colorscheme tokyonight")
+  useEffect(() => {
+    const onSay = (e: Event) => setMsg({ text: String((e as CustomEvent).detail ?? "") });
+    document.addEventListener("vigent:say", onSay);
+    return () => document.removeEventListener("vigent:say", onSay);
   }, []);
 
   // the docs index follows the section you jumped to
@@ -203,6 +218,10 @@ export function VimChrome({ file }: { file: string }) {
         pending = "";
         setCmd("");
         return;
+      }
+      if (k === "t" && !pending) {
+        e.preventDefault();
+        return colorscheme();
       }
       if (k === "j" || k === "ArrowDown") {
         e.preventDefault();
@@ -263,7 +282,7 @@ export function VimChrome({ file }: { file: string }) {
           <span className="file">{file}</span>
           <span className="cm hide-sm">[help][RO]</span>
           <span className="fill" />
-          <span className="cm hide-sm">j/k move · yy copy · : commands</span>
+          <span className="cm hide-sm">j/k move · yy copy · t theme · : commands</span>
           <span className="pos">
             {line}:1 · {pos}
           </span>

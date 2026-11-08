@@ -125,29 +125,83 @@ a.link:hover { text-decoration: underline; }
   .fact:last-child { border-bottom: 0; }
 }
 
-/* vigent at work, drawn in text: a terminal window with room to breathe */
+/* vigent at work, drawn in text: a terminal window painted in the picked colorscheme (--s-* from theme-showcase.tsx) */
 .l.wide { max-width: calc(104ch + 6.5ch); }
 .screen {
+  --s-bg: var(--panel); --s-fg: var(--fg); --s-side: var(--panel); --s-sep: var(--faint); --s-bar: var(--bar); --s-bar-fg: var(--fg);
+  --s-dim: var(--dim); --s-title: var(--bright); --s-str: var(--green); --s-user: var(--magenta); --s-tool: var(--cyan); --s-link: var(--blue);
+  --s-spin: var(--yellow); --s-mode-bg: var(--green); --s-mode-fg: var(--bg); --s-float: var(--panel); --s-sel: #2a2a30; --s-sel-fg: var(--bright);
   margin: 4px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
   overflow: hidden; font-size: 13px; line-height: 1.75;
   box-shadow: 0 24px 60px rgb(0 0 0 / .45);
 }
+.screen.transparent { --s-bg: #0d0e12; --s-side: #0d0e12; --s-float: #13141a; }
 .screen-title {
-  display: flex; align-items: center; gap: 2ch; padding: 6px 2ch;
+  display: flex; align-items: center; gap: 2ch; padding: 5px 1ch 5px 2ch;
   background: var(--bar); border-bottom: 1px solid var(--line); color: var(--dim); font-size: 12px;
 }
-.screen-title span:nth-child(2) { flex: 1; text-align: center; color: var(--fg); }
+.screen-title .name { flex: 1; text-align: center; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .screen-title .dots { display: inline-flex; gap: 6px; }
 .screen-title .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); display: inline-block; }
-.screen pre { margin: 0; padding: 16px 3ch 0; white-space: pre; font: inherit; overflow-x: auto; }
-.screen .sb { color: var(--bright); font-weight: 600; }
+.scheme {
+  display: inline-flex; align-items: center; gap: 1ch; font: inherit; color: var(--fg); cursor: pointer;
+  background: var(--bg); border: 1px solid var(--faint); padding: 1px 1ch; white-space: nowrap;
+}
+.scheme:hover, .scheme[aria-expanded="true"] { border-color: var(--cyan); color: var(--bright); }
+.chips { display: inline-flex; gap: 0; }
+.chips i { display: inline-block; width: 1.2ch; height: 1em; }
+.screen-body { position: relative; font-size: 13px; }
+.screen pre {
+  margin: 0; padding: 14px 0 0 2ch; white-space: pre; font: inherit; overflow-x: auto;
+  color: var(--s-fg);
+  /* the sidebar column, full height, scrolling with the text */
+  background: linear-gradient(to right, var(--s-side) 33ch, var(--s-bg) 33ch);
+  background-attachment: local;
+  transition: background-color .15s, color .15s;
+}
+.screen .sep { color: var(--s-sep); }
+.screen .sb { color: var(--s-title); font-weight: 700; }
+.screen .cm { color: var(--s-dim); }
+.screen .str { color: var(--s-str); }
+.screen .sp { color: var(--s-spin); }
+.screen .user { color: var(--s-user); font-weight: 700; }
+.screen .tool { color: var(--s-tool); }
+.screen .link { color: var(--s-link); }
 .screen .st {
-  display: flex; gap: 2ch; min-width: max-content; margin: 14px -3ch 0; padding: 0 1ch 0 0;
-  background: var(--bar); border-top: 1px solid var(--line);
+  display: flex; gap: 2ch; min-width: max-content; margin: 14px 0 0 -2ch; padding: 0 1ch 0 0;
+  background: var(--s-bar); color: var(--s-bar-fg); border-top: 1px solid var(--s-sep);
 }
 .screen .st .fill { flex: 1; }
-.screen .mode { background: var(--green); color: var(--bg); font-weight: 800; }
-@media (max-width: 640px) { .screen pre { padding: 12px 2ch 0; } .screen .st { margin-inline: -2ch; } .screen { font-size: 12px; } }
+.screen .mode { background: var(--s-mode-bg); color: var(--s-mode-fg); font-weight: 800; }
+
+/* the :colorscheme float, inside the window like vigent's own */
+.float {
+  position: absolute; z-index: 2; top: 10px; right: 2ch; width: min(46ch, calc(100% - 4ch));
+  display: flex; flex-direction: column; max-height: calc(100% - 20px); min-height: 0;
+  background: var(--s-float); color: var(--s-fg); border: 1px solid var(--s-sep);
+  box-shadow: 0 10px 30px rgb(0 0 0 / .45); font-size: 12.5px; line-height: 1.6;
+}
+.float-title { padding: 0 1ch; color: var(--s-title); font-weight: 700; border-bottom: 1px solid var(--s-sep); }
+.float-prompt { padding: 0 1ch; border-bottom: 1px solid var(--s-sep); }
+.float-prompt .hint { color: var(--s-dim); }
+.float-prompt .q { color: var(--s-fg); }
+.float ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; scrollbar-width: thin; }
+.float li { display: flex; align-items: center; gap: 1ch; padding: 0 1ch; cursor: pointer; white-space: nowrap; }
+.float li.on { background: var(--s-sel); color: var(--s-sel-fg); }
+.float li .mark { color: var(--s-str); width: 1ch; }
+.float li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.float li .tags { color: var(--s-dim); font-size: 11.5px; width: 16ch; text-align: right; }
+.float li.on .tags { color: inherit; opacity: .75; }
+.float li.none { color: var(--s-dim); cursor: default; }
+.float-foot { padding: 0 1ch; color: var(--s-dim); border-top: 1px solid var(--s-sep); font-size: 11.5px; }
+@media (max-width: 640px) {
+  .screen pre { padding: 12px 0 0 2ch; }
+  .screen-body, .screen { font-size: 12px; }
+  .screen-title .dots { display: none; }
+  .float { right: 1ch; width: calc(100% - 2ch); }
+  .float li .tags { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .screen pre { transition: none; } }
 
 .tree, pre.code {
   margin: 0; white-space: pre; overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
@@ -157,6 +211,8 @@ pre.code { padding-block: 6px; }
 
 .swatches { display: flex; flex-wrap: wrap; gap: 6px 3ch; padding-block: 4px; }
 .sw { display: inline-flex; align-items: center; gap: 1ch; white-space: nowrap; }
+button.sw { font: inherit; color: var(--fg); background: none; border: 1px solid transparent; padding: 1px .8ch; cursor: pointer; }
+button.sw:hover, button.sw:focus-visible { border-color: var(--faint); color: var(--bright); outline: none; }
 .sw i { display: inline-block; width: 1.4ch; height: 1em; }
 
 /* ---- docs: a help index on the side ---- */
