@@ -79,8 +79,17 @@ export function applySiteTheme(name: string, keep = false) {
   }
 }
 
+/** The docs wear gruvbox until the visitor picks a colorscheme (the home page keeps the site's own palette). */
+export const DOCS_DEFAULT = "gruvbox";
+
+/** The colorscheme a page starts in when the visitor hasn't picked one. */
+export function defaultThemeFor(pathname: string): string {
+  return pathname.startsWith("/docs") ? DOCS_DEFAULT : "default";
+}
+
 /**
  * Runs in <head> before the page paints: the saved colors, so a reload or the
- * next page doesn't flash the default palette first. Kept tiny and dependency-free.
+ * next page doesn't flash the default palette first; on the docs with nothing
+ * saved, gruvbox. Kept tiny and dependency-free.
  */
-export const PAINT_SAVED_THEME = `try{var t=JSON.parse(localStorage.getItem(${JSON.stringify(VARS_STORE)})||"null");if(t&&t.vars){var r=document.documentElement;for(var k in t.vars)r.style.setProperty(k,t.vars[k]);r.style.colorScheme=t.scheme;r.dataset.colorscheme=t.name;var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t.meta)}}catch(e){}`;
+export const PAINT_SAVED_THEME = `try{var t=JSON.parse(localStorage.getItem(${JSON.stringify(VARS_STORE)})||"null");if(!t&&location.pathname.indexOf("/docs")===0)t=${JSON.stringify(siteTheme(DOCS_DEFAULT))};if(t&&t.vars){var r=document.documentElement;for(var k in t.vars)r.style.setProperty(k,t.vars[k]);r.style.colorScheme=t.scheme;r.dataset.colorscheme=t.name;var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t.meta)}}catch(e){}`;

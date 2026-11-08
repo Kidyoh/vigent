@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { applySiteTheme, STORE } from "../lib/site-theme";
+import { applySiteTheme, defaultThemeFor, STORE } from "../lib/site-theme";
 import { THEMES } from "../lib/themes";
 import { ColorschemeFloat } from "./colorscheme-float";
 
@@ -17,7 +17,7 @@ function wearing(): string {
   } catch {
     // storage off
   }
-  return "default";
+  return defaultThemeFor(location.pathname);
 }
 
 /**
@@ -28,6 +28,17 @@ function wearing(): string {
 export function SitePicker() {
   const [open, setOpen] = useState(false);
   const before = useRef("default");
+
+  // arriving on the docs without a pick (also by a link from the home page, which skips the <head> script)
+  useEffect(() => {
+    if (document.querySelector(".screen")) return;
+    try {
+      if (localStorage.getItem(STORE)) return;
+    } catch {
+      // storage off: still start the docs in their default
+    }
+    applySiteTheme(defaultThemeFor(location.pathname));
+  }, []);
 
   useEffect(() => {
     const onOpen = (e: Event) => {
