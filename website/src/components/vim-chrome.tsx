@@ -34,11 +34,34 @@ export function VimChrome({ file }: { file: string }) {
   const [cmd, setCmd] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; err?: boolean }>({ text: "Type :install, :engines, :keys, :themes, :docs or :github" });
   const [pos, setPos] = useState("Top");
+  const [toast, setToast] = useState<{ ok: boolean; id: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const input = useRef<HTMLInputElement>(null);
 
+  /** A notice in the corner, so a copy never goes unnoticed. */
+  const notify = (ok: boolean) => {
+    clearTimeout(toastTimer.current);
+    setToast({ ok, id: Date.now() });
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  };
+
   const yank = () => {
-    const done = () => setMsg({ text: `1 line yanked: "${INSTALL}"` });
-    const fallback = () => setMsg({ text: `Copy it: ${INSTALL}` });
+    const done = () => {
+      setMsg({ text: `1 line yanked: "${INSTALL}"` });
+      notify(true);
+      document.querySelectorAll<HTMLButtonElement>("[data-yank]").forEach((b) => {
+        b.classList.add("done");
+        b.textContent = "copied ✓";
+        setTimeout(() => {
+          b.classList.remove("done");
+          b.textContent = "yy copy";
+        }, 1800);
+      });
+    };
+    const fallback = () => {
+      setMsg({ text: `Copy it: ${INSTALL}` });
+      notify(false);
+    };
     try {
       navigator.clipboard.writeText(INSTALL).then(done, fallback);
     } catch {
@@ -141,6 +164,23 @@ export function VimChrome({ file }: { file: string }) {
   };
 
   return (
+    <>
+    {toast && (
+      <div className="toast" role="status" aria-live="polite" key={toast.id}>
+        {toast.ok ? (
+          <>
+            <span className="ok">✓ yanked</span>
+            <code>{INSTALL}</code>
+            <span className="cm">paste it in your terminal</span>
+          </>
+        ) : (
+          <>
+            <span>Couldn't copy here. Select and copy:</span>
+            <code>{INSTALL}</code>
+          </>
+        )}
+      </div>
+    )}
     <footer className="status">
       <div className="sl">
         <span className={cmd !== null ? "mode cmdmode" : "mode"}>{cmd !== null ? "COMMAND" : "NORMAL"}</span>
@@ -179,5 +219,6 @@ export function VimChrome({ file }: { file: string }) {
         )}
       </div>
     </footer>
+    </>
   );
 }

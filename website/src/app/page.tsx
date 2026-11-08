@@ -25,55 +25,52 @@ export default function HomePage() {
           </span>
           <span className="cm">MIT</span>
         </L>
-        <L />
-        <div className="l">
-          <pre className="logo" aria-label="vigent">
-            {LOGO}
-          </pre>
-        </div>
-        <L />
-        <L className="eyebrow">an agent harness for the terminal</L>
-        <div className="l">
-          <h1 className="t lede">Run every coding agent at once. Each in its own worktree, all from one Vim-style screen.</h1>
-        </div>
-        <L />
-        <div className="l">
-          <p className="t sub">
-            vigent drives Claude Code, Codex, OpenCode and pi in parallel. Every agent gets a copy-on-write worktree from{" "}
-            <a className="link" href="https://riftri.dev">
-              riftri
-            </a>
-            , so ten agents on a big repo cost almost no disk, and none of them touch your checkout until you <HelpLink href="/docs#review">:merge</HelpLink>.
-          </p>
-        </div>
-        <L />
-        <L className="install">
-          <code>{INSTALL}</code>
-          <button className="yank" type="button" data-yank title="Copy the install command">
-            yy
-          </button>
-          <span className="cm">then</span> <span className="str">vigent .</span>
-        </L>
-        <L />
-        <L className="facts">
-          <div className="fact">
-            <div className="n">4 engines</div>
-            <div className="d">Claude Code · Codex · OpenCode · pi</div>
+        <section className="hero" aria-label="vigent">
+          <div className="l">
+            <pre className="logo" aria-label="vigent">
+              {LOGO}
+            </pre>
           </div>
-          <div className="fact">
-            <div className="n">1 worktree each</div>
-            <div className="d">own branch, own files, live +/− counts</div>
+          <div className="hero-copy">
+            <L className="eyebrow">an agent harness for the terminal</L>
+            <div className="l">
+              <h1 className="t lede">Run every coding agent at once. Each in its own worktree, all from one Vim-style screen.</h1>
+            </div>
+            <div className="l">
+              <p className="t sub">
+                vigent drives Claude Code, Codex, OpenCode and pi in parallel. Every agent gets a copy-on-write worktree from{" "}
+                <a className="link" href="https://riftri.dev">
+                  riftri
+                </a>
+                , so ten agents on a big repo cost almost no disk, and none of them touch your checkout until you <HelpLink href="/docs#review">:merge</HelpLink>.
+              </p>
+            </div>
           </div>
-          <div className="fact">
-            <div className="n">copy-on-write</div>
-            <div className="d">APFS · Btrfs · XFS · OverlayFS · ReFS</div>
+          <L className="install">
+            <code>{INSTALL}</code>
+            <button className="yank" type="button" data-yank title="Copy the install command (or press yy)">
+              yy copy
+            </button>
+            <span className="cm">then</span> <span className="str">vigent .</span>
+          </L>
+          <L className="facts">
+            <div className="fact">
+              <div className="n">4 engines</div>
+              <div className="d">Claude Code · Codex · OpenCode · pi</div>
+            </div>
+            <div className="fact">
+              <div className="n">1 worktree each</div>
+              <div className="d">own branch, own files, live +/− counts</div>
+            </div>
+            <div className="fact">
+              <div className="n">copy-on-write</div>
+              <div className="d">APFS · Btrfs · XFS · OverlayFS · ReFS</div>
+            </div>
+          </L>
+          <div className="l">
+            <Screen />
           </div>
-        </L>
-        <L />
-        <div className="l">
-          <Screen />
-        </div>
-        <L />
+        </section>
 
         <Rule />
         <Heading id="install" title="1. Install" tag="vigent-install" />

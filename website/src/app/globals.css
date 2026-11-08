@@ -84,24 +84,29 @@ a.link:hover { text-decoration: underline; }
 .kw { color: var(--magenta); }
 .str { color: var(--green); }
 .b { color: var(--bright); font-weight: 600; }
-.rule { color: var(--line); overflow: hidden; white-space: nowrap; user-select: none; }
+.rule { color: var(--line); overflow: hidden; white-space: nowrap; user-select: none; margin-top: 10px; }
 .row { display: flex; justify-content: space-between; gap: 2ch; flex-wrap: wrap; }
 .key { color: var(--cyan); display: inline-block; min-width: 14ch; }
 .indent { padding-left: 4ch; }
 
-/* ---- hero ---- */
+/* ---- hero: the showcase above the sections, with room to breathe ---- */
+.hero { display: flex; flex-direction: column; gap: 28px; padding-block: 40px 48px; }
+.hero-copy { display: flex; flex-direction: column; gap: 12px; }
+.hero .l { width: 100%; }  /* flex children would shrink to their content */
 .logo {
-  margin: 0; color: var(--bright); font: 800 clamp(6.5px, 2vw, 14px)/1 var(--mono);
-  overflow: hidden; white-space: pre;
+  margin: 0; color: var(--bright); font: 800 clamp(6px, 1.9vw, 13px)/1 var(--mono);
+  white-space: pre; overflow-x: auto; scrollbar-width: none;
 }
-.eyebrow { color: var(--cyan); letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
-.lede { color: var(--bright); font-size: clamp(18px, 3vw, 26px); font-weight: 800; line-height: 1.25; text-wrap: balance; }
-.sub { font-size: clamp(14px, 1.7vw, 15.5px); max-width: 68ch; }
+.eyebrow { color: var(--cyan); letter-spacing: .1em; text-transform: uppercase; font-size: 11.5px; }
+.lede { color: var(--bright); font-size: clamp(15px, 1.9vw, 18px); font-weight: 700; line-height: 1.55; letter-spacing: .01em; max-width: 52ch; text-wrap: balance; }
+.sub { font-size: 14px; line-height: 1.8; color: var(--fg); max-width: 66ch; }
+@media (max-width: 640px) { .hero { gap: 22px; padding-block: 24px 32px; } }
 
 .install { display: flex; align-items: center; gap: 1.5ch; flex-wrap: wrap; }
 .install code { color: var(--green); font-family: inherit; }
 .install code::before { content: "$ "; color: var(--dim); }
-.yank { font: inherit; color: var(--dim); background: none; border: 1px solid var(--faint); padding: 0 1ch; cursor: pointer; }
+.yank { font: inherit; font-size: 12.5px; color: var(--dim); background: none; border: 1px solid var(--faint); padding: 1px 1.2ch; cursor: pointer; transition: color .15s, border-color .15s; }
+.yank.done { color: var(--green); border-color: var(--green); }
 .yank:hover, .yank:focus-visible { color: var(--bright); border-color: var(--bright); outline: none; }
 
 /* what the harness does, in facts people can check */
@@ -183,3 +188,17 @@ pre.code { padding-block: 6px; }
   .hide-sm { display: none; }
   .key { min-width: 11ch; }
 }
+
+/* ---- "yanked" notice ---- */
+.toast {
+  position: fixed; z-index: 7; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(4.2em + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 1.5ch;
+  background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-left: 2px solid var(--green);
+  padding: 8px 2ch; font-size: 13px; max-width: calc(100vw - 32px);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .5);
+  animation: toast-in .18s ease-out;
+}
+.toast .ok { color: var(--green); font-weight: 800; }
+.toast code { color: var(--bright); font-family: inherit; overflow-wrap: anywhere; }
+@keyframes toast-in { from { transform: translateY(6px); opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } .yank { transition: none; } }
