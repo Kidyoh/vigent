@@ -4,7 +4,7 @@ A vim-style, lightweight terminal app for running several coding agents at once,
 
 **Website:** [vigent.farming-labs.dev](https://vigent.farming-labs.dev) · **Docs:** [vigent.farming-labs.dev/docs](https://vigent.farming-labs.dev/docs)
 
-![vigent: a prompt with an @file, a Claude Code agent fixing the bug in its own worktree, the diff side by side, then switching themes with Space t and :colorscheme](https://raw.githubusercontent.com/farming-labs/vigent/main/docs/screenshots/showcase.gif)
+![vigent: a prompt with an @file, a Claude Code agent fixing the bug in its own worktree, the diff side by side, then switching themes with Space t and :colorscheme](https://vigent.farming-labs.dev/showcase.gif)
 
 ## Install
 
