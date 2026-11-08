@@ -5,10 +5,12 @@ The site for vigent, built with [Farm.js](https://farmjs.dev). It looks like a N
 ```bash
 cd website
 pnpm install
-pnpm dev        # local dev server
-pnpm build      # production build in .farm/.output
-pnpm start      # serve the build
+pnpm dev          # dev server with reload: http://localhost:3000
+pnpm preview      # the production build, served locally: http://localhost:3000
+pnpm build        # the Vercel build in .vercel/output (what production runs)
 ```
+
+Needs Node 22.13 or newer and pnpm. `pnpm build` writes Vercel's output, so use `pnpm preview` (or `pnpm build:node` then `pnpm start`) to run a build locally. Pushes to `main` deploy to https://vigent.farming-labs.dev.
 
 - `src/app/page.tsx`: the home page (`/`)
 - `src/app/docs/page.tsx`: the docs (`/docs`), with the help index on the side
