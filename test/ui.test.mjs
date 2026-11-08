@@ -10,6 +10,7 @@ import { transcriptMarkdown } from "../dist/export.js";
 import { TextFloat } from "../dist/float.js";
 import { Keymap } from "../dist/keys.js";
 import { renderMarkdown } from "../dist/markdown.js";
+import { findHits, foldCase, nextHit, paintMatches } from "../dist/search.js";
 import { PICKER_ICONS } from "../dist/picker.js";
 import { Session } from "../dist/session.js";
 import { BUILTIN_THEMES, Painter, sgr } from "../dist/theme.js";
@@ -147,13 +148,86 @@ test("{ and } jump between messages; ? searches backward", () => {
 	assert.equal(app.scrollOffset, up1);
 
 	type("G", "?", ..."reply", "\r");
-	const first = app.matchIdx;
+	const first = app.curHit.line;
 	type("n");
-	assert.equal(app.matchIdx, first - 1, "n goes up after ?");
+	assert.ok(app.curHit.line < first, "n goes up after ?");
 	type("N");
-	assert.equal(app.matchIdx, first);
-	assert.match(app.message, /^\?reply/);
+	assert.equal(app.curHit.line, first);
+	assert.match(app.message, /^\/reply/, "N after ? goes down, shown as / like Vim");
 	ex("noh");
+	assert.equal(app.searchQuery, "");
+});
+
+test("search helpers: smartcase, hits in order, wrapscan, painting keeps the line's colors", () => {
+	assert.equal(foldCase("wait", "WaitFor"), "waitfor");
+	assert.equal(foldCase("Wait", "WaitFor"), "WaitFor", "a capital makes it case-sensitive");
+	const hits = findHits("a", [{ plain: "a b a" }, { plain: "none" }, { plain: "A" }]);
+	assert.deepEqual(hits, [{ line: 0, n: 0 }, { line: 0, n: 1 }, { line: 2, n: 0 }]);
+	assert.deepEqual(nextHit(hits, { line: 0, n: 0 }, 1), { hit: { line: 0, n: 1 }, nth: 2, wrapped: false });
+	assert.deepEqual(nextHit(hits, { line: 2, n: 0 }, 1), { hit: { line: 0, n: 0 }, nth: 1, wrapped: true });
+	assert.deepEqual(nextHit(hits, { line: 0, n: 0 }, -1), { hit: { line: 2, n: 0 }, nth: 3, wrapped: true });
+	assert.equal(nextHit([], { line: 0, n: 0 }, 1), undefined);
+
+	const RED = "\x1b[31m";
+	const ON = "<on>";
+	const CUR = "<cur>";
+	const line = `${RED}fix the race\x1b[0m and race`;
+	const painted = paintMatches(line, "race", ON, "<bg>", 1, CUR);
+	assert.equal(painted, `${RED}fix the ${ON}race\x1b[0m<bg>${RED}\x1b[0m and ${CUR}race\x1b[0m<bg>`);
+	assert.equal(strip(painted.replace(/<[a-z]+>/g, "")), "fix the race and race", "the text itself is unchanged");
+	assert.equal(paintMatches(line, "nope", ON, ""), line);
+});
+
+test("/ searches as you type, highlights only the matches, n/N wrap with [k/N]; Esc puts the view back", () => {
+	const s = sessionWithReply();
+	for (let i = 0; i < 12; i++) s.items.push({ kind: "agent", text: `reply ${i}\n${"line\n".repeat(4)}` });
+	const { app, type, screen } = makeApp({ sessions: [s], rows: 12 });
+	assert.equal(app.scrollOffset, 0);
+
+	// incsearch: the view moves while typing, before Enter
+	type("/", ..."wait");
+	assert.equal(app.mode, "SEARCH");
+	assert.ok(app.scrollOffset > 0, "jumped up to the match while typing");
+	assert.match(screen(), /\/wait/);
+	const raw = app.render(110).join("\n");
+	assert.ok(raw.includes(app.painter.s("IncSearch") + "wait"), "the match being typed is painted");
+	// Esc: back where it was, nothing kept
+	type("\x1b");
+	assert.equal(app.mode, "NORMAL");
+	assert.equal(app.scrollOffset, 0);
+	assert.equal(app.searchQuery, "");
+
+	// / searches down from the top of the view; past the last match it wraps to the top, like Vim
+	type("/", ..."reply", "\r");
+	assert.match(app.message, /^\/reply {2}\[12\/12\]$/);
+	type("n");
+	assert.match(app.message, /^\/reply {2}\[1\/12\] {2}search hit BOTTOM, continuing at TOP$/);
+	const first = app.curHit.line;
+	assert.ok(app.scrollOffset > 0, "scrolled up to it");
+	type("n");
+	assert.match(app.message, /^\/reply {2}\[2\/12\]$/);
+	assert.ok(app.curHit.line > first);
+	type("N", "N");
+	assert.match(app.message, /^\?reply {2}\[12\/12\] {2}search hit TOP, continuing at BOTTOM$/);
+
+	// only the word is highlighted: the rest of a matching line keeps its colors
+	const view = app.render(110).join("\n");
+	assert.ok(view.includes(app.painter.s("CurSearch") + "reply\x1b[0m"), "just the word, then the line's own style");
+	assert.ok(!view.includes(app.painter.s("CurSearch") + "reply 11"), "not the whole line");
+	// on a taller screen, the other matches show in Search
+	const tall = makeApp({ sessions: [s], rows: 40 });
+	tall.type("?", ..."reply", "\r");
+	const both = tall.app.render(110).join("\n");
+	assert.ok(both.includes(tall.app.painter.s("Search") + "reply\x1b[0m"));
+	assert.equal(both.split(tall.app.painter.s("CurSearch") + "reply").length, 2, "one current match");
+
+	// smartcase, and not found
+	type("/", ..."REPLY", "\r");
+	assert.match(app.message, /E486: Pattern not found: REPLY/);
+	// Esc in NORMAL clears the highlight; n says there's nothing to repeat
+	type("\x1b", "n");
+	assert.match(app.message, /E35: No previous regular expression/);
+	assert.ok(!app.render(110).join("\n").includes(app.painter.s("Search") + "reply"));
 });
 
 test("dd asks before killing; :q refuses while agents run", () => {

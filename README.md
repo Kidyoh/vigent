@@ -87,7 +87,7 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 | NORMAL | `]s` `[s` `1`–`9` `Ctrl-^` | Switch agents |
 | NORMAL | `<Space>e` | Move the cursor into the SESSIONS sidebar, like neo-tree: `j`/`k` (or `gg`/`G`, `1`–`9`) pick an agent and show it, Enter / Esc / `l` / `<Space>e` go back to the transcript |
 | NORMAL | `za` `zR` `zM` | Toggle, open or close tool-output folds |
-| NORMAL | `/pattern` `?pattern` `n` `N` | Search the transcript, forward or backward |
+| NORMAL | `/pattern` `?pattern` `n` `N` | Search the transcript like Neovim: it jumps to the first match as you type and highlights every match, `n`/`N` go to the next/previous one with `[3/7]` in the command line, `Esc` or `:noh` clears the highlight. Smartcase: a capital makes it case-sensitive |
 | NORMAL | `V` / `v` | VISUAL: select lines with `j` `k`, `ib` for a code block, `y` to copy |
 | NORMAL | `yy` / `yib` | Copy the agent's last reply / the nearest code block |
 | NORMAL | `dd` | Kill the focused agent (asks first) |

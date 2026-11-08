@@ -53,6 +53,7 @@ import { splitView, unifiedView } from "./diffview.js";
 import { TREE_GLYPHS, type TreeRow } from "./tree.js";
 import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
+import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { EFFORTS, effortChoicesFor, modelChoices } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon } from "./icons.js";
@@ -218,9 +219,14 @@ export class App implements Component {
 	private message = "";
 	private messageGroup = "Comment";
 	private scrollOffset = 0; // lines from bottom
+	/** the last search (n / N repeat it; its matches stay highlighted until Esc or :noh) */
 	private searchQuery = "";
-	private matches: number[] = [];
-	private matchIdx = -1;
+	/** the match the last search or n / N went to */
+	private curHit?: Hit;
+	/** while typing after / or ?: where the view was, to go back on Esc */
+	private searchFrom?: { scroll: number; hit?: Hit; query: string; at: Hit; back: Hit };
+	/** what the incremental search last showed */
+	private searchPreview = "";
 	private spinnerFrame = 0;
 	private spinnerTimer?: ReturnType<typeof setInterval>;
 	private statTimer?: ReturnType<typeof setInterval>;
@@ -455,6 +461,7 @@ export class App implements Component {
 		if (data.startsWith("\x1b[200~")) {
 			// bracketed paste: insert as text, never as mappings
 			this.typeText(data.slice(6).replace(/\x1b\[201~$/, "").replace(/\r?\n/g, " "));
+			if (this.mode === "SEARCH") this.previewSearch();
 			this.tui.requestRender();
 			return;
 		}
@@ -466,6 +473,7 @@ export class App implements Component {
 		}
 		if (this.mode === "NORMAL" && this.seq.pendingKeys.length === 0) this.message = "";
 		for (const k of this.splitEscape(key)) this.seq.feed(k);
+		if (this.mode === "SEARCH" && this.cmdBuf !== this.searchPreview) this.previewSearch();
 		this.tui.requestRender();
 	}
 
@@ -532,6 +540,7 @@ export class App implements Component {
 		const count = this.sessions.length;
 		switch (name) {
 			case "mode.normal":
+				if (this.mode === "SEARCH") this.cancelSearch();
 				if (this.mode === "COMMAND" || this.mode === "SEARCH") this.cmdBuf = "";
 				this.mode = "NORMAL";
 				return;
@@ -544,9 +553,7 @@ export class App implements Component {
 				return;
 			case "mode.search":
 			case "mode.search_back":
-				this.mode = "SEARCH";
-				this.searchBackward = name === "mode.search_back";
-				this.cmdBuf = "";
+				this.startSearch(name === "mode.search_back");
 				return;
 			case "mode.visual": {
 				const lines = this.buildPaneLines(this.paneWidth());
@@ -742,10 +749,10 @@ export class App implements Component {
 			this.mode = "NORMAL";
 			this.exec(cmd);
 		} else if (this.mode === "SEARCH") {
-			this.searchQuery = this.cmdBuf;
+			const query = this.cmdBuf;
 			this.cmdBuf = "";
 			this.mode = "NORMAL";
-			this.runSearch();
+			this.runSearch(query);
 		}
 	}
 
@@ -824,6 +831,11 @@ export class App implements Component {
 				return;
 			case "tree":
 				this.openTree();
+				return;
+			case "noh":
+			case "nohl":
+			case "nohlsearch":
+				this.clearSearch();
 				return;
 			case "checkhealth":
 			case "che":
@@ -2490,44 +2502,103 @@ export class App implements Component {
 		this.paneCache.key = "";
 	}
 
+	/** Esc or :noh: the matches stop being highlighted (n still finds them) */
 	private clearSearch() {
 		this.searchQuery = "";
-		this.matches = [];
-		this.matchIdx = -1;
+		this.curHit = undefined;
 	}
 
-	private runSearch() {
-		const lines = this.buildPaneLines(this.paneWidth());
-		const q = this.searchQuery.toLowerCase();
-		this.matches = [];
-		if (!q) return;
-		lines.forEach((l, i) => {
-			if (l.plain.toLowerCase().includes(q)) this.matches.push(i);
-		});
-		if (this.matches.length === 0) {
-			this.setMessage(`E486: Pattern not found: ${this.searchQuery}`, "ErrorMsg");
-			this.matchIdx = -1;
+	/**
+	 * `/` or `?`: from the top of the view down, or from its bottom up, like
+	 * Neovim searching from the cursor. The view comes back on Esc.
+	 */
+	private startSearch(backward: boolean) {
+		this.mode = "SEARCH";
+		this.searchBackward = backward;
+		this.cmdBuf = "";
+		this.searchPreview = "";
+		const { start, end } = this.viewRange(this.buildPaneLines(this.paneWidth()).length);
+		this.searchFrom = {
+			scroll: this.scrollOffset,
+			hit: this.curHit,
+			query: this.searchQuery,
+			at: { line: start, n: -1 },
+			back: { line: Math.max(0, end - 1), n: Number.MAX_SAFE_INTEGER },
+		};
+	}
+
+	/** While typing after / or ?: show the first match and highlight them all (incsearch). */
+	private previewSearch() {
+		const from = this.searchFrom;
+		const query = this.cmdBuf;
+		this.searchPreview = query;
+		if (!from) return;
+		this.scrollOffset = from.scroll;
+		const found = query ? nextHit(findHits(query, this.buildPaneLines(this.paneWidth())), this.searchBackward ? from.back : from.at, this.searchBackward ? -1 : 1) : undefined;
+		this.curHit = found?.hit;
+		if (found) this.scrollToLine(found.hit.line);
+	}
+
+	/** Esc while typing a search: the view and the last search come back. */
+	private cancelSearch() {
+		const from = this.searchFrom;
+		this.searchFrom = undefined;
+		if (!from) return;
+		this.scrollOffset = from.scroll;
+		this.curHit = from.hit;
+		this.searchQuery = from.query;
+	}
+
+	/** Enter after / or ?: go to the match and keep the search for n / N. */
+	private runSearch(query: string) {
+		const from = this.searchFrom;
+		this.searchFrom = undefined;
+		if (!query) {
+			// an empty search repeats the last one, as in Vim
+			if (from) this.scrollOffset = from.scroll;
+			if (!this.searchQuery) return;
+			this.curHit = from?.hit;
+			return this.gotoMatch(1);
+		}
+		this.searchQuery = query;
+		const hits = findHits(query, this.buildPaneLines(this.paneWidth()));
+		const found = nextHit(hits, this.searchBackward ? (from?.back ?? { line: Number.MAX_SAFE_INTEGER, n: 0 }) : (from?.at ?? { line: -1, n: 0 }), this.searchBackward ? -1 : 1);
+		if (!found) {
+			if (from) this.scrollOffset = from.scroll;
+			this.curHit = undefined;
+			this.setMessage(`E486: Pattern not found: ${query}`, "ErrorMsg");
 			return;
 		}
-		this.matchIdx = this.matches.length - 1;
-		this.scrollToLine(this.matches[this.matchIdx]);
-		this.announceMatch();
+		this.showHit(found, hits.length, false);
 	}
 
+	/** n (dir 1) / N (dir -1): the next match the way the last search went, or the other way. */
 	private gotoMatch(dir: 1 | -1) {
-		if (this.matches.length === 0) {
-			if (this.searchQuery) this.setMessage(`E486: Pattern not found: ${this.searchQuery}`, "ErrorMsg");
+		if (!this.searchQuery) {
+			this.setMessage("E35: No previous regular expression", "ErrorMsg");
 			return;
 		}
-		const step = this.searchBackward ? -dir : dir;
-		this.matchIdx = (this.matchIdx + step + this.matches.length) % this.matches.length;
-		this.scrollToLine(this.matches[this.matchIdx]);
-		this.announceMatch();
+		// the transcript may have grown since: find the matches again
+		const lines = this.buildPaneLines(this.paneWidth());
+		const hits = findHits(this.searchQuery, lines);
+		const step = (this.searchBackward ? -dir : dir) as 1 | -1;
+		const { start, end } = this.viewRange(lines.length);
+		const from = this.curHit ?? (step > 0 ? { line: start, n: -1 } : { line: Math.max(0, end - 1), n: Number.MAX_SAFE_INTEGER });
+		const found = nextHit(hits, from, step);
+		if (!found) {
+			this.setMessage(`E486: Pattern not found: ${this.searchQuery}`, "ErrorMsg");
+			return;
+		}
+		this.showHit(found, hits.length, step !== (this.searchBackward ? -1 : 1));
 	}
 
-	private announceMatch() {
-		const prefix = this.searchBackward ? "?" : "/";
-		this.setMessage(`${prefix}${this.searchQuery}  match ${this.matchIdx + 1}/${this.matches.length}`, "Search");
+	/** Scroll to a match and say where it is: /term [3/7], and when the search wrapped around. */
+	private showHit(found: { hit: Hit; nth: number; wrapped: boolean }, total: number, reversed: boolean) {
+		this.curHit = found.hit;
+		this.scrollToLine(found.hit.line);
+		const up = this.searchBackward !== reversed;
+		const wrap = found.wrapped ? (up ? "  search hit TOP, continuing at BOTTOM" : "  search hit BOTTOM, continuing at TOP") : "";
+		this.setMessage(`${up ? "?" : "/"}${this.searchQuery}  [${found.nth}/${total}]${wrap}`, found.wrapped ? "WarningMsg" : "Search");
 	}
 
 	private scrollToLine(lineIdx: number) {
@@ -2563,6 +2634,8 @@ export class App implements Component {
 		const view = paneLines.slice(start, start + paneH);
 		const [selA, selB] = [Math.min(this.visual.anchor, this.visual.cursor), Math.max(this.visual.anchor, this.visual.cursor)];
 		const visualBg = P.attr("Visual").bg;
+		// what's highlighted: the search being typed (incsearch), else the last one (hlsearch)
+		const term = intro ? "" : this.mode === "SEARCH" ? this.cmdBuf : this.searchQuery;
 
 		const out: string[] = [];
 		const sep = P.p("WinSeparator", this.icons.sep);
@@ -2582,8 +2655,10 @@ export class App implements Component {
 				// like nvim: the Visual background under the line's own colors
 				bg = P.on("Normal", visualBg);
 				text = bg + line.text.split(normalBg).join(bg);
-			} else if (line && this.matches.includes(idx)) {
-				text = P.s("Search") + line.plain;
+			} else if (line && term) {
+				// hlsearch: every match, the current one in CurSearch, the line's own colors kept
+				const current = this.curHit?.line === idx ? this.curHit.n : -1;
+				text = paintMatches(line.text, term, P.s("Search"), normalBg, current, P.s(this.mode === "SEARCH" ? "IncSearch" : "CurSearch"));
 			}
 			const pad = Math.max(0, paneW + 2 - 1 - visibleWidth(line?.plain ?? ""));
 			out.push(left + bg + " " + text + bg + " ".repeat(pad) + RESET);

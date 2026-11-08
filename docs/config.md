@@ -373,7 +373,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `{` / `}` | `message.prev` / `message.next` |
 | `yy` / `yib` | `yank.reply` / `yank.block` |
 | `dd` | `session.kill` (asks first) |
-| `<Esc>` | `search.clear` |
+| `<Esc>` | `search.clear` (also `:noh`) |
 | `<C-c>` | `session.abort` |
 | `<C-l>` | `app.redraw` |
 | `ZZ` / `ZQ` | `app.quit` / `app.quit_force` |

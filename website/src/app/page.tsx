@@ -156,7 +156,7 @@ export default function HomePage() {
         <KeyRow k="<Space>M">pick the model</KeyRow>
         <KeyRow k="<Space>e">sessions sidebar: j/k pick an agent</KeyRow>
         <KeyRow k="<Space>R">reasoning effort</KeyRow>
-        <KeyRow k="/pattern">search the transcript</KeyRow>
+        <KeyRow k="/pattern">search the transcript as you type · n/N next/prev</KeyRow>
         <KeyRow k="yy  yib">copy the last reply / a code block</KeyRow>
         <KeyRow k="?">every key, yours first</KeyRow>
         <More href="/docs#keys" tag="vigent-keys" what="every key and command" />
