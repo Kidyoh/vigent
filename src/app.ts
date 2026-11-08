@@ -35,6 +35,8 @@ import {
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
+import { dropPatch, parseDiff, restorePatch } from "./hunks.js";
+import { HunkReview } from "./hunk-review.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
@@ -803,6 +805,10 @@ export class App implements Component {
 			case "kill":
 			case "kill!":
 				this.killFocused(cmd === "kill!");
+				return;
+			case "review":
+			case "hunks":
+				this.openReview();
 				return;
 			case "diff":
 				this.openDiff(/^(split|vert|vertical|side)$/.test(arg));
@@ -1754,6 +1760,50 @@ export class App implements Component {
 	}
 
 	/** `:diff`: what the focused agent changed since its worktree was created. */
+	/** `:review`: keep or drop the focused agent's changes hunk by hunk. */
+	private openReview() {
+		const s = this.focusedSession;
+		const wt = s?.worktree;
+		if (!s || !wt?.path) {
+			this.setMessage(s ? `'${s.name}' has no worktree to review` : "no agent", "ErrorMsg");
+			return;
+		}
+		if (s.state === "running") {
+			this.setMessage(`'${s.name}' is still working; review it when it's done (or :pause it)`, "WarningMsg");
+			return;
+		}
+		const load = async () => parseDiff(await diffText(wt, Number.POSITIVE_INFINITY));
+		load()
+			.then((files) => {
+				if (files.length === 0) {
+					this.setMessage(`no changes on ${wt.branch} yet`, "Comment");
+					this.tui.requestRender();
+					return;
+				}
+				this.seq.reset();
+				let handle: { hide(): void } | undefined;
+				const after = async () => {
+					s.refreshStat(0);
+					return load();
+				};
+				const review = new HunkReview(this.painter, PICKER_ICONS[this.ui.icons], `Review ${wt.branch} vs ${wt.base ?? "base"}`, files, () => this.terminal.rows - 2, {
+					drop: (patch) => dropPatch(wt.path!, patch).then(after),
+					restore: (patch) => restorePatch(wt.path!, patch).then(after),
+					close: () => {
+						handle?.hide();
+						this.repaint();
+					},
+					requestRender: () => this.tui.requestRender(),
+				});
+				handle = this.tui.showOverlay(review, { width: this.terminal.columns - 4, anchor: "center" });
+				this.tui.requestRender();
+			})
+			.catch((err) => {
+				this.setMessage(`git diff failed: ${(err as Error).message.split("\n")[0]}`, "ErrorMsg");
+				this.tui.requestRender();
+			});
+	}
+
 	private openDiff(split = false) {
 		const s = this.focusedSession;
 		const wt = s?.worktree;
@@ -2651,6 +2701,7 @@ const EX_HELP: [string, string][] = [
 	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
 	[":new! [name]", "agent in this checkout, no worktree"],
 	[":diff  /  :diff split", "the agent's changes, unified / side by side (s switches)"],
+	[":review", "keep or drop the agent's changes hunk by hunk"],
 	[":merge [--no-squash]", "squash-merge the agent's branch into yours"],
 	[":pr", "push the branch and open a pull request"],
 	[":queue <prompt>", "send after the current run (:queue lists)"],

@@ -205,7 +205,7 @@ statusline live for the rest. pi-tui's differential renderer keeps this cheap.
   JSON reports and receipts. Plain git is used only when riftri declines and
   changes nothing. `:checkhealth` and `:worktrees` show the disk saved.
 - **Later.** Server/remote mode (phone follows a session), pi extensions
-  passthrough, partial-hunk accept, session templates.
+  passthrough, session templates.
 
 ## 8. Open questions
 

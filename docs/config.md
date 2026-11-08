@@ -345,6 +345,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>D` | `:dash` |
 | `<leader>u` | `session.tree` (like an undo tree, for the conversation) |
 | `<leader>s` | `:settings<CR>` (theme, look, engine, worktrees and keys in one float) |
+| `<leader>r` | `:review<CR>` (keep or drop the agent's changes hunk by hunk) |
 | `<leader>M` | `:model<CR>` (pick the focused agent's model) |
 | `<leader>e` | `:effort<CR>` (pick its reasoning effort) |
 | `<leader>E` | `:engine<CR>` (pick the engine new agents run on) |

@@ -148,6 +148,7 @@ export const DEFAULT_KEYS: Record<KeyMode, Record<string, string>> = {
 		"<leader>D": ":dash<CR>",
 		"<leader>u": "session.tree",
 		"<leader>s": ":settings<CR>",
+		"<leader>r": ":review<CR>",
 		"<leader>M": ":model<CR>",
 		"<leader>e": ":effort<CR>",
 		"<leader>E": ":engine<CR>",

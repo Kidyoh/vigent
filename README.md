@@ -138,6 +138,10 @@ A worktree is normally a full copy of your checkout, so ten agents on a big repo
 
 ## Reviewing and landing work
 
+**`:review`** (`Space r`) goes through the agent's changes one hunk at a time. That covers its commits, its uncommitted edits and its new files. Press `x` to drop the hunk under the cursor, `X` to drop the whole file, and `u` to undo. Dropping takes the change out of the agent's worktree, so `:merge` and `:pr` land only what you kept.
+
+![:review](docs/screenshots/review.png)
+
 ```vim
 :diff                  " the agent's changes; ]c / [c jump between hunks
 :merge                 " squash-merge its branch into yours: one commit, e.g. "fix: flaky checkout test"
