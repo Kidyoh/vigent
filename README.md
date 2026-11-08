@@ -2,9 +2,7 @@
 
 A vim-style, lightweight terminal app for running several coding agents at once, built on the [pi](https://github.com/badlogic/pi-mono) engine. It can also drive the Claude Code, Codex and OpenCode CLIs you already have installed, with their own logins.
 
-![vigent with the default Neovim theme](docs/screenshots/vigent-default-theme.png)
-
-![vigent with the gruvbox theme, second session focused](docs/screenshots/vigent-gruvbox.png)
+![vigent running a Claude Code agent in its own worktree, with the sessions and engines sidebars](docs/screenshots/showcase.png)
 
 ## Install
 
@@ -38,27 +36,17 @@ vigent --help
 
 Like LazyVim, vigent opens on a dashboard. Press `i` and type a task, `n` to name a new agent, `t` for themes, `s` for settings, `m` / `e` for model and effort, `c` to check engines, `?` for every key, or `q` to quit. Press `Space` (the leader) and pause, and a which-key panel lists every key that can follow and what it does. `Esc` closes it, and `:set nowhichkey` turns it off.
 
-![the dashboard, with the lazyvim theme over a translucent terminal](docs/screenshots/dashboard-lazyvim.png)
-
-![which-key after Space](docs/screenshots/which-key.png)
-
 ### While several agents run
 
 When an agent finishes, fails or needs you while you're looking at another one (or at another window), vigent rings the bell. In iTerm2, WezTerm, Ghostty and kitty it also sends a desktop notification, inside tmux too. The message line says which agent and the key to open it, and the agent gets a ◆ in the sidebar until you do. Set `notify` in `[ui]` (or `:settings`) to `"bell"`, `"desktop"` or `"off"`.
 
-![an agent finished in the background](docs/screenshots/notify.png)
-
 The statusline shows what the agent on screen has used, like `74.8k tok · $0.50`, and `:dash` adds up every agent. `:cost` lists each agent with its engine, tokens and cost, and the total. Costs are what each engine reports: Claude Code prices what it used at API rates even on a subscription, OpenCode prices each step, pi uses its model prices, and Codex reports tokens only. CLI agents keep their totals across restarts.
-
-![:cost](docs/screenshots/cost.png)
 
 ### From your phone
 
 **`:serve`** lets you follow your agents from your phone, or start `vigent --serve` to have it on from the beginning. vigent shows an address on your network and an 8-character access code. Open the address on your phone and type the code, or open the link that already has the code in it.
 
 The page uses your theme's colors. It lists your agents with their state, branch, changes and cost, and follows a reply as it streams. You can send a follow-up (it waits its turn if the agent is busy), stop an agent, or start a new one.
-
-![following agents from a phone](docs/screenshots/serve-phone.png)
 
 The code is new each time, and every request needs it. Prompts and stops need it in a header, so no other web page can send them through your browser. After 10 wrong codes the server stops answering. It's plain HTTP, so use it on your own Wi-Fi or over a VPN like Tailscale, not on public Wi-Fi. `:serve local` listens on this machine only, for an SSH tunnel. `:serve 9000` picks the port (the default is 8377). `:serve stop` ends it and retires the code.
 
@@ -70,15 +58,9 @@ Inside a git repository, press `i`, type what you want done, and press Enter. An
 
 Type `@` in a prompt and a file picker opens over it with the files in the agent's worktree (what git tracks plus new files, never what `.gitignore` hides). Type to narrow it, `Enter` writes `@src/cart.js`, `Esc` keeps a plain `@`, and `Backspace` takes the `@` back. Each engine gets the files its own way: Claude Code reads `@path` itself, OpenCode gets them with `-f`, and for Codex and pi vigent adds each file's contents under your prompt (text files up to 100 KB; the transcript notes any it left out). The transcript shows what you typed, with the mentions highlighted.
 
-![@ opens a file picker](docs/screenshots/attach-picker.png)
-
-![the prompt with its mentions, and the reply](docs/screenshots/attach-sent.png)
-
 ### Templates
 
 For prompts you use often, `:new -t fix the cart total is off by one` starts an agent and sends it the `fix` template with your task filled in. Four are built in: `fix` (failing test first, then the fix), `test`, `review` (changes nothing) and `explain`. `:templates` (`Space T`, or `T` on the start screen) picks one. Add your own under `[templates.<name>]` in config.toml, each with an optional engine, model and effort ([docs/config.md](docs/config.md#templates)).
-
-![:templates](docs/screenshots/templates.png)
 
 ## From source
 
@@ -111,10 +93,6 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 
 Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
 
-![Neovim-style intro screen](docs/screenshots/intro.png)
-
-![VISUAL mode on a markdown reply](docs/screenshots/visual-mode.png)
-
 ## Engines: pi, Claude Code, Codex, OpenCode
 
 pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may already use: vigent runs them as installed, in the agent's worktree, so each one uses its own login and settings. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected.
@@ -127,10 +105,6 @@ pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may alre
 
 The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks the first signed-in CLI, otherwise pi if it has an API key. With neither, vigent starts nothing and says what to run (`claude auth login`, `codex login`) or export (`ANTHROPIC_API_KEY`) to connect one. **`:engine`** (`<Space>E`, or `E` on the dashboard) switches it while vigent runs: a menu lists auto, pi, Claude Code, Codex and OpenCode with which are ready, and `:engine claude` sets it directly. Agents already open keep their engine, since their conversation lives there; `:new <task>` starts one on the new engine. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
 
-![:checkhealth with Claude Code signed in and Codex waiting for codex login](docs/screenshots/checkhealth.png)
-
-![a Claude Code agent reopened after a restart, continuing its conversation](docs/screenshots/claude-code-agent.png)
-
 | Engine | vigent runs | Default extra arguments |
 |---|---|---|
 | `claude` | `claude -p --output-format stream-json` | `--permission-mode acceptEdits` |
@@ -138,8 +112,6 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 | `opencode` | `opencode run --format json --dir <worktree>` | none |
 
 **Model and effort:** `:model` (`<Space>M`) opens a picker with the models the agent's engine offers (Claude Code's model names, Codex's own catalog from `codex debug models`, OpenCode's `opencode models`, or pi's for the providers you have a key for). In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>e`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
-
-![:model on a Claude Code agent](docs/screenshots/model-picker.png)
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
@@ -150,8 +122,6 @@ A pi agent loads what pi itself would load. That covers extensions from `~/.pi/a
 vigent gives extensions a UI of their own. When an extension asks for confirmation, vigent shows a y/n question in the command line. Choices and text input open pickers. Notifications go to the transcript and the message line, and statuses show in the winbar. Each one names the agent it came from, and a question from an agent you aren't looking at rings the bell. So pi's permission gate works the same as in pi: it asks before an `rm -rf`, and **No** blocks the command.
 
 Type an extension's command (`/deploy`), a skill (`/skill:changelog`) or a prompt template (`/tidy src/cart.js`) as a prompt. **`:pi`** lists everything the focused agent loaded, including extensions that failed and why. Press Enter on a command, skill or prompt template to start a prompt with it.
-
-![a pi extension asking before rm -rf](docs/screenshots/pi-extensions.png)
 
 ## Worktrees
 
@@ -177,17 +147,9 @@ A worktree is normally a full copy of your checkout, so ten agents on a big repo
 - On restart, vigent inspects riftri's worktrees before reopening their agents. If an OverlayFS view lost its mount (after a reboot), vigent repairs it first.
 - vigent falls back to git only when riftri declines with a receipt saying nothing was changed (unsupported volume, checkout or environment). Any other riftri failure is shown, never papered over. `[worktree] backend = "riftri"` requires riftri, and `"git"` turns it off.
 
-![:worktrees with every agent on riftri](docs/screenshots/riftri-worktrees.png)
-
-![agents in their own worktrees](docs/screenshots/worktrees-sidebar.png)
-
-![:diff](docs/screenshots/worktrees-diff.png)
-
 ## Reviewing and landing work
 
 **`:review`** (`Space r`) goes through the agent's changes one hunk at a time. That covers its commits, its uncommitted edits and its new files. Press `x` to drop the hunk under the cursor, `X` to drop the whole file, and `u` to undo. Dropping takes the change out of the agent's worktree, so `:merge` and `:pr` land only what you kept.
-
-![:review](docs/screenshots/review.png)
 
 ```vim
 :diff                  " the agent's changes; ]c / [c jump between hunks
@@ -209,14 +171,6 @@ A worktree is normally a full copy of your checkout, so ten agents on a big repo
 Agents survive a restart: quit vigent, start it again in the same repo, and the agents you didn't `:kill` come back with their conversations. Their records live in git's own worktree metadata (`.git/worktrees/<name>/vigent/`), not in your files, and are deleted along with the worktree.
 
 `:merge` and `:pr` first commit anything the agent left uncommitted. `:merge` only touches your checkout when it's on the agent's base branch with no uncommitted changes, and a conflict is rolled back so nothing changes. After a merge, `:kill!` removes the worktree and the merged branch. `:q` won't quit while agents are running; `:q!` or `ZQ` does. Use `:new <task> --model <id>` to give one agent a different model.
-
-![:diff split](docs/screenshots/diff-split.png)
-
-![:tree](docs/screenshots/tree.png)
-
-![:merge](docs/screenshots/merge.png)
-
-![:dash](docs/screenshots/dashboard.png)
 
 ## Configuration
 
@@ -246,8 +200,6 @@ Normal = { bg = "NONE" }
 ```
 
 You can also change keys while vigent runs, with `:nmap`, `:imap`, `:cmap`, `:unmap` and `:let mapleader`. **[docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md)** has every option, action and built-in key.
-
-![:help lists every key, yours first](docs/screenshots/keys-help.png)
 
 ## Themes
 
@@ -281,21 +233,9 @@ CursorLine = "guibg=#2a2f3a"
 
 **Icons and fonts:** `icons = "nerd"` (or `:settings`, Icons) uses Nerd Font icons like AstroNvim and LazyVim: a git branch icon, status and engine icons, an icon per tool call (terminal, pencil, file, search…) and file-type icons in the diff view, colored from your theme. vigent draws in your terminal's font, the same as Neovim in a terminal, so for these icons set your terminal's font to a [Nerd Font](https://www.nerdfonts.com) (for example JetBrainsMono Nerd Font).
 
-25 built in, including `lazyvim` (LazyVim's look, transparent), the tokyonight, catppuccin and rose-pine families, `dracula`, `onedark`, `everforest`, `nightfox`, `gruvbox`, `kanagawa`, `nord`, `monokai-pro`, `ayu-mirage`, and GitHub and solarized in dark and light. The picker shows each one's colors:
+25 built in, including `lazyvim` (LazyVim's look, transparent), the tokyonight, catppuccin and rose-pine families, `dracula`, `onedark`, `everforest`, `nightfox`, `gruvbox`, `kanagawa`, `nord`, `monokai-pro`, `ayu-mirage`, and GitHub and solarized in dark and light. The picker shows each one's colors.
 
-![the colorscheme picker: every theme with its colors, dark / light / transparent](docs/screenshots/colorscheme-swatches.png)
-
-**`:settings`** (`<Space>s`) changes the theme, transparency, layout, engine, worktrees and any key in one place. Press `w` and it's saved to config.toml:
-
-![:settings](docs/screenshots/settings.png)
-
-![the lazyvim theme over a translucent terminal: sidebar, transcript and floats show the background through](docs/screenshots/lazyvim-transparent.png)
-
-![colorscheme picker with live preview](docs/screenshots/colorscheme-picker.png)
-
-![habamax imported from Neovim](docs/screenshots/imported-habamax.png)
-
-![nord with :hi and :set changes applied live](docs/screenshots/live-customization.png)
+**`:settings`** (`<Space>s`) changes the theme, transparency, layout, engine, worktrees and any key in one place. Press `w` and it's saved to config.toml.
 
 The full guide covers importing, theme files, palettes, every option and every highlight group: **[docs/themes.md](https://github.com/farming-labs/vigent/blob/main/docs/themes.md)**.
 
