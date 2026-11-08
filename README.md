@@ -4,7 +4,7 @@ A vim-style, lightweight terminal app for running several coding agents at once,
 
 **Website:** [vigent.farming-labs.dev](https://vigent.farming-labs.dev) · **Docs:** [vigent.farming-labs.dev/docs](https://vigent.farming-labs.dev/docs)
 
-![vigent running a Claude Code agent in its own worktree, with the sessions and engines sidebars](docs/screenshots/showcase.png)
+![vigent running a Claude Code agent in its own worktree, with the sessions and engines sidebars](https://vigent.farming-labs.dev/showcase.png)
 
 ## Install
 
