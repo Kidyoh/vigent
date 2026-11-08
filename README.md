@@ -133,6 +133,16 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
+### pi extensions, skills and prompt templates
+
+A pi agent loads what pi itself would load. That covers extensions from `~/.pi/agent/extensions/` and `.pi/extensions/`, and the packages you installed with pi. It also covers skills, prompt templates, and the project's `AGENTS.md`.
+
+vigent gives extensions a UI of their own. When an extension asks for confirmation, vigent shows a y/n question in the command line. Choices and text input open pickers. Notifications go to the transcript and the message line, and statuses show in the winbar. Each one names the agent it came from, and a question from an agent you aren't looking at rings the bell. So pi's permission gate works the same as in pi: it asks before an `rm -rf`, and **No** blocks the command.
+
+Type an extension's command (`/deploy`), a skill (`/skill:changelog`) or a prompt template (`/tidy src/cart.js`) as a prompt. **`:pi`** lists everything the focused agent loaded, including extensions that failed and why. Press Enter on a command, skill or prompt template to start a prompt with it.
+
+![a pi extension asking before rm -rf](docs/screenshots/pi-extensions.png)
+
 ## Worktrees
 
 Every agent gets its own git worktree and branch, so agents never touch your checkout or each other's files:

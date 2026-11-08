@@ -8,6 +8,7 @@
  */
 import { expandPrompt } from "./attach.js";
 import { loadPiAi, loadPiSdk } from "./pi-sdk.js";
+import { extensionUi, type PiResources, piResources, type PiUiHost } from "./pi-ui.js";
 import type { EngineId } from "./engines.js";
 import { flattenTree, type TreeGlyphs, type TreeRow } from "./tree.js";
 import { diffStat, type WorktreeInfo } from "./worktree.js";
@@ -338,6 +339,7 @@ export class PiSession extends Session {
 			...(this.opts.agentDir ? { agentDir: this.opts.agentDir } : {}),
 		});
 		this.session = session;
+		await this.bindExtensions(sdk, session);
 		if (resuming) {
 			const restored = itemsFromMessages(session.messages ?? []);
 			this.items.push(...restored.items);
@@ -455,6 +457,73 @@ export class PiSession extends Session {
 		return { editorText: r.editorText };
 	}
 
+	/** where this agent's extensions show dialogs and messages (set by the app) */
+	uiHost?: PiUiHost;
+	/** statuses extensions keep up to date (ctx.ui.setStatus), shown in the winbar */
+	extensionStatus = new Map<string, string>();
+
+	/**
+	 * Hand pi's extensions their UI and start them (session_start), as pi's
+	 * own modes do. Without this, an extension's confirm() always answers no
+	 * and its notify() goes nowhere.
+	 */
+	private async bindExtensions(sdk: any, session: any) {
+		const THEME = Symbol.for("@mariozechner/pi-coding-agent:theme");
+		try {
+			if (!(globalThis as any)[THEME]) sdk.initTheme?.(undefined, false);
+		} catch {
+			// extensions that style text get plain text
+		}
+		const ui = extensionUi(
+			() => this.uiHost ?? this.fallbackUi,
+			() => (globalThis as any)[THEME],
+		);
+		try {
+			await session.bindExtensions({
+				uiContext: ui,
+				commandContextActions: {
+					waitForIdle: () => session.agent.waitForIdle(),
+					// one conversation per agent in vigent: :new starts another agent
+					newSession: async () => ({ cancelled: true }),
+					fork: async () => ({ cancelled: true }),
+					switchSession: async () => ({ cancelled: true }),
+					navigateTree: async (targetId: string) => {
+						const r = await session.navigateTree(targetId, {});
+						return { cancelled: r.cancelled };
+					},
+					reload: async () => {
+						await session.reload();
+					},
+				},
+				onError: (err: any) => this.pushInfo(`extension error (${shortExtPath(err?.extensionPath)}${err?.event ? `, ${err.event}` : ""}): ${err?.error ?? err}`),
+			});
+		} catch (err: any) {
+			this.pushInfo(`pi extensions didn't start: ${String(err?.message ?? err)}`);
+		}
+		const failed = piResources(session).extensions.filter((e) => e.error);
+		for (const e of failed) this.pushInfo(`extension ${shortExtPath(e.path)} didn't load: ${e.error}`);
+	}
+
+	/** with no screen to ask on: messages still reach the transcript, dialogs answer no */
+	private fallbackUi: PiUiHost = {
+		select: async () => undefined,
+		confirm: async () => false,
+		input: async () => undefined,
+		notify: (message) => this.pushInfo(message),
+		setStatus: (key, text) => this.setExtensionStatus(key, text),
+	};
+
+	setExtensionStatus(key: string, text: string | undefined) {
+		if (text) this.extensionStatus.set(key, text);
+		else this.extensionStatus.delete(key);
+		this.emit();
+	}
+
+	/** What pi loaded for this agent: extensions, their commands, skills, prompt templates, AGENTS.md files. */
+	resources(): PiResources | undefined {
+		return this.session ? piResources(this.session) : undefined;
+	}
+
 	send(text: string): void {
 		this.pushUser(text);
 		this.setState("running");
@@ -464,6 +533,10 @@ export class PiSession extends Session {
 			// pi reports agent_end a moment before it accepts the next prompt (queued prompts hit this)
 			.then(() => this.session.agent?.waitForIdle?.())
 			.then(() => this.session.prompt(attached.prompt))
+			// an extension command (/name) or a handled input runs no turn: nothing else will end it
+			.then(() => {
+				if (this.state === "running") this.setState("idle");
+			})
 			.catch((err: any) => {
 				const text = String(err?.message ?? err);
 				// pi's own advice (/login, its docs paths) is for pi's TUI, not vigent: keep its first line
@@ -569,4 +642,10 @@ export async function piModel(id: string): Promise<unknown> {
 	} catch {
 		return undefined;
 	}
+}
+
+/** ~/.pi/agent/extensions/guard.ts → extensions/guard.ts */
+function shortExtPath(p: unknown): string {
+	const parts = String(p ?? "extension").split(/[\\/]/);
+	return parts.slice(-2).join("/");
 }

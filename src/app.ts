@@ -40,6 +40,7 @@ import { dropPatch, parseDiff, restorePatch } from "./hunks.js";
 import { HunkReview } from "./hunk-review.js";
 import { listFiles, MENTION, mentionable } from "./attach.js";
 import { allTemplates, fillTemplate, needsTask, type Template } from "./templates.js";
+import type { PiUiHost } from "./pi-ui.js";
 import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
@@ -54,7 +55,7 @@ import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice
 import { EFFORTS, effortChoicesFor, modelChoices } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon } from "./icons.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
-import type { Session, SessionState } from "./session.js";
+import type { PiSession, Session, SessionState } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
 import {
@@ -250,7 +251,7 @@ export class App implements Component {
 	/** VISUAL selection, as line indices into the transcript pane */
 	private visual = { anchor: 0, cursor: 0 };
 	/** a y/n question in the command line (dd, quitting with agents running) */
-	private confirm?: { question: string; onYes: () => void };
+	private confirm?: { question: string; onYes: () => void; onNo?: () => void };
 	/** copies text to the system clipboard; returns how (replaced in tests) */
 	clipboard: (text: string) => string = (text) => copyToClipboard(text, (d) => this.terminal.write(d));
 
@@ -293,6 +294,7 @@ export class App implements Component {
 	}
 
 	addSession(s: Session, focus = true) {
+		if ("extensionStatus" in s) (s as PiSession).uiHost = this.piUiHost(s);
 		this.sessions.push(s);
 		this.lastState.set(s, s.state);
 		s.onChange(() => {
@@ -405,24 +407,26 @@ export class App implements Component {
 	}
 
 	/** Ask a y/n question in the command line, like vim's confirm prompts. */
-	private ask(question: string, onYes: () => void) {
+	private ask(question: string, onYes: () => void, onNo?: () => void) {
 		this.seq.reset();
-		this.confirm = { question, onYes };
+		this.confirm?.onNo?.(); // a newer question replaces an unanswered one: that one is a no
+		this.confirm = { question, onYes, onNo };
 	}
 
 	handleInput(data: string): void {
-		if (this.confirm) {
-			const { onYes } = this.confirm;
-			this.confirm = undefined;
-			this.message = "";
-			if (data === "y" || data === "Y") onYes();
-			this.tui.requestRender();
-			return;
-		}
-		// focus reporting: the terminal window gained or lost focus
+		// focus reporting: the terminal window gained or lost focus (never an answer to a question)
 		if (data === "\x1b[I" || data === "\x1b[O") {
 			this.terminalFocused = data === "\x1b[I";
 			if (this.terminalFocused && this.focusedSession) this.unread.delete(this.focusedSession);
+			this.tui.requestRender();
+			return;
+		}
+		if (this.confirm) {
+			const { onYes, onNo } = this.confirm;
+			this.confirm = undefined;
+			this.message = "";
+			if (data === "y" || data === "Y") onYes();
+			else onNo?.();
 			this.tui.requestRender();
 			return;
 		}
@@ -786,6 +790,10 @@ export class App implements Component {
 			case "cost":
 			case "usage":
 				this.openUsage();
+				return;
+			case "pi":
+			case "extensions":
+				this.openPiResources();
 				return;
 			case "tree":
 				this.openTree();
@@ -1290,7 +1298,7 @@ export class App implements Component {
 		current: string,
 		custom: boolean,
 		done: (v: string) => void,
-		opts: ChoicePickerOptions = {},
+		opts: ChoicePickerOptions & { onCancel?: () => void } = {},
 		place: OverlayOptions = { width: Math.min(72, this.terminal.columns - 4), anchor: "center" },
 	) {
 		this.seq.reset();
@@ -1305,6 +1313,7 @@ export class App implements Component {
 			(v) => {
 				handle?.hide();
 				if (v !== null) done(v);
+				else opts.onCancel?.();
 				this.repaint();
 			},
 			() => this.tui.requestRender(),
@@ -1728,6 +1737,103 @@ export class App implements Component {
 			selectable: rows,
 			onSelect: (lineIdx) => this.focusSession(rows.indexOf(lineIdx)),
 			initial: rows[this.focusIdx],
+		});
+	}
+
+	/**
+	 * Where a pi agent's extensions talk to you: confirm() is a y/n question in
+	 * the command line, select() and input() are pickers, notify() goes to the
+	 * transcript and the message line. Each names the agent it's from.
+	 */
+	piUiHost(s: Session): PiUiHost {
+		const who = () => `'${s.name}'`;
+		// one line, and emoji in text style (U+FE0F makes terminals disagree on their width)
+		const oneLine = (t: string) => t.replace(/\uFE0F/g, "").replace(/\s+/g, " ").trim();
+		const lookHere = () => {
+			if (s !== this.focusedSession || !this.terminalFocused) this.alert(alertSequence(`vigent: ${who()} asks you something`, this.ui.notify));
+		};
+		return {
+			select: (title, options) =>
+				new Promise((resolve) => {
+					lookHere();
+					this.openChoices(`${who()} · ${oneLine(title)}`, options.map((value) => ({ value })), "", false, resolve, {
+						onCancel: () => resolve(undefined),
+						rows: Math.max(3, Math.min(10, options.length)),
+					});
+				}),
+			confirm: (title, message) =>
+				new Promise((resolve) => {
+					lookHere();
+					const text = [title, message].filter(Boolean).map(oneLine).join(": ");
+					this.ask(`${who()} ${text} (y/n)`, () => resolve(true), () => resolve(false));
+					this.tui.requestRender();
+				}),
+			input: (title, placeholder) =>
+				new Promise((resolve) => {
+					lookHere();
+					this.openChoices(`${who()} · ${oneLine(title)}${placeholder ? ` (${oneLine(placeholder)})` : ""}`, [], "", true, resolve, { search: true, rows: 3, onCancel: () => resolve(undefined) });
+				}),
+			notify: (message, type) => {
+				s.pushInfo(message);
+				this.setMessage(`${who()}: ${message}`, type === "error" ? "ErrorMsg" : type === "warning" ? "WarningMsg" : "ModeMsg");
+				this.tui.requestRender();
+			},
+			setStatus: (key, text) => (s as PiSession).setExtensionStatus?.(key, text),
+		};
+	}
+
+	/** `:pi`: what pi loaded for the focused agent. Enter on a command, skill or prompt starts a prompt with it. */
+	openPiResources() {
+		const s = this.focusedSession;
+		if (!s || !("resources" in s)) {
+			this.setMessage(s ? `:pi lists a pi agent's extensions; '${s.name}' runs on ${ENGINE_NAMES[s.engine]}` : "no agent yet", "Comment");
+			return;
+		}
+		const r = (s as PiSession).resources();
+		if (!r) {
+			this.setMessage(`'${s.name}' is still starting`, "Comment");
+			return;
+		}
+		const lines: FloatLine[] = [];
+		const rows: number[] = [];
+		const typed: string[] = [];
+		const home = process.env.HOME ?? "";
+		const short = (p: string) => (home && p.startsWith(home) ? `~${p.slice(home.length)}` : this.shortPath(p));
+		const section = (title: string, n: number) => {
+			if (lines.length) lines.push([]);
+			lines.push([["Title", title], ["Comment", `  ${n}`]]);
+		};
+		const item = (name: string, note: string | undefined, insert?: string) => {
+			if (insert) {
+				rows.push(lines.length);
+				typed.push(insert);
+			}
+			lines.push([
+				["Identifier", `  ${name.padEnd(24)}`],
+				["Comment", note ? ` ${truncateToWidth(note.replace(/\s+/g, " "), 60, "…")}` : ""],
+			]);
+		};
+		section("Extensions", r.extensions.length);
+		if (!r.extensions.length) lines.push([["Comment", "  none (~/.pi/agent/extensions/ or .pi/extensions/)"]]);
+		for (const e of r.extensions) lines.push(e.error ? [["ErrorMsg", `  ${short(e.path)}`], ["Comment", `  ${e.error}`]] : [["NormalFloat", `  ${short(e.path)}`]]);
+		section("Commands", r.commands.length);
+		for (const c of r.commands) item(`/${c.name}`, c.description, `/${c.name} `);
+		section("Skills", r.skills.length);
+		for (const k of r.skills) item(`/skill:${k.name}`, k.description, `/skill:${k.name} `);
+		section("Prompt templates", r.prompts.length);
+		for (const p of r.prompts) item(`/${p.name}`, p.description, `/${p.name} `);
+		section("Context files", r.contextFiles.length);
+		for (const f of r.contextFiles) lines.push([["NormalFloat", `  ${short(f)}`]]);
+		lines.push([]);
+		lines.push([["Comment", "Enter starts a prompt with it · pi loads these itself, as in pi"]]);
+		this.openFloat(`pi · ${s.name}`, lines, Math.min(96, this.terminal.columns - 4), {
+			selectable: rows.length ? rows : undefined,
+			onSelect: (lineIdx) => {
+				const text = typed[rows.indexOf(lineIdx)];
+				if (!text) return;
+				this.mode = "INSERT";
+				this.inputBuf = text;
+			},
 		});
 	}
 
@@ -2468,7 +2574,8 @@ export class App implements Component {
 		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
 		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}${s.effort ? ` · ${s.effort}` : ""}` : "";
 		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? " · riftri" : ""}` : s ? "this checkout" : "";
-		const status = s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "";
+		const ext = s && "extensionStatus" in s ? [...(s as PiSession).extensionStatus.values()].join(" · ") : "";
+		const status = (s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "") + (ext ? `  ${ext}` : "");
 		// the path gives way first (from its start: the end names the worktree), always two spaces before it
 		const pathRoom = w - visibleWidth(left) - visibleWidth(model) - visibleWidth(status) - 3;
 		const shownWhere = !where ? "" : visibleWidth(where) <= pathRoom ? where : pathRoom > 4 ? `…${where.slice(where.length - pathRoom + 1)}` : "";
@@ -2898,6 +3005,7 @@ const EX_HELP: [string, string][] = [
 	[":pause  /  :resume", "hold the agent and its queue / continue"],
 	[":dash", "all agents at a glance"],
 	[":cost", "tokens and money each agent has used, and the total"],
+	[":pi", "a pi agent's extensions, commands, skills and prompt templates"],
 	[":tree", "the conversation's branches; go back and branch"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],

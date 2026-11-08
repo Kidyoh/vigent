@@ -378,7 +378,8 @@ export class ChoicePicker implements Component {
 			if (!c) {
 				let text = "";
 				if (i === 0 && this.loading) text = "  loading…";
-				else if (i === 0 && items.length === 0) text = this.custom && this.query.trim() ? `  Enter uses '${this.query.trim()}'` : "  no match";
+				else if (i === 0 && items.length === 0)
+					text = this.custom && this.query.trim() ? `  Enter uses '${this.query.trim()}'` : this.custom && this.items.length === 0 ? "  type it, then Enter" : "  no match";
 				lines.push(row(P.on("Comment", bg) + truncateToWidth(text, inner, "…") + RESET, Math.min(inner, visibleWidth(text))));
 				continue;
 			}
