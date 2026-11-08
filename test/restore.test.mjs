@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, test } from "node:test";
-import { agentStateDir, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir, setDetached } from "../dist/agents.js";
+import { agentStateDir, loadAgentMeta, reopenableAgents, restorableAgents, saveAgentMeta, sessionDir, setDetached } from "../dist/agents.js";
 import { itemsFromMessages } from "../dist/session.js";
 import { createWorktree, DEFAULT_WORKTREE, removeWorktree } from "../dist/worktree.js";
 
@@ -261,4 +261,33 @@ test("a pi agent with no API key says what to do, without pi's own /login advice
 		s.dispose();
 		faux.unregister();
 	}
+});
+
+test("an OverlayFS view that lost its mount (a reboot) is repaired before its agent's record is read", () => {
+	const cfg = { ...DEFAULT_WORKTREE, dir: "../shop-overlay" };
+	const wt = createWorktree(repo, "fix overlay", cfg);
+	saveAgentMeta(wt.path, { name: "fix overlay", model: "m", base: "main", createdAt: "2026-02-01T00:00:00Z" });
+	// unmounted: the folder is still there, but empty (no .git, no files)
+	const gitFile = path.join(wt.path, ".git");
+	const hidden = path.join(tmp, "hidden-git");
+	fs.renameSync(gitFile, hidden);
+	assert.equal(restorableAgents(repo, cfg).length, 0, "reading the record first misses it");
+
+	const asked = [];
+	const repair = (root, paths) => {
+		asked.push(...paths);
+		if (fs.existsSync(hidden)) fs.renameSync(hidden, gitFile); // riftri remounts the view
+		return new Map(paths.map((p) => [p, { path: p, ready: true, backend: "overlay-fs" }]));
+	};
+	const { agents, blocked } = reopenableAgents(repo, cfg, repair);
+	assert.deepEqual(asked, [wt.path], "every vigent worktree is inspected first");
+	assert.deepEqual(blocked, []);
+	assert.deepEqual(agents.map((a) => [a.meta.name, a.backend]), [["fix overlay", "overlay-fs"]]);
+
+	// a view riftri can't make ready is reported, not opened
+	const stuck = (root, paths) => new Map(paths.map((p) => [p, { path: p, ready: false, reason: "mount is foreign" }]));
+	const r = reopenableAgents(repo, cfg, stuck);
+	assert.deepEqual(r.agents, []);
+	assert.deepEqual(r.blocked, [{ path: wt.path, reason: "mount is foreign" }]);
+	removeWorktree(repo, wt, true);
 });

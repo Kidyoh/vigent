@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
-import { type AgentMeta, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
+import { type AgentMeta, loadAgentMeta, reopenableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
@@ -414,17 +414,12 @@ async function main(): Promise<number | undefined> {
 		}
 	} else if (root && config.worktree.enabled) {
 		// reopen the agents that were running when vigent last quit
-		const agents = restorableAgents(root, config.worktree);
-		// riftri views on OverlayFS lose their mount on reboot: repair them before an agent runs there
-		const views = prepareViews(root, agents.map((a) => a.worktree.path!));
-		for (const { meta, worktree } of agents) {
-			const view = views.get(worktree.path!);
-			if (view && !view.ready) {
-				warnings.push(`couldn't reopen '${meta.name}': ${view.reason}`);
-				continue;
-			}
+		// riftri views on OverlayFS lose their mount on reboot: they're repaired before any agent's record is read
+		const { agents, blocked } = reopenableAgents(root, config.worktree, prepareViews);
+		for (const b of blocked) warnings.push(`couldn't reopen the agent in ${b.path}: ${b.reason}`);
+		for (const { meta, worktree, backend } of agents) {
 			try {
-				app.addSession(reopen(meta, { ...worktree, riftri: view?.backend }), false);
+				app.addSession(reopen(meta, { ...worktree, riftri: backend }), false);
 			} catch (err) {
 				warnings.push(`couldn't reopen '${meta.name}': ${(err as Error).message}`);
 			}
