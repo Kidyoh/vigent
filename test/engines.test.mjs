@@ -135,12 +135,26 @@ else if (a === "login status") { console.error("Not logged in"); process.exit(1)
 
 	assert.equal(defaultEngine(engines), "claude", "the first signed-in engine");
 	assert.equal(defaultEngine(undefined, env), "claude", "before the checks finish: the first one installed");
-	assert.equal(defaultEngine(undefined, { ...env, OPENAI_API_KEY: "x" }), "pi", "pi when it has a key");
+	assert.equal(defaultEngine(undefined, { ...env, OPENAI_API_KEY: "x" }), "claude", "an installed CLI before pi, even when pi has a key");
+	assert.equal(defaultEngine(undefined, { PATH: "", HOME: home, OPENAI_API_KEY: "x" }), "pi", "pi when no CLI is installed");
 	assert.equal(onPath("codex", env), true);
 	assert.equal(onPath("opencode", env), false);
 
 	const pi = (await detectEngines({ ...env, PATH: "" , GEMINI_API_KEY: "x" }, 5000))[0];
 	assert.deepEqual([pi.connected, pi.detail], [true, "built in · using GEMINI_API_KEY"]);
+});
+
+test("auto: a signed-in CLI before pi, pi only when no CLI is ready", () => {
+	const e = (id, over = {}) => ({ id, name: id, installed: true, connected: false, detail: "", ...over });
+	const none = { installed: false };
+	const pick = (pi, claude, codex, opencode = none) => defaultEngine([e("pi", pi), e("claude", claude), e("codex", codex), e("opencode", opencode)]);
+
+	assert.equal(pick({ connected: true }, { connected: true }, {}), "claude", "ANTHROPIC_API_KEY set and Claude Code signed in: Claude Code");
+	assert.equal(pick({ connected: true }, {}, { connected: true }), "codex", "Claude Code not signed in, Codex is: Codex");
+	assert.equal(pick({ connected: true }, { checking: true }, none), "claude", "at startup, while sign-in checks run: the installed CLI, not pi");
+	assert.equal(pick({ connected: true }, {}, {}), "pi", "no CLI signed in: pi with its key");
+	assert.equal(pick({}, {}, {}), "claude", "nothing ready: the first installed CLI (starting an agent then says how to sign in)");
+	assert.equal(pick({}, none, none), "pi", "nothing installed: pi");
 });
 
 test("a CLI agent: streams the reply, keeps the conversation id, resumes with it", async () => {

@@ -77,7 +77,7 @@ Move with `j`/`k`, change with `Enter`/`Space` (or step with `h`/`l`), and press
 |---|---|---|
 | `theme` | `"default"` | Colorscheme at startup. `colorscheme` is accepted as an alias. See [themes.md](themes.md). |
 | `model` | `"claude-sonnet-4-5"` | Model for new pi agents. `--model` on the command line wins. |
-| `engine` | `"auto"` | What runs new agents: `"pi"`, `"claude"`, `"codex"`, `"opencode"`, or `"auto"` (pi if it has an API key, else the first signed-in CLI). `--engine` on the command line wins; `:new <task> --engine <id>` picks one per agent. See [`[engines]`](#engines). |
+| `engine` | `"auto"` | What runs new agents: `"pi"`, `"claude"`, `"codex"`, `"opencode"`, or `"auto"` (the first signed-in CLI, else pi if it has an API key; with neither, starting an agent says how to connect one). `--engine` on the command line wins; `:new <task> --engine <id>` picks one per agent. See [`[engines]`](#engines). |
 | `leader` | `"<Space>"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader` (vim's own default is `"\"`). `mapleader` is accepted as an alias. |
 
 ## `[ui]`

@@ -105,7 +105,7 @@ export default function DocsPage() {
             <C>" what's installed and signed in</C>
           </Code>
           <L>
-            Agents keep the engine they started on. <span className="b">auto</span> picks pi when it has a key, otherwise the first signed-in CLI.
+            Agents keep the engine they started on. <span className="b">auto</span> picks the first signed-in CLI, otherwise pi when it has a key.
           </L>
           <L />
 

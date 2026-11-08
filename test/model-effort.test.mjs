@@ -213,7 +213,7 @@ test(":engine picks the engine new agents run on, shows what's ready, and leaves
 	const picker = overlays.at(-1);
 	const screen = plain(picker.render(80));
 	assert.match(screen, /Engine for new agents/);
-	assert.match(screen, /● auto +pick for me \(now pi\)/);
+	assert.match(screen, /● auto +pick for me \(now Claude Code\)/, "a signed-in CLI wins over pi with a key");
 	assert.match(screen, /claude +Claude Code · ready/);
 	assert.match(screen, /codex +Codex · not signed in: codex login/);
 	assert.match(screen, /opencode +OpenCode · not installed/);

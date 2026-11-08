@@ -1399,7 +1399,7 @@ export class App implements Component {
 				change: (d) => {
 					this.preferredEngine = cycle<EngineId | "auto">(["auto", "pi", "claude", "codex", "opencode"], this.preferredEngine, d);
 				},
-				hint: "auto: pi with an API key, else the first signed-in CLI · :engine picks it from anywhere",
+				hint: "auto: the first signed-in CLI, else pi with an API key · :engine picks it from anywhere",
 			},
 			{
 				section: "Agents",
@@ -1554,6 +1554,11 @@ export class App implements Component {
 			this.setMessage(`${info.name} isn't installed: ${info.install} · :checkhealth`, "ErrorMsg");
 			return undefined;
 		}
+		// auto lands on an engine that isn't ready only when none is; an agent started there could never answer
+		if (!opts.engine && this.preferredEngine === "auto" && info && !info.connected && !info.checking) {
+			this.setMessage(this.noEngineReady(), "ErrorMsg");
+			return undefined;
+		}
 		const withWorktree = opts.worktree !== false && this.workspace.config.enabled;
 		try {
 			const model = opts.model ?? this.newAgentModel[engine];
@@ -1580,6 +1585,15 @@ export class App implements Component {
 			this.setMessage(String(err?.message ?? err), "ErrorMsg");
 			return undefined;
 		}
+	}
+
+	/** "no engine is signed in: run claude auth login or codex login, or for pi export ANTHROPIC_API_KEY=… · :checkhealth" */
+	private noEngineReady(): string {
+		const engines = this.engines ?? [];
+		const logins = engines.filter((e) => e.id !== "pi" && e.installed && e.connect).map((e) => e.connect);
+		const pi = engines.find((e) => e.id === "pi")?.connect;
+		const ways = [logins.length > 0 ? `run ${logins.join(" or ")}` : "", pi ? `for pi ${pi}` : ""].filter(Boolean).join(", or ");
+		return `no engine is signed in${ways ? `: ${ways}` : ""} · :checkhealth`;
 	}
 
 	/**

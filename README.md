@@ -64,7 +64,7 @@ The code is new each time, and every request needs it. Prompts and stops need it
 
 ### First agent
 
-Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using pi if it has an API key, or else the first signed-in CLI (Claude Code, Codex, OpenCode; `:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.
+Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using the first CLI you're signed in to (Claude Code, Codex, OpenCode), with its own login and settings, or else pi if it has an API key (`:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.
 
 ### Pointing an agent at files
 
@@ -125,7 +125,7 @@ pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may alre
 :checkhealth                                " installed? signed in? how to connect the rest
 ```
 
-The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks pi if it has an API key, otherwise the first signed-in CLI. **`:engine`** (`<Space>E`, or `E` on the dashboard) switches it while vigent runs: a menu lists auto, pi, Claude Code, Codex and OpenCode with which are ready, and `:engine claude` sets it directly. Agents already open keep their engine, since their conversation lives there; `:new <task>` starts one on the new engine. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
+The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but not signed in (with the command to sign in, like `codex login`), `○` not installed. Without `--engine`, new agents use `engine` from the config. Its default, `"auto"`, picks the first signed-in CLI, otherwise pi if it has an API key. With neither, vigent starts nothing and says what to run (`claude auth login`, `codex login`) or export (`ANTHROPIC_API_KEY`) to connect one. **`:engine`** (`<Space>E`, or `E` on the dashboard) switches it while vigent runs: a menu lists auto, pi, Claude Code, Codex and OpenCode with which are ready, and `:engine claude` sets it directly. Agents already open keep their engine, since their conversation lives there; `:new <task>` starts one on the new engine. A CLI agent survives a restart too: vigent saves the CLI's conversation id and continues that conversation. Its earlier messages stay in the CLI's own history.
 
 ![:checkhealth with Claude Code signed in and Codex waiting for codex login](docs/screenshots/checkhealth.png)
 

@@ -79,20 +79,24 @@ export function piConnected(env: NodeJS.ProcessEnv = process.env): boolean {
 	return detectPi(env).connected;
 }
 
+const CLI_IDS = ["claude", "codex", "opencode"] as const;
+
 /**
- * The engine new agents use when none is given: pi if it has a key, else the
- * first signed-in CLI (Claude Code, Codex, OpenCode). Before the sign-in checks
- * finish, the first of those that is installed.
+ * The engine new agents use when none is given ("auto"): the first signed-in
+ * CLI (Claude Code, Codex, OpenCode), so your own login and settings are used;
+ * pi only when no CLI is ready and pi has a key. While the sign-in checks run,
+ * an installed CLI still wins over pi. With nothing ready, the first installed
+ * CLI, else pi (starting an agent then says how to connect one).
  */
 export function defaultEngine(engines: EngineInfo[] | undefined, env: NodeJS.ProcessEnv = process.env): EngineId {
 	if (engines) {
-		const ready = engines.find((e) => e.connected);
-		if (ready) return ready.id;
-		const installed = engines.find((e) => e.id !== "pi" && e.installed);
-		return installed?.id ?? "pi";
+		const cli = (ok: (e: EngineInfo) => boolean) => CLI_IDS.map((id) => engines.find((e) => e.id === id)).find((e) => e && ok(e))?.id;
+		const ready = cli((e) => e.connected) ?? cli((e) => e.installed && Boolean(e.checking));
+		if (ready) return ready;
+		if (engines.find((e) => e.id === "pi")?.connected) return "pi";
+		return cli((e) => e.installed) ?? "pi";
 	}
-	if (piConnected(env)) return "pi";
-	for (const id of ["claude", "codex", "opencode"] as const) if (onPath(ENGINE_BINS[id], env)) return id;
+	for (const id of CLI_IDS) if (onPath(ENGINE_BINS[id], env)) return id;
 	return "pi";
 }
 

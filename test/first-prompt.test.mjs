@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { agentNameFrom, App } from "../dist/app.js";
 import { DEFAULT_UI } from "../dist/config.js";
-import { quickEngines } from "../dist/engines.js";
+import { defaultEngine, quickEngines } from "../dist/engines.js";
 import { Keymap } from "../dist/keys.js";
 import { Session } from "../dist/session.js";
 import { BUILTIN_THEMES, Painter } from "../dist/theme.js";
@@ -68,6 +68,26 @@ test("a first prompt that can't start an agent says why and starts nothing", () 
 	app.handleInput("i");
 	app.handleInput("\r");
 	assert.equal(app.sessions.length, 0, "an empty prompt does nothing");
+});
+
+test("auto with no engine ready starts nothing and says how to connect one", () => {
+	const { app, made, type } = makeApp();
+	app.engines = [
+		{ id: "pi", name: "pi", installed: true, connected: false, detail: "built in · no API key found", connect: "export ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY)" },
+		{ id: "claude", name: "Claude Code", installed: true, connected: false, detail: "not signed in", connect: "claude auth login" },
+		{ id: "codex", name: "Codex", installed: true, connected: false, detail: "not signed in", connect: "codex login" },
+		{ id: "opencode", name: "OpenCode", installed: false, connected: false, detail: "not installed" },
+	];
+	app.defaultEngine = () => defaultEngine(app.engines);
+	app.handleInput("i");
+	type("hello");
+	app.handleInput("\r");
+	assert.equal(app.sessions.length, 0);
+	assert.match(app.message, /no engine is signed in: run claude auth login or codex login, or for pi export ANTHROPIC_API_KEY=… .* · :checkhealth/);
+
+	// an engine you picked yourself still starts; its CLI says what's wrong
+	assert.ok(app.startAgent("mine", { engine: "claude" }));
+	assert.equal(made.at(-1).engine, "claude");
 });
 
 test("agent names from prompts", () => {

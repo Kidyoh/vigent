@@ -361,7 +361,7 @@ theme = "default"
 # --- Engines ---------------------------------------------------------------
 # What runs new agents: "pi" (built in), or a coding-agent CLI you already
 # have installed and signed in: "claude" (Claude Code), "codex", "opencode".
-# "auto" picks pi if it has an API key, else the first signed-in CLI.
+# "auto" picks the first signed-in CLI (your own login), else pi if it has an API key.
 # Per agent: :new fix the race --engine codex.   Status: :checkhealth
 engine = "auto"
 
