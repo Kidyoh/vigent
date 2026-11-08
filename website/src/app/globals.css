@@ -1,0 +1,185 @@
+/*
+ * The site is one Neovim buffer on a near-black terminal: tabline on top,
+ * numbered lines, ~ past the end, statusline and command line at the bottom.
+ * Two buffers: vigent.txt (/) and the docs (/docs, with a help index on the side).
+ */
+:root {
+  --bg: #0a0a0b;        /* the terminal */
+  --panel: #0f0f11;     /* sidebar, code blocks */
+  --bar: #161618;       /* tabline, statusline */
+  --line: #1f1f23;      /* rules, borders */
+  --cursorline: #121214;
+  --fg: #d7d8dc;
+  --bright: #f4f4f6;
+  --dim: #7b7d85;
+  --faint: #34353b;
+  --cyan: #8cf8f7;      /* Neovim's own accents, used sparingly */
+  --blue: #a6dbff;
+  --green: #b3f6c0;
+  --yellow: #fce094;
+  --magenta: #ffcaff;
+  --red: #ffc0b9;
+  --mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 3em; background: var(--bg); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.65 var(--mono);
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bar); }
+a { color: inherit; }
+::selection { background: #2a3a4a; }
+:focus-visible { outline: 1px solid var(--cyan); outline-offset: 1px; }
+h1, h2, h3, p { margin: 0; font: inherit; }
+
+/* ---- tabline ---- */
+.tabline {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; align-items: stretch; overflow-x: auto;
+  background: var(--bar); border-bottom: 1px solid var(--line);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  scrollbar-width: none;
+}
+.tabline a { padding: 3px 14px; text-decoration: none; color: var(--dim); white-space: nowrap; }
+.tabline a:hover { color: var(--fg); }
+.tabline a.on { background: var(--bg); color: var(--bright); font-weight: 600; box-shadow: inset 0 1px 0 var(--cyan); }
+.tabline .fill { flex: 1; min-width: 1ch; }
+.tabline .ver { color: var(--faint); padding: 3px 14px; white-space: nowrap; }
+
+/* ---- the buffer ---- */
+.buffer {
+  counter-reset: ln;
+  padding-block: 14px 80px;
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.l {
+  display: grid; grid-template-columns: 4.5ch minmax(0, 1fr); column-gap: 2ch;
+  min-height: 1.65em; max-width: calc(80ch + 6.5ch); margin-inline: auto;
+}
+.l::before { counter-increment: ln; content: counter(ln); color: var(--faint); text-align: right; user-select: none; }
+.l:hover { background: var(--cursorline); }
+.l:hover::before { color: var(--yellow); }
+.l > * { min-width: 0; }
+.t { overflow-wrap: anywhere; }
+.tilde::before { counter-increment: none; content: "~"; text-align: left; color: var(--faint); padding-left: .5ch; }
+.tilde:hover { background: none; }
+
+/* help-file syntax */
+.tag { color: var(--cyan); }
+.link { color: var(--blue); text-decoration: none; }
+a.link:hover { text-decoration: underline; }
+.hl { color: var(--yellow); font-weight: 600; }
+.cm { color: var(--dim); }
+.kw { color: var(--magenta); }
+.str { color: var(--green); }
+.b { color: var(--bright); font-weight: 600; }
+.rule { color: var(--line); overflow: hidden; white-space: nowrap; user-select: none; }
+.row { display: flex; justify-content: space-between; gap: 2ch; flex-wrap: wrap; }
+.key { color: var(--cyan); display: inline-block; min-width: 14ch; }
+.indent { padding-left: 4ch; }
+
+/* ---- hero ---- */
+.logo {
+  margin: 0; color: var(--bright); font: 800 clamp(6.5px, 2vw, 14px)/1 var(--mono);
+  overflow: hidden; white-space: pre;
+}
+.eyebrow { color: var(--cyan); letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
+.lede { color: var(--bright); font-size: clamp(18px, 3vw, 26px); font-weight: 800; line-height: 1.25; text-wrap: balance; }
+.sub { font-size: clamp(14px, 1.7vw, 15.5px); max-width: 68ch; }
+
+.install { display: flex; align-items: center; gap: 1.5ch; flex-wrap: wrap; }
+.install code { color: var(--green); font-family: inherit; }
+.install code::before { content: "$ "; color: var(--dim); }
+.yank { font: inherit; color: var(--dim); background: none; border: 1px solid var(--faint); padding: 0 1ch; cursor: pointer; }
+.yank:hover, .yank:focus-visible { color: var(--bright); border-color: var(--bright); outline: none; }
+
+/* what the harness does, in facts people can check */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(22ch, 1fr)); border: 1px solid var(--line); margin-block: 6px; }
+.fact { padding: 10px 2ch; border-right: 1px solid var(--line); }
+.fact:last-child { border-right: 0; }
+.fact .n { color: var(--bright); font-weight: 800; font-size: 15px; }
+.fact .d { color: var(--dim); font-size: 12.5px; }
+@media (max-width: 640px) {
+  .fact { border-right: 0; border-bottom: 1px solid var(--line); }
+  .fact:last-child { border-bottom: 0; }
+}
+
+/* vigent at work, drawn in text */
+.screen { margin: 4px 0; border: 1px solid var(--line); background: var(--panel); overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+.screen pre { margin: 0; padding: 2px 0; white-space: pre; font: inherit; }
+.screen .sb { color: var(--bright); font-weight: 600; }
+.screen .st { background: var(--bar); display: block; }
+.screen .mode { background: var(--green); color: var(--bg); font-weight: 800; }
+
+.tree, pre.code {
+  margin: 0; white-space: pre; overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
+  padding: 8px 2ch; font: 13px/1.6 var(--mono); color: var(--fg);
+}
+pre.code { padding-block: 6px; }
+
+.swatches { display: flex; flex-wrap: wrap; gap: 6px 3ch; padding-block: 4px; }
+.sw { display: inline-flex; align-items: center; gap: 1ch; white-space: nowrap; }
+.sw i { display: inline-block; width: 1.4ch; height: 1em; }
+
+/* ---- docs: a help index on the side ---- */
+.docs { display: grid; grid-template-columns: 26ch minmax(0, 1fr); }
+.side {
+  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.9em); align-self: start;
+  max-height: calc(100vh - 5em); overflow-y: auto;
+  background: var(--panel); border-right: 1px solid var(--line);
+  padding: 12px 0 80px max(1ch, env(safe-area-inset-left, 0px));
+}
+.side .head { color: var(--dim); padding: 0 1.5ch 6px; }
+.side a { display: block; padding: 0 1.5ch; text-decoration: none; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side a::before { content: "  "; white-space: pre; color: var(--faint); }
+.side a:hover { color: var(--bright); background: var(--cursorline); }
+.side a.on { color: var(--bright); background: #1a1a1d; }
+.side a.on::before { content: "▸ "; color: var(--cyan); }
+.side .grp { color: var(--yellow); padding: 10px 1.5ch 2px; }
+.docs .buffer { padding-left: 1ch; }
+.docs .l { margin-inline: 0; }
+@media (max-width: 760px) {
+  .docs { grid-template-columns: minmax(0, 1fr); }
+  .side {
+    position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line);
+    padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+  }
+  .side > div { display: inline; }
+  .side .head, .side .grp { display: none; }
+  .side a { display: inline-block; padding: 0 .5ch; }
+  .side a::before { content: ""; }
+  .side a.on::before { content: "▸"; }
+}
+
+/* ---- statusline and command line ---- */
+.status {
+  position: fixed; inset: auto 0 0 0; z-index: 6; background: var(--bar); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.sl { display: flex; align-items: center; gap: 2ch; white-space: nowrap; overflow: hidden; }
+.sl .mode { background: var(--green); color: var(--bg); font-weight: 800; padding: 0 1ch; }
+.sl .mode.cmdmode { background: var(--yellow); }
+.sl .file { color: var(--bright); font-weight: 600; }
+.sl .fill { flex: 1; }
+.sl .pos { padding-right: 1ch; color: var(--dim); }
+.cmd { display: flex; align-items: center; min-height: 1.65em; padding-inline: 1ch; background: var(--bg); color: var(--dim); cursor: text; }
+.cmd .colon { color: var(--bright); }
+.cmd input { flex: 1; font: inherit; color: var(--bright); background: transparent; border: 0; outline: 0; padding: 0; }
+.cmd .msg.err { color: var(--red); }
+@media (max-width: 560px) {
+  .hide-sm { display: none; }
+  .key { min-width: 11ch; }
+}
