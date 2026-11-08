@@ -59,8 +59,8 @@ export default function HomePage() {
           </L>
           <L className="facts">
             <div className="fact">
-              <div className="n">4 engines</div>
-              <div className="d">Claude Code · Codex · OpenCode · pi</div>
+              <div className="n">your agents</div>
+              <div className="d">Claude Code · Codex · OpenCode, your logins</div>
             </div>
             <div className="fact">
               <div className="n">1 worktree each</div>
