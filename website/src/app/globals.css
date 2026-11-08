@@ -26,7 +26,7 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 3em; background: var(--bg); }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--tab-h) + 12px); scroll-padding-bottom: calc(var(--status-h) + 12px); background: var(--bg); }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
   margin: 0;
@@ -72,7 +72,9 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 }
 .l::before { counter-increment: ln; content: counter(ln); color: var(--faint); text-align: right; user-select: none; }
 .l:hover { background: var(--cursorline); }
-.l:hover::before { color: var(--yellow); }
+/* the cursor line: where j/k put you, and what yy copies */
+.l.cursor { background: #18181c; box-shadow: inset 2px 0 0 var(--cyan); }
+.l.cursor::before { color: var(--yellow); font-weight: 600; }
 .l > * { min-width: 0; }
 .t { overflow-wrap: anywhere; }
 .tilde::before { counter-increment: none; content: "~"; text-align: left; color: var(--faint); padding-left: .5ch; }
