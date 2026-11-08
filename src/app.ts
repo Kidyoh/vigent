@@ -39,6 +39,8 @@ import { setDetached } from "./agents.js";
 import { dropPatch, parseDiff, restorePatch } from "./hunks.js";
 import { HunkReview } from "./hunk-review.js";
 import { listFiles, MENTION, mentionable } from "./attach.js";
+import { allTemplates, fillTemplate, needsTask, type Template } from "./templates.js";
+import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
@@ -232,6 +234,8 @@ export class App implements Component {
 	/** model and effort for new agents, per engine ([engines.<id>] in config.toml, :model / :effort with no agent) */
 	newAgentModel: Partial<Record<EngineId, string>> = {};
 	newAgentEffort: Partial<Record<EngineId, string>> = {};
+	/** yours, from [templates] in config.toml (the built-in ones are added to these) */
+	templates: Record<string, Template> = {};
 	/** save an agent's settings (model, effort) so they survive a restart */
 	persist: (s: Session) => void = () => {};
 	/** `engine` from config.toml or :settings; "auto" lets defaultEngine() pick */
@@ -806,12 +810,24 @@ export class App implements Component {
 			case "new!": {
 				const modelFlag = /(?:^|\s)--model[= ](\S+)/.exec(arg);
 				const engineFlag = /(?:^|\s)(?:--engine|-e)[= ](\S+)/.exec(arg);
-				const name =
-					arg
-						.replace(/(?:^|\s)--model[= ]\S+/, "")
-						.replace(/(?:^|\s)(?:--engine|-e)[= ]\S+/, "")
-						.trim() || `agent-${this.sessions.length + 1}`;
-				this.startAgent(name, { worktree: cmd === "new", model: modelFlag?.[1], engine: engineFlag?.[1] });
+				const templateFlag = /(?:^|\s)(?:--template|-t)[= ](\S+)/.exec(arg);
+				const rest = arg
+					.replace(/(?:^|\s)--model[= ]\S+/, "")
+					.replace(/(?:^|\s)(?:--engine|-e)[= ]\S+/, "")
+					.replace(/(?:^|\s)(?:--template|-t)[= ]\S+/, "")
+					.trim();
+				if (templateFlag) {
+					this.startFromTemplate(templateFlag[1], rest, { worktree: cmd === "new" ? undefined : false, model: modelFlag?.[1], engine: engineFlag?.[1] });
+					return;
+				}
+				this.startAgent(rest || `agent-${this.sessions.length + 1}`, { worktree: cmd === "new", model: modelFlag?.[1], engine: engineFlag?.[1] });
+				return;
+			}
+			case "templates":
+			case "template":
+			case "tpl": {
+				if (!arg) this.openTemplatePicker();
+				else this.exec(`new -t ${arg}`);
 				return;
 			}
 			case "kill":
@@ -1172,6 +1188,62 @@ export class App implements Component {
 		return "chosenModel" in t.session ? (t.session as { chosenModel?: string }).chosenModel : t.session.model;
 	}
 
+	/** Every template: the built-in ones, then yours. */
+	allTemplates(): Template[] {
+		return allTemplates(this.templates);
+	}
+
+	/**
+	 * `:new -t <template> [task]`: start an agent with the template's engine,
+	 * model and effort, and send it the template's prompt. Flags you type
+	 * (--engine, --model) win over the template's.
+	 */
+	startFromTemplate(name: string, task: string, opts: { worktree?: boolean; model?: string; engine?: string } = {}): Session | undefined {
+		const all = this.allTemplates();
+		const t = all.find((x) => x.name === name);
+		if (!t) {
+			this.setMessage(`no template '${name}'${didYouMean(name, all.map((x) => x.name))} · :templates lists them`, "ErrorMsg");
+			return undefined;
+		}
+		if (needsTask(t) && !task && !(t.builtin && t.name === "review")) {
+			this.setMessage(`template '${t.name}' needs a task: :new -t ${t.name} <what>`, "ErrorMsg");
+			this.mode = "COMMAND";
+			this.cmdBuf = `new -t ${t.name} `;
+			return undefined;
+		}
+		const engine = opts.engine ?? t.engine;
+		const s = this.startAgent(task ? agentNameFrom(task) : t.name, {
+			worktree: opts.worktree ?? t.worktree,
+			model: opts.model ?? (engine === t.engine || !t.engine ? t.model : undefined),
+			engine,
+			effort: !opts.engine || opts.engine === t.engine ? t.effort : undefined,
+		});
+		if (!s) return undefined;
+		s.submit(fillTemplate(t, task));
+		this.setMessage(`${this.message} · template ${t.name}`, this.messageGroup);
+		return s;
+	}
+
+	/** `:templates`: pick one; the command line then takes the task. */
+	openTemplatePicker() {
+		const items = this.allTemplates().map((t) => {
+			const how = [t.engine ? ENGINE_NAMES[t.engine] : "", t.model ?? "", t.effort ?? ""].filter(Boolean).join(" · ");
+			const what = t.description ?? t.prompt.split("\n")[0];
+			return { value: t.name, note: `${what}${how ? ` (${how})` : ""}${t.builtin ? "" : " · yours"}` };
+		});
+		const place = { width: Math.min(96, this.terminal.columns - 4), anchor: "center" as const };
+		this.openChoices("Start an agent from a template", items, "", false, (name) => {
+			const t = this.allTemplates().find((x) => x.name === name);
+			if (t && !needsTask(t)) {
+				this.startFromTemplate(name, "");
+				return;
+			}
+			this.mode = "COMMAND";
+			this.cmdBuf = `new -t ${name} `;
+			this.setMessage(t?.builtin && t.name === "review" ? "what to focus on (optional), then Enter" : "what it's for, then Enter", "Comment");
+		}, {}, place);
+	}
+
 	/** where effort levels come from (replaced in tests) */
 	effortChoices: (engine: EngineId, model?: string) => Promise<PickerChoice[]> = (engine, model) => effortChoicesFor(engine, model);
 
@@ -1452,7 +1524,7 @@ export class App implements Component {
 	 * Start an agent (`:new`, or the first prompt typed with no agent yet).
 	 * Returns it, or undefined after showing why it couldn't start.
 	 */
-	startAgent(name: string, opts: { worktree?: boolean; model?: string; engine?: string } = {}): Session | undefined {
+	startAgent(name: string, opts: { worktree?: boolean; model?: string; engine?: string; effort?: string } = {}): Session | undefined {
 		const engine = opts.engine ?? this.defaultEngine();
 		if (!isEngineId(engine)) {
 			this.setMessage(`unknown engine '${engine}': pi, claude, codex or opencode`, "ErrorMsg");
@@ -1466,7 +1538,7 @@ export class App implements Component {
 		const withWorktree = opts.worktree !== false && this.workspace.config.enabled;
 		try {
 			const model = opts.model ?? this.newAgentModel[engine];
-			const effort = this.newAgentEffort[engine];
+			const effort = opts.effort ?? this.newAgentEffort[engine];
 			const s = this.newSession(name, { worktree: withWorktree, model, engine, ...(effort ? { effort } : {}) });
 			this.addSession(s);
 			const wt = s.worktree;
@@ -2321,6 +2393,9 @@ export class App implements Component {
 			case "c":
 				this.openHealth();
 				return true;
+			case "T":
+				this.openTemplatePicker();
+				return true;
 			case "?":
 				this.openHelp();
 				return true;
@@ -2630,7 +2705,9 @@ export class App implements Component {
 							.split("\0")
 							.map((part, i) => (!part ? "" : P.p(i % 2 ? "VigentMention" : "Keyword", part)))
 							.join("");
-						push(P.p("VigentUser", I.prompt) + P.s("Normal") + painted, I.prompt + stripAnsi(l), {
+						// the ❯ marks where a prompt starts; its other lines hang under it
+						const lead = i === 0 ? I.prompt : " ".repeat(visibleWidth(I.prompt));
+						push(P.p("VigentUser", lead) + P.s("Normal") + painted, lead + stripAnsi(l), {
 							item: n,
 							start: i === 0,
 						});
@@ -2810,6 +2887,7 @@ function describeRhs(rhs: Rhs[]): string {
 
 const EX_HELP: [string, string][] = [
 	[":new [task]", "start an agent in its own worktree"],
+	[":new -t <template> <task>", "start one from a template and send it (:templates picks)"],
 	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
 	[":new! [name]", "agent in this checkout, no worktree"],
 	[":diff  /  :diff split", "the agent's changes, unified / side by side (s switches)"],
@@ -2931,6 +3009,7 @@ const LOGO = [
 const DASHBOARD: [string, string, string, string][] = [
 	["i", "✎", "New agent: type a task, Enter", NERD.pencil],
 	["n", "+", "New agent by name", NERD.plus],
+	["T", "▤", "New agent from a template", NERD.fileText],
 	["t", "◐", "Theme", NERD.palette],
 	["s", "⚙", "Settings", NERD.gear],
 	["m", "◆", "Model", NERD.chip],

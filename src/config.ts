@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { EFFORTS } from "./choices.js";
+import { parseTemplates, type Template } from "./templates.js";
 import { ICON_SETS, type IconSet } from "./icons.js";
 import { type EngineId, isEngineId } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
@@ -67,6 +68,8 @@ export interface Config {
 	/** raw mappings per mode; validated when the keymap is built */
 	keys: Partial<Record<KeyMode, Record<string, unknown>>>;
 	worktree: WorktreeConfig;
+	/** [templates.<name>]: prompts to start agents with (:new -t <name>) */
+	templates: Record<string, Template>;
 }
 
 export const DEFAULT_UI: UiOptions = {
@@ -89,7 +92,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath()): { config: Config; warnings: string[] } {
-	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {} };
+	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {} };
 	const warnings: string[] = [];
 	if (!fs.existsSync(file)) return { config, warnings };
 
@@ -141,6 +144,9 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 					}
 					config.engines[id as EngineId] = e;
 				}
+				break;
+			case "templates":
+				config.templates = parseTemplates(value, warnings);
 				break;
 			case "keys":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -367,6 +373,17 @@ engine = "auto"
 # args = ["-c", 'sandbox_mode="workspace-write"']  # the default
 # [engines.opencode]
 # model = "anthropic/claude-sonnet-4-5"
+
+# --- Templates -------------------------------------------------------------
+# Prompts you start agents with often. :new -t fix <task> starts an agent and
+# sends the prompt, {task} replaced by what you typed; :templates picks one.
+# Built in: fix, test, review, explain (one of yours with the same name
+# replaces it). engine, model, effort and worktree are optional.
+# [templates.migrate]
+# description = "a database migration, with a rollback"
+# prompt = "Write a migration that {task}. Include the rollback, and test both."
+# engine = "claude"
+# effort = "high"
 
 # --- Leader ----------------------------------------------------------------
 # What <leader> means in [keys]. Vim's default is "\\".

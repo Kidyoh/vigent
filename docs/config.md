@@ -198,6 +198,31 @@ Both apply from the agent's next prompt, show in the winbar (`claude-fable-5 · 
 
 `claude -p` can't stop and ask before a tool runs, so with the default `acceptEdits` Claude Code may edit files in the worktree, and other tools follow the permission rules in your Claude Code settings. Use `"--permission-mode", "bypassPermissions"` only where the agent is sandboxed.
 
+## `[templates]`
+
+A template is a prompt you start agents with often. `:new -t <name> <task>` starts an agent on the template's engine, model and effort, and sends it the prompt with `{task}` replaced by your task. A prompt without `{task}` gets the task added after it. `:templates` (`Space T`, or `T` on the start screen) opens a picker. Pick a template there and type the task on the command line.
+
+```toml
+[templates.migrate]
+description = "a database migration, with a rollback"   # shown in the picker
+prompt = "Write a migration that {task}. Include the rollback, and test both."
+engine = "claude"     # optional: pi, claude, codex, opencode (default: the usual engine)
+model = "opus"        # optional
+effort = "high"       # optional; checked against the engine's levels
+worktree = true       # optional; false runs it in your checkout
+```
+
+Four are built in. A template of yours with the same name replaces it.
+
+| Template | What the agent is told |
+|---|---|
+| `fix` | find and fix the bug: reproduce it with a failing test first, make the smallest change, run the suite |
+| `test` | write tests in the project's style, run them, and report bugs instead of changing the code |
+| `review` | review this branch's work for bugs, missing tests and unclear code, without changing files; the task (optional) is what to focus on |
+| `explain` | explain how something works and where it lives, without changing files |
+
+What you type wins: `:new -t migrate --engine codex <task>` runs on Codex, without the template's model and effort.
+
 ## `[keys]`
 
 One table per mode: `[keys.normal]`, `[keys.insert]`, `[keys.visual]` and `[keys.command]` (the `:`, `/` and `?` command line). Entries placed directly under `[keys]` count as normal mode.
@@ -346,6 +371,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>u` | `session.tree` (like an undo tree, for the conversation) |
 | `<leader>s` | `:settings<CR>` (theme, look, engine, worktrees and keys in one float) |
 | `<leader>r` | `:review<CR>` (keep or drop the agent's changes hunk by hunk) |
+| `<leader>T` | `:templates<CR>` (start an agent from a template) |
 | `<leader>M` | `:model<CR>` (pick the focused agent's model) |
 | `<leader>e` | `:effort<CR>` (pick its reasoning effort) |
 | `<leader>E` | `:engine<CR>` (pick the engine new agents run on) |

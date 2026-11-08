@@ -386,9 +386,12 @@ export class ChoicePicker implements Component {
 			const rowBg = selected ? (P.attr("PmenuSel").bg ?? P.attr("Visual").bg) : bg;
 			const group = selected ? "PmenuSel" : "NormalFloat";
 			const marker = c.value === this.current ? `${I.current} ` : "  ";
-			const name = truncateToWidth(`${marker}${c.value}`, Math.max(10, inner - 4), "…");
+			// notes line up in a column after the longest name (up to a third of the width)
+			const nameW = Math.min(Math.floor(inner / 3), Math.max(...items.map((x) => visibleWidth(x.value))));
+			const padded = c.note ? c.value + " ".repeat(Math.max(0, nameW - visibleWidth(c.value))) : c.value;
+			const name = truncateToWidth(`${marker}${padded}`, Math.max(10, inner - 4), "…");
 			const note = c.note ? truncateToWidth(`  ${c.note}`, Math.max(0, inner - 2 - visibleWidth(name)), "…") : "";
-			lines.push(row(P.on(group, rowBg) + ` ${name}` + P.on("Comment", rowBg) + note + RESET, 1 + visibleWidth(name) + visibleWidth(note), rowBg));
+			lines.push(row(P.on(group, rowBg) + ` ${name}` + P.on(selected ? "PmenuSel" : "Comment", rowBg) + note + RESET, 1 + visibleWidth(name) + visibleWidth(note), rowBg));
 		}
 		const keys = this.searching ? "type to filter · Esc done" : "j/k move · Enter pick · q close";
 		const count = ` ${items.length ? this.index + 1 : 0}/${items.length} · ${keys} `;

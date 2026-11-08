@@ -55,6 +55,12 @@ Type `@` in a prompt and a file picker opens over it with the files in the agent
 
 ![the prompt with its mentions, and the reply](docs/screenshots/attach-sent.png)
 
+### Templates
+
+For prompts you use often, `:new -t fix the cart total is off by one` starts an agent and sends it the `fix` template with your task filled in. Four are built in: `fix` (failing test first, then the fix), `test`, `review` (changes nothing) and `explain`. `:templates` (`Space T`, or `T` on the start screen) picks one. Add your own under `[templates.<name>]` in config.toml, each with an optional engine, model and effort ([docs/config.md](docs/config.md#templates)).
+
+![:templates](docs/screenshots/templates.png)
+
 ## From source
 
 ```bash

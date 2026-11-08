@@ -329,6 +329,7 @@ async function main(): Promise<number | undefined> {
 		});
 
 	// model and effort for new agents, per engine, from [engines.<id>]
+	app.templates = config.templates;
 	for (const [id, opts] of Object.entries(config.engines)) {
 		if (opts?.model) app.newAgentModel[id as EngineId] = opts.model;
 		if (opts?.effort) app.newAgentEffort[id as EngineId] = opts.effort;
