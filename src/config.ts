@@ -15,6 +15,7 @@
  *   CursorLine = "guibg=#2a2f3a"
  *   VigentSidebar = { link = "NormalFloat" }
  */
+import { NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
@@ -40,6 +41,8 @@ export interface UiOptions {
 	transparent: boolean | "auto";
 	/** after <leader> (or any key that starts mappings), show what can follow, like which-key.nvim */
 	whichkey: boolean;
+	/** when an agent finishes while you look elsewhere: "auto" (bell, plus a desktop notification where the terminal shows one), "bell", "desktop", "off" */
+	notify: NotifyMode;
 }
 
 /** [engines.claude] / [engines.codex] / [engines.opencode] */
@@ -77,6 +80,7 @@ export const DEFAULT_UI: UiOptions = {
 	termguicolors: process.env.TERM_PROGRAM !== "Apple_Terminal",
 	transparent: "auto",
 	whichkey: true,
+	notify: "auto",
 };
 
 export function configPath(): string {
@@ -226,6 +230,7 @@ const ALIASES: Record<string, keyof UiOptions> = {
 	transp: "transparent",
 	whichkey: "whichkey",
 	wk: "whichkey",
+	notify: "notify",
 };
 
 /** Set one option from a config value. Returns an error message, or undefined on success. */
@@ -247,6 +252,10 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 			ui.sidebar_width = n;
 			return;
 		}
+		case "notify":
+			if (!NOTIFY_MODES.includes(value as NotifyMode)) return `'${name}' should be "auto", "bell", "desktop" or "off"`;
+			ui.notify = value as NotifyMode;
+			return;
 		case "icons":
 			if (!ICON_SETS.includes(value as IconSet)) return `'${name}' should be "unicode", "nerd" or "ascii"`;
 			ui.icons = value as IconSet;
@@ -374,6 +383,7 @@ timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 # termguicolors = false  # for terminals without 24-bit color: use the nearest of 256
 # transparent = true    # use the terminal's background with any theme ("auto": the theme decides)
 whichkey = true          # after <leader>, show what each next key does (like which-key.nvim)
+notify = "auto"          # an agent finished while you looked elsewhere: "auto", "bell", "desktop", "off"
 
 # --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
 # Applied on top of whichever theme is active. A value is a table, a vim

@@ -34,6 +34,7 @@ export const NERD = {
 	list: "", // nf-fa-list
 	caretRight: "", // nf-fa-caret_right
 	caretDown: "", // nf-fa-caret_down
+	bell: "", // nf-fa-bell
 } as const;
 
 /** An icon for a tool call, by the tool's name (Claude Code, Codex, OpenCode and pi names). */

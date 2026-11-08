@@ -93,6 +93,7 @@ Each option can also be changed while vigent runs, with vim's `:set` syntax: `:s
 | `icons` | `"unicode"` | `"ascii"` swaps every glyph for plain ASCII |
 | `timeoutlen` | `1000` | ms to wait for the next key of a mapping (vim's `'timeoutlen'`, alias `tm`) |
 | `termguicolors` | `true` (`false` in macOS Terminal.app) | 24-bit color, as in vim. Turn it off on terminals without it, and every color is mapped to the nearest of the 256 standard ones (alias `tgc`) |
+| `notify` | `"auto"` | when an agent finishes, fails or needs you while you're looking at another one (or another window): `"auto"` rings the bell and, in terminals that show one (iTerm2, WezTerm, Ghostty, kitty; also inside tmux), sends a desktop notification. `"bell"`, `"desktop"` or `"off"` choose. The agent gets a mark in the sidebar until you open it |
 | `whichkey` | `true` | after `<leader>` (or any key that starts mappings), pause and a panel lists what each next key does, like which-key.nvim. `Esc` closes it (alias `wk`) |
 | `transparent` | `"auto"` | draw on the terminal's own background, so its blur, opacity or wallpaper shows through. `"auto"` does what the theme says (`lazyvim` is transparent); `true` or `false` forces it for every theme. Live: `:set transparent`, `:set notransparent`, `:set transparent!`, and `:set transparent&` back to `"auto"` |
 

@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
 import { type AgentMeta, loadAgentMeta, restorableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
+import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
 import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines } from "./engines.js";
@@ -397,6 +398,7 @@ async function main(): Promise<number | undefined> {
 			s.abort();
 			s.dispose();
 		}
+		terminal.write(FOCUS_REPORTING_OFF);
 		tui.stop();
 		process.exit(0);
 	};
@@ -437,6 +439,8 @@ async function main(): Promise<number | undefined> {
 	tui.setFocus(app);
 	terminal.setTitle("vigent");
 	tui.start();
+	// focus reports let a notification skip the agent you're looking at
+	terminal.write(FOCUS_REPORTING_ON);
 	if (warnings.length > 0) app.notify(warnings.join(" · "));
 	if (isFollow(themeName)) {
 		const editor = themeName;

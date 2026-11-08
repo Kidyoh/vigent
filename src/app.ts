@@ -35,6 +35,7 @@ import {
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
+import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
 import { defaultEngine as defaultEngineFor, ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
@@ -94,6 +95,8 @@ interface Icons {
 	queued: string;
 	open_agent: string;
 	here: string;
+	/** an agent finished (or failed) while you looked elsewhere */
+	unread: string;
 	ok: string;
 	warn: string;
 	off: string;
@@ -117,6 +120,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		queued: "⧗",
 		open_agent: "▸",
 		here: "●",
+		unread: "◆",
 		ok: "●",
 		warn: "◐",
 		off: "○",
@@ -138,6 +142,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		queued: NERD.clock,
 		open_agent: "▸",
 		here: NERD.circle,
+		unread: NERD.bell,
 		ok: NERD.check,
 		warn: NERD.warning,
 		off: NERD.circleO,
@@ -159,6 +164,7 @@ const ICONS: Record<UiOptions["icons"], Icons> = {
 		queued: "+",
 		open_agent: ">",
 		here: "*",
+		unread: "!",
 		ok: "+",
 		warn: "~",
 		off: "-",
@@ -280,7 +286,9 @@ export class App implements Component {
 
 	addSession(s: Session, focus = true) {
 		this.sessions.push(s);
+		this.lastState.set(s, s.state);
 		s.onChange(() => {
+			this.watchState(s);
 			this.syncSpinner();
 			this.tui.requestRender();
 		});
@@ -300,8 +308,33 @@ export class App implements Component {
 		this.tui.requestRender();
 	}
 
+	/** agents that finished, failed or wait for you while you looked elsewhere */
+	unread = new Set<Session>();
+	/** the terminal window has focus (from focus reporting; assumed until told otherwise) */
+	terminalFocused = true;
+	private lastState = new WeakMap<Session, SessionState>();
+	/** where notifications go (replaced in tests) */
+	alert: (bytes: string) => void = (bytes) => this.terminal.write(bytes);
+
+	/** An agent stopped running: if you're not looking at it, say so (bell, desktop notification, sidebar mark). */
+	private watchState(s: Session) {
+		const before = this.lastState.get(s);
+		this.lastState.set(s, s.state);
+		if (before !== "running" || s.state === "running" || s.state === "paused") return;
+		const visible = s === this.focusedSession && this.terminalFocused;
+		if (visible) return;
+		this.unread.add(s);
+		const n = this.sessions.indexOf(s) + 1;
+		const what = s.state === "error" ? "failed" : s.state === "waiting" ? "needs you" : "finished";
+		if (s !== this.focusedSession) {
+			this.setMessage(`'${s.name}' ${what} · ${n <= 9 ? `${n} or ` : ""}]s to open it`, s.state === "error" ? "ErrorMsg" : "ModeMsg");
+		}
+		this.alert(alertSequence(`vigent: '${s.name}' ${what}`, this.ui.notify));
+	}
+
 	private focusSession(idx: number) {
 		if (idx < 0 || idx >= this.sessions.length || idx === this.focusIdx) return;
+		this.unread.delete(this.sessions[idx]);
 		this.altIdx = this.focusIdx;
 		this.focusIdx = idx;
 		this.scrollOffset = 0;
@@ -374,6 +407,13 @@ export class App implements Component {
 			this.confirm = undefined;
 			this.message = "";
 			if (data === "y" || data === "Y") onYes();
+			this.tui.requestRender();
+			return;
+		}
+		// focus reporting: the terminal window gained or lost focus
+		if (data === "\x1b[I" || data === "\x1b[O") {
+			this.terminalFocused = data === "\x1b[I";
+			if (this.terminalFocused && this.focusedSession) this.unread.delete(this.focusedSession);
 			this.tui.requestRender();
 			return;
 		}
@@ -1232,6 +1272,13 @@ export class App implements Component {
 				hint: "riftri: copy-on-write worktrees that share unchanged files (riftri.dev)",
 			},
 			{
+				section: "Agents",
+				label: "Notify when an agent finishes",
+				value: () => ({ auto: "auto (bell, and a desktop notification where the terminal shows one)", bell: "bell", desktop: "desktop notification", off: "off" })[ui.notify],
+				change: (d) => (ui.notify = cycle(NOTIFY_MODES, ui.notify, d) as NotifyMode),
+				hint: "when an agent finishes, fails or needs you while you're looking at another one (or another window)",
+			},
+			{
 				section: "Keys",
 				label: "which-key popup",
 				value: () => onOff(ui.whichkey),
@@ -1319,7 +1366,7 @@ export class App implements Component {
 			set(undefined, "theme", this.painter.theme.name);
 			set(undefined, "engine", this.preferredEngine);
 			set(undefined, "leader", this.keymap.leader);
-			for (const k of ["sidebar", "sidebar_width", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey"] as const) set("ui", k, ui[k]);
+			for (const k of ["sidebar", "sidebar_width", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey", "notify"] as const) set("ui", k, ui[k]);
 			set("worktree", "enabled", this.workspace.config.enabled);
 			set("worktree", "backend", this.workspace.config.backend ?? "auto");
 			for (const [lhs, rhs] of this.keyChanges) set("keys.normal", lhs, rhs);
@@ -1519,6 +1566,7 @@ export class App implements Component {
 				["Comment", ` ${truncateToWidth(s.worktree ? `${I.worktree}${s.worktree.branch}` : s.model, 34, "…")}`],
 				...stat,
 				["Comment", s.queue.length ? `  ${I.queued}${s.queue.length}` : ""],
+				[s.state === "error" ? "ErrorMsg" : "WarningMsg", this.unread.has(s) ? `  ${I.unread} new` : ""],
 			]);
 			lines.push([
 				["NormalFloat", "      "],
@@ -2323,6 +2371,7 @@ export class App implements Component {
 						[glyphGroup, `${glyph} `],
 						[focused ? "Title" : "VigentSidebar", s.name],
 						["Comment", s.queue.length > 0 ? ` ${I.queued}${s.queue.length}` : ""],
+						[s.state === "error" ? "ErrorMsg" : "WarningMsg", this.unread.has(s) ? ` ${I.unread}` : ""],
 					],
 					rowBg,
 				),
