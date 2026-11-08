@@ -19,6 +19,8 @@
   --yellow: #fce094;
   --magenta: #ffcaff;
   --red: #ffc0b9;
+  --tab-h: 30px;        /* tabline height */
+  --status-h: 48px;     /* statusline + command line */
   --mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
@@ -49,12 +51,13 @@ h1, h2, h3, p { margin: 0; font: inherit; }
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   scrollbar-width: none;
+  height: var(--tab-h);
 }
-.tabline a { padding: 3px 14px; text-decoration: none; color: var(--dim); white-space: nowrap; }
+.tabline a { display: flex; align-items: center; padding: 0 14px; text-decoration: none; color: var(--dim); white-space: nowrap; }
 .tabline a:hover { color: var(--fg); }
 .tabline a.on { background: var(--bg); color: var(--bright); font-weight: 600; box-shadow: inset 0 1px 0 var(--cyan); }
 .tabline .fill { flex: 1; min-width: 1ch; }
-.tabline .ver { color: var(--faint); padding: 3px 14px; white-space: nowrap; }
+.tabline .ver { display: flex; align-items: center; color: var(--faint); padding: 0 14px; white-space: nowrap; }
 
 /* ---- the buffer ---- */
 .buffer {
@@ -140,10 +143,13 @@ pre.code { padding-block: 6px; }
 /* ---- docs: a help index on the side ---- */
 .docs { display: grid; grid-template-columns: 26ch minmax(0, 1fr); }
 .side {
-  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.9em); align-self: start;
-  max-height: calc(100vh - 5em); overflow-y: auto;
+  /* from the tabline to the bottom of the window; the statusline covers its foot */
+  --side-top: calc(env(safe-area-inset-top, 0px) + var(--tab-h));
+  position: sticky; top: var(--side-top); align-self: start;
+  height: calc(100vh - var(--side-top)); height: calc(100dvh - var(--side-top));
+  overflow-y: auto; overscroll-behavior: contain;
   background: var(--panel); border-right: 1px solid var(--line);
-  padding: 12px 0 80px max(1ch, env(safe-area-inset-left, 0px));
+  padding: 12px 0 calc(var(--status-h) + 16px + env(safe-area-inset-bottom, 0px)) max(1ch, env(safe-area-inset-left, 0px));
 }
 .side .head { color: var(--dim); padding: 0 1.5ch 6px; }
 .side a { display: block; padding: 0 1.5ch; text-decoration: none; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -157,7 +163,7 @@ pre.code { padding-block: 6px; }
 @media (max-width: 760px) {
   .docs { grid-template-columns: minmax(0, 1fr); }
   .side {
-    position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line);
+    position: static; height: auto; max-height: none; border-right: 0; border-bottom: 1px solid var(--line);
     padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
   }
   .side > div { display: inline; }
