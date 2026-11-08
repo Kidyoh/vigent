@@ -487,6 +487,8 @@ test("markdown: text after **bold** or `code` keeps the theme's text color", () 
 	assert.ok(afterBold.indexOf(P.s("Normal")) < afterBold.indexOf("after") && afterBold.includes(P.s("Normal")), "Normal comes back before 'after'");
 });
 
+const plainLast = (app) => app.render(120).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+
 test("<Space>e puts the cursor in the sessions sidebar: j/k pick an agent, Enter goes back", () => {
 	const sessions = ["fix flaky test", "auth refactor", "docs pass"].map((name) => {
 		const s = sessionWithReply();
@@ -497,7 +499,7 @@ test("<Space>e puts the cursor in the sessions sidebar: j/k pick an agent, Enter
 	app.focusSession(0);
 	type(" ", "e");
 	assert.equal(app.sidebarFocused, true);
-	assert.match(app.message, /-- SESSIONS -- 1 fix flaky test · j\/k move · Enter open · Esc back/);
+	assert.match(app.message, /-- SESSIONS -- 1 fix flaky test · j\/k move · Enter open · a new · dd kill · Esc back/);
 	assert.match(screen(), /▸ SESSIONS/, "the sidebar title shows it has the cursor");
 	type("j");
 	assert.equal(app.focusedSession.name, "auth refactor", "j moves down and shows that agent");
@@ -521,4 +523,46 @@ test("<Space>e puts the cursor in the sessions sidebar: j/k pick an agent, Enter
 	type(" ", "e", ":");
 	assert.equal(app.sidebarFocused, false);
 	assert.equal(app.mode, "COMMAND", "other keys work as usual, back in the transcript");
+});
+
+test("neovim's window keys move between the sidebar and the transcript; dd and a act from the sidebar", () => {
+	const sessions = ["fix flaky test", "auth refactor", "docs pass"].map((name) => {
+		const s = sessionWithReply();
+		s.name = name;
+		return s;
+	});
+	const { app, type } = makeApp({ sessions });
+	app.focusSession(0);
+	let repainted = 0;
+	const repaint = app.repaint.bind(app);
+	app.repaint = () => (repainted++, repaint());
+
+	type("\x17", "h"); // <C-w>h
+	assert.equal(app.sidebarFocused, true, "<C-w>h moves into the sidebar");
+	type("\x17", "l"); // <C-w>l
+	assert.equal(app.sidebarFocused, false, "<C-w>l moves back to the transcript");
+	type("\x08"); // <C-h>
+	assert.equal(app.sidebarFocused, true, "<C-h> too, like LazyVim");
+	type("\x08");
+	assert.equal(app.sidebarFocused, true, "<C-h> in the sidebar stays there");
+	type("\x0c"); // <C-l>
+	assert.equal(app.sidebarFocused, false, "<C-l> goes back");
+	const before = repainted;
+	type("\x0c");
+	assert.equal(repainted, before + 1, "in the transcript, <C-l> still redraws");
+	type("\x17", "w");
+	assert.equal(app.sidebarFocused, true, "<C-w>w toggles");
+	type("\x17", "w");
+	assert.equal(app.sidebarFocused, false);
+
+	// dd kills the agent under the cursor (asks first); a starts a new one
+	type(" ", "e", "j", "d", "d");
+	assert.match(plainLast(app), /Kill 'auth refactor'.*\[y\/N\]/, "dd asks before killing the agent under the cursor");
+	type("n");
+	assert.equal(app.sessions.length, 3, "n keeps it");
+	assert.equal(app.sidebarFocused, true, "still in the sidebar");
+	type("a");
+	assert.equal(app.sidebarFocused, false);
+	assert.equal(app.mode, "COMMAND");
+	assert.equal(app.cmdBuf, "new ", "a: name the new agent on the command line");
 });

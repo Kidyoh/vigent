@@ -85,7 +85,8 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 | NORMAL | `i` / `a` / `o` | Enter INSERT and type a prompt for the focused agent (it waits in a queue if the agent is busy). With no agent yet, the prompt starts one |
 | NORMAL | `j` `k` `gg` `G` `Ctrl-d` `Ctrl-u` `{` `}` | Scroll the transcript, or jump between messages |
 | NORMAL | `]s` `[s` `1`–`9` `Ctrl-^` | Switch agents |
-| NORMAL | `<Space>e` | Move the cursor into the SESSIONS sidebar, like neo-tree: `j`/`k` (or `gg`/`G`, `1`–`9`) pick an agent and show it, Enter / Esc / `l` / `<Space>e` go back to the transcript |
+| NORMAL | `<Space>e` | Move the cursor into the SESSIONS sidebar, like neo-tree: `j`/`k` (or `gg`/`G`, `1`–`9`) pick an agent and show it, `a` starts a new one, `dd` kills the one under the cursor (asks first), Enter / Esc / `l` / `<Space>e` go back to the transcript |
+| NORMAL | `<C-w>h` `<C-w>l` `<C-w>w` | Move between the sidebar and the transcript like neovim windows; `<C-h>` / `<C-l>` work too, LazyVim-style (`<C-l>` still redraws when you're already in the transcript) |
 | NORMAL | `za` `zR` `zM` | Toggle, open or close tool-output folds |
 | NORMAL | `/pattern` `?pattern` `n` `N` | Search the transcript like Neovim: it jumps to the first match as you type and highlights every match, `n`/`N` go to the next/previous one with `[3/7]` in the command line, `Esc` or `:noh` clears the highlight. Smartcase: a capital makes it case-sensitive |
 | NORMAL | `V` / `v` | VISUAL: select lines with `j` `k`, `ib` for a code block, `y` to copy |

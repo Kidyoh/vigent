@@ -646,6 +646,12 @@ export class App implements Component {
 				return this.focusSession(this.altIdx);
 			case "sidebar.focus":
 				return this.toggleSidebarFocus();
+			case "window.left":
+				if (!this.sidebarFocused) this.toggleSidebarFocus();
+				return;
+			case "window.right":
+				// already in the transcript: <C-l> keeps vim's meaning, redraw
+				return this.sidebarFocused ? this.leaveSidebar() : this.repaint();
 			case "session.goto": {
 				const n = Number(arg);
 				if (!Number.isInteger(n) || n < 1) this.setMessage(`session.goto needs a number, got '${arg ?? ""}'`, "ErrorMsg");
@@ -2066,6 +2072,7 @@ export class App implements Component {
 		s.abort();
 		s.dispose();
 		this.sessions.splice(this.focusIdx, 1);
+		if (this.sessions.length === 0) this.sidebarFocused = false;
 		this.server?.sync();
 		this.focusIdx = Math.max(0, Math.min(this.focusIdx, this.sessions.length - 1));
 		const wt = s.worktree;
@@ -2882,7 +2889,7 @@ export class App implements Component {
 
 	private sidebarHint() {
 		const s = this.focusedSession;
-		this.setMessage(`-- SESSIONS -- ${s ? `${this.focusIdx + 1} ${s.name} · ` : ""}j/k move · Enter open · Esc back`, "ModeMsg");
+		this.setMessage(`-- SESSIONS -- ${s ? `${this.focusIdx + 1} ${s.name} · ` : ""}j/k move · Enter open · a new · dd kill · Esc back`, "ModeMsg");
 	}
 
 	/** A key while the sidebar has the cursor. Keys it doesn't use go back to the transcript and run there. */
@@ -2897,6 +2904,32 @@ export class App implements Component {
 		};
 		if (pending === this.keymap.leader && key === "e") {
 			this.leaveSidebar();
+			return true;
+		}
+		// neovim's window keys: <C-w>l / <C-w>w go back, <C-w>h stays
+		if (pending === "<C-w>") {
+			if (key === "l" || key === "w" || key === "p" || key === "<C-w>") this.leaveSidebar();
+			return true;
+		}
+		if (key === "<C-w>") {
+			this.sidebarPending = key;
+			return true;
+		}
+		if (key === "<C-l>") {
+			this.leaveSidebar();
+			return true;
+		}
+		if (key === "<C-h>" || key === "<BS>") return true;
+		// act on the agent under the cursor, like neo-tree's file actions
+		if (key === "d") {
+			if (pending === "d") this.runAction("session.kill");
+			else this.sidebarPending = "d";
+			return true;
+		}
+		if (key === "a") {
+			this.leaveSidebar();
+			this.mode = "COMMAND";
+			this.cmdBuf = "new ";
 			return true;
 		}
 		switch (key) {

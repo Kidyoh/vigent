@@ -44,6 +44,7 @@ const QUICK_KEYS: [string, string][] = [
   [":diff", "see its changes"],
   [":merge", "land it, squashed"],
   [":pr", "open a pull request"],
+  ["<Space>e", "the sessions sidebar"],
   ["<Space>", "which-key"],
   ["?", "every key"],
 ];
@@ -222,13 +223,19 @@ export default function DocsPage() {
           <KeyRow k="j k gg G">scroll the transcript</KeyRow>
           <KeyRow k="{  }">jump between messages</KeyRow>
           <KeyRow k="]s [s 1–9">switch agents</KeyRow>
+          <KeyRow k="<Space>e">
+            focus the sessions sidebar, like neo-tree: <K>j</K>/<K>k</K> pick, <K>a</K> new, <K>dd</K> kill, <K>Esc</K> back
+          </KeyRow>
+          <KeyRow k="<C-w>h <C-w>l">
+            sidebar / transcript, like neovim windows (also <K>{"<C-h>"}</K> <K>{"<C-l>"}</K>)
+          </KeyRow>
           <KeyRow k="za zR zM">fold tool output</KeyRow>
           <KeyRow k="V  v">
             select lines, <K>y</K> to copy
           </KeyRow>
           <KeyRow k="yy  yib">copy the last reply / a code block</KeyRow>
           <KeyRow k="dd">kill the focused agent (asks first)</KeyRow>
-          <KeyRow k="<Space>…">n d m p q t D u s E M e (pause to see them)</KeyRow>
+          <KeyRow k="<Space>…">n d m p q t D u s r T E M R (pause to see them)</KeyRow>
           <L>Copies go through the terminal (OSC 52), so they work over SSH.</L>
           <L />
 

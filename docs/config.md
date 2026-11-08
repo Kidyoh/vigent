@@ -346,6 +346,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `app.help` | show every key |
 | `app.dashboard` | all agents at a glance (`:dash`) |
 | `app.redraw` | redraw the screen |
+| `window.left` | move to the sessions sidebar (like `<C-w>h`) |
+| `window.right` | move back to the transcript (like `<C-w>l`); there, redraw the screen |
 | `app.quit` | quit vigent; refuses while agents are running, like vim's `:q` |
 | `app.quit_force` | quit even with agents running (`:q!`) |
 | `app.quit_hint` | explain how to quit |
@@ -375,7 +377,11 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `dd` | `session.kill` (asks first) |
 | `<Esc>` | `search.clear` (also `:noh`) |
 | `<C-c>` | `session.abort` |
-| `<C-l>` | `app.redraw` |
+| `<C-l>` | `window.right` (from the sidebar back to the transcript; in the transcript, redraw) |
+| `<C-h>` `<BS>` | `window.left` (most terminals send `<C-h>` as Backspace) |
+| `<C-w>h` | `window.left` |
+| `<C-w>l` | `window.right` |
+| `<C-w>w` | `sidebar.focus` (toggle) |
 | `ZZ` / `ZQ` | `app.quit` / `app.quit_force` |
 | `q` | `app.quit_hint` |
 | `<leader>n` | `:new ` (type the task) |
@@ -390,7 +396,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>r` | `:review<CR>` (keep or drop the agent's changes hunk by hunk) |
 | `<leader>T` | `:templates<CR>` (start an agent from a template) |
 | `<leader>M` | `:model<CR>` (pick the focused agent's model) |
-| `<leader>e` | `sidebar.focus` (move the cursor into the sessions sidebar: `j`/`k` pick an agent, Enter or Esc go back) |
+| `<leader>e` | `sidebar.focus` (move the cursor into the sessions sidebar: `j`/`k` pick an agent, `a` new agent, `dd` kill it, Enter or Esc go back) |
 | `<leader>R` | `:effort<CR>` (pick its reasoning effort) |
 | `<leader>E` | `:engine<CR>` (pick the engine new agents run on) |
 
