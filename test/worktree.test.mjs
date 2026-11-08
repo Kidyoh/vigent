@@ -254,7 +254,8 @@ test("the app: :new, :worktrees, :worktree remove, :kill, :kill!, :new!", async 
 
 	ex("worktrees");
 	assert.equal(overlays.length, 1);
-	const listing = overlays[0].render(96).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+	// wide enough for a long temp path (macOS: /var/folders/…), which a narrow list cuts off
+	const listing = overlays[0].render(200).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 	assert.match(listing, /● fix\/cart-badge\s+fix cart badge\s+\S*shop-worktrees/);
 
 	ex("worktree remove fix/cart-badge");

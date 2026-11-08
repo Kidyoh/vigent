@@ -152,7 +152,8 @@ test(":pi lists what pi loaded; Enter on a command, skill or prompt starts a pro
 	try {
 		[":", "p", "i", "\r"].forEach((k) => app.handleInput(k));
 		const float = overlays.at(-1);
-		const screen = plain(float.render(96));
+		// wide enough for a long temp path (macOS: /var/folders/…), which a narrow float cuts off
+		const screen = plain(float.render(200));
 		assert.match(screen, /pi · ship it/);
 		assert.match(screen, /Extensions {2}3/);
 		assert.match(screen, /permission-gate\.ts/);

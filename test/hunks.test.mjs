@@ -100,8 +100,9 @@ test(":review: drop a hunk, drop a new file, undo, and :merge's commit leaves ou
 	await until(() => plain(review.render(110)).includes("dropped notes.md"));
 	assert.ok(!fs.existsSync(path.join(wt, "notes.md")));
 	review.handleInput("u");
-	await until(() => fs.existsSync(path.join(wt, "notes.md")));
-	assert.match(plain(review.render(110)), /restored notes\.md/);
+	// the message comes after the diff reloads, which is after git writes the file back
+	await until(() => plain(review.render(110)).includes("restored notes.md"));
+	assert.ok(fs.existsSync(path.join(wt, "notes.md")));
 
 	// what :merge would take: commit what's left in the worktree
 	await commitPending({ branch: "fix/cart", path: wt, base: "main" });

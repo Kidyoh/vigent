@@ -20,7 +20,8 @@ const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vigent-e2e-")
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const fixture = path.join(import.meta.dirname, "fixtures", "claude-tool.jsonl");
 const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-const gitDir = path.dirname(execFileSync(process.platform === "win32" ? "where" : "which", ["git"], { encoding: "utf8" }).split("\n")[0].trim());
+// git's own binary, not the first `git` on PATH: a wrapper there (a git shim) can't find git once PATH is cut down to sysbin
+const gitDir = process.platform === "win32" ? path.dirname(execFileSync("where", ["git"], { encoding: "utf8" }).split("\n")[0].trim()) : execFileSync("git", ["--exec-path"], { encoding: "utf8" }).trim();
 
 // a stand-in `claude`: version, sign-in status, and a run that edits a file and streams Claude Code's JSON
 const bin = path.join(tmp, "bin");

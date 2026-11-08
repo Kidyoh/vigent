@@ -94,7 +94,8 @@ test(":settings changes the look, the engine and the keys live, and w saves them
 	assert.equal(app.keymap.lookup("normal", ["x"]).exact, undefined);
 
 	s.handleInput("w");
-	assert.match(plain(s.render(96)), /saved to .*config\.toml/);
+	// wide enough for a long temp path (macOS: /var/folders/…), which a narrow float cuts off
+	assert.match(plain(s.render(200)), /saved to .*config\.toml/);
 	const { config, warnings } = loadConfig(configPath());
 	assert.deepEqual(warnings, []);
 	assert.equal(config.ui.transparent, true);
