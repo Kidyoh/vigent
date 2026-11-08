@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { CLI_ADAPTERS, CliSession } from "../dist/cli-engines.js";
-import { defaultEngine, detectEngines, onPath } from "../dist/engines.js";
+import { defaultEngine, detectEngines, engineEnv, onPath } from "../dist/engines.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vigent-engines-"));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -309,4 +309,44 @@ model = 5
 	assert.deepEqual(warnings, ["config [engines.codex]: 'model' should be a string", "config: unknown engine [engines.gemini] (pi, claude, codex or opencode)"]);
 	fs.writeFileSync(file, `engine = "gpt"\n`);
 	assert.match(loadConfig(file).warnings[0], /'engine' should be "auto", "pi"/);
+});
+
+test("Claude Code with a Claude account and ANTHROPIC_API_KEY: vigent leaves the key out, so the account is used", async () => {
+	const dir = path.join(tmp, "claude-key-bin");
+	const log = path.join(tmp, "claude-key.log");
+	// like the real one: the key in the environment wins over the account in auth status, and in runs
+	const claude = fakeBin(dir, "claude", `
+const a = process.argv.slice(2).join(" ");
+const key = process.env.ANTHROPIC_API_KEY;
+if (a === "--version") console.log("2.1.319 (Claude Code)");
+else if (a === "auth status --json") console.log(JSON.stringify(key ? { loggedIn: true, authMethod: "oauth_token", apiKeySource: "ANTHROPIC_API_KEY" } : ${"process.env.NO_ACCOUNT ? { loggedIn: false } : { loggedIn: true, authMethod: \"oauth_token\" }"}));
+else {
+  require("fs").appendFileSync(${JSON.stringify(log)}, (key ? "with-key" : "no-key") + "\\n");
+  const say = (o) => console.log(JSON.stringify(o));
+  say({ type: "system", subtype: "init", session_id: "s1", model: "m" });
+  say({ type: "assistant", message: { content: [{ type: "text", text: key ? "API Error: 400 not scoped to a workspace" : "hello" }] } });
+  say({ type: "result", subtype: "success", is_error: false, session_id: "s1", usage: {} });
+}`);
+	const base = { PATH: `${dir}${path.delimiter}${path.dirname(process.execPath)}`, HOME: path.join(tmp, "home") };
+
+	const both = (await detectEngines({ ...base, ANTHROPIC_API_KEY: "sk-ant-unscoped" }, 5000)).find((e) => e.id === "claude");
+	assert.equal(both.detail, "signed in (Claude account; ANTHROPIC_API_KEY left out)");
+	assert.deepEqual(both.dropEnv, ["ANTHROPIC_API_KEY"]);
+	const env = engineEnv(both, { ...base, ANTHROPIC_API_KEY: "sk-ant-unscoped" });
+	assert.equal(env.ANTHROPIC_API_KEY, undefined);
+	assert.equal(env.PATH, base.PATH, "everything else stays");
+
+	// the agent's runs get that environment, asked at each run
+	const s = new CliSession("hi", "claude", undefined, { cwd: tmp, bin: claude, env: () => env });
+	s.send("hello");
+	await settle(s);
+	assert.equal(fs.readFileSync(log, "utf8").trim(), "no-key");
+	assert.ok(s.items.some((i) => i.kind === "agent" && i.text === "hello"));
+	s.dispose();
+
+	// only a key, no account: the key is how it signs in, so it stays
+	const keyOnly = (await detectEngines({ ...base, ANTHROPIC_API_KEY: "sk-ant-x", NO_ACCOUNT: "1" }, 5000)).find((e) => e.id === "claude");
+	assert.equal(keyOnly.detail, "signed in (API key)");
+	assert.equal(keyOnly.dropEnv, undefined);
+	assert.equal(engineEnv(keyOnly, { ANTHROPIC_API_KEY: "sk-ant-x" }).ANTHROPIC_API_KEY, "sk-ant-x");
 });

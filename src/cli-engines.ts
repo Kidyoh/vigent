@@ -308,7 +308,8 @@ export interface CliSessionOptions {
 	effort?: string;
 	/** the CLI to run; default: the engine's usual command on PATH */
 	bin?: string;
-	env?: NodeJS.ProcessEnv;
+	/** the CLI's environment; a function is asked at each run (what detection learns can change it) */
+	env?: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
 	/** called when the CLI reports its conversation id, so it can be saved */
 	onResumeId?: (id: string) => void;
 }
@@ -377,7 +378,7 @@ export class CliSession extends Session {
 		try {
 			child = spawn(this.opts.bin ?? this.adapter.bin, args, {
 				cwd: this.cwd,
-				env: this.opts.env ?? process.env,
+				env: typeof this.opts.env === "function" ? this.opts.env() : (this.opts.env ?? process.env),
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 		} catch (err: any) {

@@ -9,7 +9,7 @@ import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
-import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines } from "./engines.js";
+import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
@@ -322,6 +322,8 @@ async function main(): Promise<number | undefined> {
 			resumeId,
 			effort,
 			extraArgs: config.engines[engine]?.args,
+			// e.g. Claude Code without ANTHROPIC_API_KEY when it has a Claude account (see detectClaude)
+			env: () => engineEnv(app.engines?.find((e) => e.id === engine)),
 			onResumeId: (id) => {
 				if (!wt?.path) return;
 				const meta = loadAgentMeta(wt.path);

@@ -97,7 +97,7 @@ Copies go to the system clipboard through the terminal (OSC 52), so they work ov
 
 ## Engines: pi, Claude Code, Codex, OpenCode
 
-pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may already use: vigent runs them as installed, in the agent's worktree, so each one uses its own login and settings. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected.
+pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may already use: vigent runs them as installed, in the agent's worktree, so each one uses its own login and settings. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected. If `ANTHROPIC_API_KEY` is set and Claude Code is also signed in with a Claude account, vigent runs Claude Code without that variable, so it uses your account (a key that isn't scoped to a workspace, or is out of credit, would otherwise fail every request). `:checkhealth` says so: *signed in (Claude account; ANTHROPIC_API_KEY left out)*.
 
 ```vim
 :new fix the race --engine codex            " this agent runs Codex

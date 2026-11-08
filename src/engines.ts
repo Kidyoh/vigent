@@ -30,6 +30,16 @@ export interface EngineInfo {
 	install?: string;
 	/** sign-in status not known yet (shown while the real check runs) */
 	checking?: boolean;
+	/** environment variables vigent leaves out when it runs this CLI, so the CLI uses its own login */
+	dropEnv?: string[];
+}
+
+/** The environment to run an engine's CLI with: everything but what detection said to leave out. */
+export function engineEnv(engine: EngineInfo | undefined, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	if (!engine?.dropEnv?.length) return env;
+	const out = { ...env };
+	for (const k of engine.dropEnv) delete out[k];
+	return out;
 }
 
 export const ENGINE_NAMES: Record<EngineId, string> = {
@@ -159,8 +169,32 @@ async function detectClaude(env: NodeJS.ProcessEnv, timeoutMs: number): Promise<
 	try {
 		const st = JSON.parse(s.stdout);
 		if (st.loggedIn) {
-			const how = st.authMethod === "api_key" || st.apiKeySource ? "API key" : "Claude account";
-			return { ...base, installed: true, connected: true, version, detail: `signed in (${how})`, connect: undefined };
+			const usesKey = st.authMethod === "api_key" || !!st.apiKeySource;
+			// ANTHROPIC_API_KEY wins over a signed-in Claude account. When there is an account too,
+			// leave the key out, so Claude Code runs on the login you use it with (an unscoped or
+			// spent key otherwise fails every request, e.g. "not scoped to a workspace")
+			if (usesKey && env.ANTHROPIC_API_KEY) {
+				const without = { ...env };
+				delete without.ANTHROPIC_API_KEY;
+				const account = await run("claude", ["auth", "status", "--json"], timeoutMs, without);
+				try {
+					const a = JSON.parse(account.stdout);
+					if (a.loggedIn && a.authMethod !== "api_key" && !a.apiKeySource) {
+						return {
+							...base,
+							installed: true,
+							connected: true,
+							version,
+							detail: "signed in (Claude account; ANTHROPIC_API_KEY left out)",
+							connect: undefined,
+							dropEnv: ["ANTHROPIC_API_KEY"],
+						};
+					}
+				} catch {
+					// no account to fall back to: the key it is
+				}
+			}
+			return { ...base, installed: true, connected: true, version, detail: `signed in (${usesKey ? "API key" : "Claude account"})`, connect: undefined };
 		}
 		return { ...base, installed: true, connected: false, version, detail: "not signed in" };
 	} catch {
