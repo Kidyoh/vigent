@@ -263,6 +263,14 @@ button.sw:hover, button.sw:focus-visible { border-color: var(--faint); color: va
   .side a.on::before { content: "▸"; }
 }
 
+/* <Space>e hides the help index and the text takes its room */
+.docs.noside { grid-template-columns: minmax(0, 1fr); }
+.docs.noside .side { display: none; }
+@media (min-width: 1360px) { .docs.noside { grid-template-columns: minmax(0, 1fr) 34ch; } }
+/* the index has the keyboard: its cursor line looks like the text's */
+.side a:focus { outline: none; color: var(--bright); background: var(--cursor); box-shadow: inset 2px 0 0 var(--cyan); }
+.side a:focus::before { content: "▸ "; color: var(--cyan); }
+
 /* ---- docs: an outline on the right, like a tagbar split; only where there's room for it ---- */
 .outline { display: none; }
 @media (min-width: 1360px) {

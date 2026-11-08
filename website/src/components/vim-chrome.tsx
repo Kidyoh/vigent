@@ -54,6 +54,9 @@ export function VimChrome({ file }: { file: string }) {
   const anchor = useRef<number | null>(null);
   const [visual, setVisual] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  /** the docs have a help index; the statusline names its keys there */
+  const [hasIndex, setHasIndex] = useState(false);
+  useEffect(() => setHasIndex(Boolean(document.querySelector(".docs .side"))), []);
 
   /** A notice in the corner, so a copy never goes unnoticed. */
   const notify = (ok: boolean, text: string) => {
@@ -88,6 +91,44 @@ export function VimChrome({ file }: { file: string }) {
     endVisual();
     moveTo(from, false);
     yank(picked.join("\n"), picked.length);
+  };
+
+  /** The docs' help index, on the pages that have one. */
+  const indexEl = () => document.querySelector<HTMLElement>(".docs .side");
+  const indexLinks = (side: HTMLElement) => Array.from(side.querySelectorAll<HTMLAnchorElement>("a[href^='#']"));
+
+  /** Into the help index (showing it first): on the section you're reading, like neo-tree on the open file. */
+  const focusIndex = (side: HTMLElement) => {
+    side.closest(".docs")?.classList.remove("noside");
+    const links = indexLinks(side);
+    const heads = lines().filter((l) => l.querySelector("h2"));
+    const here = heads.filter((l) => lines().indexOf(l) <= cursor.current).pop()?.id;
+    (links.find((a) => a.getAttribute("href") === `#${here}`) ?? links[0])?.focus();
+    setMsg({ text: "help index: j/k move · Enter jumps · l or Esc back to the text · <Space>e hides it" });
+  };
+  /** Back to the text, the cursor where it was. */
+  const leaveIndex = () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setMsg({ text: "" });
+  };
+  /** <Space>e: open and focus the index, focus it if it's open, close it if you're in it. */
+  const toggleIndex = () => {
+    const side = indexEl();
+    if (!side) return setMsg({ text: "No help index on this page: :help opens the docs" });
+    const docs = side.closest(".docs");
+    const hidden = docs?.classList.contains("noside");
+    if (hidden || !side.contains(document.activeElement)) return focusIndex(side);
+    leaveIndex();
+    docs?.classList.add("noside");
+    setMsg({ text: "help index hidden · <Space>e shows it" });
+  };
+  /** ]] / [[: the next or previous section heading. */
+  const jumpSection = (dir: 1 | -1) => {
+    const all = lines();
+    const heads = all.flatMap((l, i) => (l.querySelector("h2") ? [i] : []));
+    const to = dir > 0 ? heads.find((i) => i > cursor.current) : [...heads].reverse().find((i) => i < cursor.current);
+    if (to === undefined) return setMsg({ text: dir > 0 ? "Last section" : "First section" });
+    moveTo(to);
   };
 
   /** Ask the drawing of vigent for its colorscheme picker (on a page without it, go to the one that has it). */
@@ -232,6 +273,78 @@ export function VimChrome({ file }: { file: string }) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as Element).closest?.("input, textarea") || e.metaKey || e.altKey) return;
       const k = e.key;
+
+      // <Space> is the leader, as in LazyVim; on a button it still presses the button
+      if (pending === "leader") {
+        pending = "";
+        clearTimeout(timer);
+        if (k === "e") {
+          e.preventDefault();
+          return toggleIndex();
+        }
+        if (k === "Escape") return setMsg({ text: "" });
+        setMsg({ text: `<Space>${k.length === 1 ? k : ""} isn't mapped here: <Space>e toggles the help index` });
+        return;
+      }
+      if (k === " " && !e.ctrlKey && !(e.target as Element).closest?.("button, summary, [role=button]")) {
+        e.preventDefault();
+        pending = "leader";
+        setMsg({ text: "<Space>  e help index" });
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (pending === "leader") {
+            pending = "";
+            setMsg({ text: "" });
+          }
+        }, 1500);
+        return;
+      }
+
+      // in the help index: j/k between sections, Enter jumps, l / Esc / q go back to the text
+      const side = indexEl();
+      if (side && !e.ctrlKey && side.contains(document.activeElement)) {
+        const links = indexLinks(side);
+        const at = links.indexOf(document.activeElement as HTMLAnchorElement);
+        const go = (i: number) => {
+          e.preventDefault();
+          links[Math.max(0, Math.min(links.length - 1, i))]?.focus();
+        };
+        if (k === "j" || k === "ArrowDown") return go(at + 1);
+        if (k === "k" || k === "ArrowUp") return go(at - 1);
+        if (k === "G") return go(links.length - 1);
+        if (k === "g") {
+          if (pending === "g") {
+            pending = "";
+            return go(0);
+          }
+          pending = "g";
+          clearTimeout(timer);
+          timer = setTimeout(() => (pending = ""), 800);
+          return;
+        }
+        if (k === "Enter") {
+          // the link itself jumps (the hash moves the cursor); then the keys belong to the text again
+          setTimeout(leaveIndex, 0);
+          return;
+        }
+        if (k === "l" || k === "Escape" || k === "q") {
+          e.preventDefault();
+          return leaveIndex();
+        }
+        return;
+      }
+
+      if (k === "]" || k === "[") {
+        if (pending === k) {
+          pending = "";
+          return jumpSection(k === "]" ? 1 : -1);
+        }
+        pending = k;
+        clearTimeout(timer);
+        timer = setTimeout(() => (pending = ""), 800);
+        return;
+      }
+
       if (e.ctrlKey) {
         if (k === "d" || k === "u") {
           e.preventDefault();
@@ -329,7 +442,9 @@ export function VimChrome({ file }: { file: string }) {
           <span className="file">{file}</span>
           <span className="cm hide-sm">[help][RO]</span>
           <span className="fill" />
-          <span className="cm hide-sm">j/k move · yy copy · V select · t theme · : commands</span>
+          <span className="cm hide-sm">
+            {hasIndex ? "j/k move · ]] section · <Space>e index · t theme · : commands" : "j/k move · yy copy · V select · t theme · : commands"}
+          </span>
           <span className="pos">
             {line}:1 · {pos}
           </span>
