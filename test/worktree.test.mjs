@@ -210,7 +210,9 @@ test("a pi agent's tools run inside its worktree", async () => {
 		);
 		assert.equal(s.items.at(-1).text, "Done: wrote notes.md.");
 
-		await new Promise((r) => setTimeout(r, 400));
+		// the stat refreshes in the background after the run; under load that takes longer than any fixed wait
+		const end = Date.now() + 5000;
+		while (s.worktree.stat?.files !== 2 && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
 		assert.deepEqual(s.worktree.stat, { files: 2, added: 3, removed: 0 }, "live diff stat after the run");
 	} finally {
 		s.dispose();
