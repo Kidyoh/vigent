@@ -363,3 +363,52 @@ test("Esc pressed right before a key isn't lost (arrives as Alt-key)", () => {
 	assert.equal(app.mode, "NORMAL");
 	assert.equal(app.scrollOffset, 0, "Esc then G (uppercase) went to the bottom");
 });
+
+test("markdown tables: box-drawn, aligned, and fit the pane by wrapping cells", () => {
+	const P = new Painter(BUILTIN_THEMES.default);
+	const md = "| Test | Runs | Notes |\n|:--|--:|:-:|\n| checkout | 50 | waits a fixed **50ms** before checking |\n| cart | 5 | [issue](https://example.com/1) |";
+	const wide = renderMarkdown(md, 80, P).lines.map((l) => l.plain);
+	assert.deepEqual(wide, [
+		"┌──────────┬──────┬────────────────────────────────────┐",
+		"│ Test     │ Runs │               Notes                │",
+		"├──────────┼──────┼────────────────────────────────────┤",
+		"│ checkout │   50 │ waits a fixed 50ms before checking │",
+		"│ cart     │    5 │               issue                │",
+		"└──────────┴──────┴────────────────────────────────────┘",
+	]);
+	const narrow = renderMarkdown(md, 30, P).lines.map((l) => l.plain);
+	assert.ok(narrow.every((l) => [...l].length <= 30), "nothing past the pane");
+	assert.ok(narrow.length > wide.length, "cells wrap instead");
+	assert.ok(!wide.join("\n").includes("example.com"), "a link in a table shows its text only");
+	assert.equal(renderMarkdown(md, 80, P, "•", 0, { ascii: true }).lines[0].plain[0], "+", "ascii borders");
+});
+
+test("markdown: numbered, nested and task lists, rules, quotes that wrap, inline styles", () => {
+	const P = new Painter(BUILTIN_THEMES.default);
+	const md = [
+		"1. first",
+		"2. second",
+		"  - nested",
+		"- [x] done",
+		"- [ ] todo",
+		"---",
+		"> a quote long enough to wrap onto a second line here",
+		"*italic* ~~gone~~ [docs](https://vigent.farming-labs.dev/docs) \\*kept\\*",
+	].join("\n");
+	const { lines } = renderMarkdown(md, 40, P);
+	const plain = lines.map((l) => l.plain);
+	assert.deepEqual(plain.slice(0, 5), ["1. first", "2. second", "  • nested", "☑ done", "☐ todo"]);
+	assert.equal(plain[5], "─".repeat(40));
+	assert.ok(plain[6].startsWith("▏ ") && plain[7].startsWith("▏ "), "every wrapped quote line keeps its bar");
+	assert.equal(plain.slice(8).join(" "), "italic gone docs (https://vigent.farming-labs.dev/docs) *kept*", "styles, the link with its address, escapes");
+	const styled = lines.slice(8).map((l) => l.text).join("");
+	assert.match(styled, /\x1b\[3m/, "italic");
+	assert.match(styled, /\x1b\[9m/, "strikethrough");
+});
+
+test("markdown: text after **bold** or `code` keeps the theme's text color", () => {
+	const P = new Painter(BUILTIN_THEMES.default);
+	const [line] = renderMarkdown("before **bold** after", 80, P).lines;
+	const afterBold = line.text.slice(line.text.indexOf("bold") + 4);
+	assert.ok(afterBold.indexOf(P.s("Normal")) < afterBold.indexOf("after") && afterBold.includes(P.s("Normal")), "Normal comes back before 'after'");
+});

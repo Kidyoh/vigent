@@ -2912,7 +2912,7 @@ export class App implements Component {
 				case "agent": {
 					push("", "");
 					const text = item.text + (item.streaming ? ` ${I.cursor}` : "");
-					const md = renderMarkdown(text, paneW, P, I.bullet, nextBlock);
+					const md = renderMarkdown(text, paneW, P, I.bullet, nextBlock, { ascii: this.ui.icons === "ascii" });
 					md.lines.forEach((l, i) =>
 						push(P.s("Normal") + l.text + RESET, l.plain, { item: n, start: i === 0, block: l.block, label: l.label }),
 					);
