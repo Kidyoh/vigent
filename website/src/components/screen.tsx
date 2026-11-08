@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /** Width of the sidebar column, in characters. */
-const SIDE = 27;
+const SIDE = 31;
 
 type Part = string | [cls: string, text: string];
 
@@ -39,6 +39,15 @@ export function Screen() {
       role="img"
       aria-label="vigent running two agents in parallel: the sidebar lists them with their branches, the main pane shows a Claude Code agent fixing a flaky test"
     >
+      <div className="screen-title" aria-hidden="true">
+        <span className="dots">
+          <i />
+          <i />
+          <i />
+        </span>
+        <span>vigent — ~/code/shop</span>
+        <span className="cm">2 agents</span>
+      </div>
       <pre>
         {ROWS.map(([side, main], r) => (
           <span key={r}>
@@ -51,7 +60,9 @@ export function Screen() {
         ))}
         <span className="st">
           <span className="mode"> NORMAL </span>
-          {" fix-flaky-test  fix/flaky-test                          opus · high  31.2k tok "}
+          <span> fix-flaky-test  fix/flaky-test</span>
+          <span className="fill" />
+          <span>opus · high  31.2k tok </span>
         </span>
       </pre>
     </div>

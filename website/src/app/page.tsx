@@ -67,7 +67,7 @@ export default function HomePage() {
               <div className="d">APFS · Btrfs · XFS · OverlayFS · ReFS</div>
             </div>
           </L>
-          <div className="l">
+          <div className="l wide">
             <Screen />
           </div>
         </section>

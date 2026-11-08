@@ -125,12 +125,29 @@ a.link:hover { text-decoration: underline; }
   .fact:last-child { border-bottom: 0; }
 }
 
-/* vigent at work, drawn in text */
-.screen { margin: 4px 0; border: 1px solid var(--line); background: var(--panel); overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
-.screen pre { margin: 0; padding: 2px 0; white-space: pre; font: inherit; }
+/* vigent at work, drawn in text: a terminal window with room to breathe */
+.l.wide { max-width: calc(104ch + 6.5ch); }
+.screen {
+  margin: 4px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  overflow: hidden; font-size: 13px; line-height: 1.75;
+  box-shadow: 0 24px 60px rgb(0 0 0 / .45);
+}
+.screen-title {
+  display: flex; align-items: center; gap: 2ch; padding: 6px 2ch;
+  background: var(--bar); border-bottom: 1px solid var(--line); color: var(--dim); font-size: 12px;
+}
+.screen-title span:nth-child(2) { flex: 1; text-align: center; color: var(--fg); }
+.screen-title .dots { display: inline-flex; gap: 6px; }
+.screen-title .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); display: inline-block; }
+.screen pre { margin: 0; padding: 16px 3ch 0; white-space: pre; font: inherit; overflow-x: auto; }
 .screen .sb { color: var(--bright); font-weight: 600; }
-.screen .st { background: var(--bar); display: block; }
+.screen .st {
+  display: flex; gap: 2ch; min-width: max-content; margin: 14px -3ch 0; padding: 0 1ch 0 0;
+  background: var(--bar); border-top: 1px solid var(--line);
+}
+.screen .st .fill { flex: 1; }
 .screen .mode { background: var(--green); color: var(--bg); font-weight: 800; }
+@media (max-width: 640px) { .screen pre { padding: 12px 2ch 0; } .screen .st { margin-inline: -2ch; } .screen { font-size: 12px; } }
 
 .tree, pre.code {
   margin: 0; white-space: pre; overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
