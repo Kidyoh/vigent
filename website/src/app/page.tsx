@@ -12,7 +12,7 @@ export const dynamic = "force-static";
 export const metadata: Metadata = {
   title: "vigent — the vim-native agent harness",
   description:
-    "Run Claude Code, Codex, OpenCode and pi in parallel, each in its own copy-on-write worktree powered by riftri, from one Vim-style terminal screen.",
+    "Run Claude Code, Codex, OpenCode and pi in parallel, each in its own copy-on-write worktree powered by riftri.",
 };
 
 export default function HomePage() {
@@ -35,7 +35,7 @@ export default function HomePage() {
           <div className="hero-copy">
             <L className="eyebrow">an agent harness for the terminal</L>
             <div className="l">
-              <h1 className="t lede">Run every coding agent at once. Each in its own worktree, all from one Vim-style screen.</h1>
+              <h1 className="t lede">Run every coding agent at once, each in its own worktree.</h1>
             </div>
             <div className="l">
               <p className="t sub">
