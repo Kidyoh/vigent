@@ -343,7 +343,7 @@ async function main(): Promise<number | undefined> {
 		saveAgentMeta(wt, {
 			...meta,
 			model: s instanceof CliSession ? (requested ?? "") : s.model,
-			...(s instanceof CliSession ? { requestedModel: requested } : {}),
+			...(s instanceof CliSession ? { requestedModel: requested, usage: { tokens: s.tokens, ...(s.cost !== undefined ? { cost: s.cost } : {}) } } : {}),
 			effort: s.effort,
 		});
 	};
@@ -376,7 +376,13 @@ async function main(): Promise<number | undefined> {
 	/** Reopen a saved agent with the engine it was started with. */
 	const reopen = (meta: AgentMeta, worktree: WorktreeInfo): Session => {
 		const engine = meta.engine && isEngineId(meta.engine) ? meta.engine : "pi";
-		if (engine !== "pi") return cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId, meta.effort);
+		if (engine !== "pi") {
+			const s = cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId, meta.effort);
+			// the CLI keeps the conversation; vigent keeps the running totals
+			s.tokens = meta.usage?.tokens ?? 0;
+			s.cost = meta.usage?.cost;
+			return s;
+		}
 		return new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!), effort: meta.effort });
 	};
 	app.attachSession = (wt) => {

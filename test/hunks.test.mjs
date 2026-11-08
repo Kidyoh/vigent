@@ -96,7 +96,9 @@ test(":review: drop a hunk, drop a new file, undo, and :merge's commit leaves ou
 
 	review.handleInput("J"); // to notes.md
 	review.handleInput("X");
-	await until(() => !fs.existsSync(path.join(wt, "notes.md")));
+	// done once the review says so (it reloads the diff after git drops the file)
+	await until(() => plain(review.render(110)).includes("dropped notes.md"));
+	assert.ok(!fs.existsSync(path.join(wt, "notes.md")));
 	review.handleInput("u");
 	await until(() => fs.existsSync(path.join(wt, "notes.md")));
 	assert.match(plain(review.render(110)), /restored notes\.md/);

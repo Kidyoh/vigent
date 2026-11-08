@@ -39,6 +39,10 @@ When an agent finishes, fails or needs you while you're looking at another one (
 
 ![an agent finished in the background](docs/screenshots/notify.png)
 
+The statusline shows what the agent on screen has used, like `74.8k tok · $0.50`, and `:dash` adds up every agent. `:cost` lists each agent with its engine, tokens and cost, and the total. Costs are what each engine reports: Claude Code prices what it used at API rates even on a subscription, OpenCode prices each step, pi uses its model prices, and Codex reports tokens only. CLI agents keep their totals across restarts.
+
+![:cost](docs/screenshots/cost.png)
+
 ### First agent
 
 Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using pi if it has an API key, or else the first signed-in CLI (Claude Code, Codex, OpenCode; `:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.
@@ -156,6 +160,7 @@ A worktree is normally a full copy of your checkout, so ten agents on a big repo
 :merge --no-squash     " a regular merge commit instead
 :pr                    " push the branch and open a pull request (gh), or print the compare URL
 :dash                  " every agent at a glance; j/k and Enter to jump to one
+:cost                  " tokens and money each agent has used, and the total
 :queue <prompt>        " send a follow-up after the current run (:queue alone lists them)
 :pause  /  :resume     " hold an agent and its queue, then continue
 :w [file]              " save the transcript as Markdown

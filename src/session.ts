@@ -46,6 +46,8 @@ export abstract class Session {
 	state: SessionState = "idle";
 	items: TranscriptItem[] = [];
 	tokens = 0;
+	/** money spent, in US dollars, as the engine reports it; undefined = the engine doesn't say (Codex) */
+	cost?: number;
 	version = 0; // bumped on every change, used for render caching
 	private listeners = new Set<() => void>();
 
@@ -339,6 +341,7 @@ export class PiSession extends Session {
 			const restored = itemsFromMessages(session.messages ?? []);
 			this.items.push(...restored.items);
 			this.tokens += restored.tokens;
+			if (restored.cost !== undefined) this.cost = (this.cost ?? 0) + restored.cost;
 			this.pushInfo(`resumed: ${restored.items.filter((i) => i.kind === "user").length} earlier prompts`);
 			this.refreshStat(0);
 		}
@@ -379,7 +382,10 @@ export class PiSession extends Session {
 					if (event.message?.content) last.text = extractText(event.message.content);
 					last.streaming = false;
 					const usage = event.message?.usage;
-					if (usage) this.tokens += (usage.input ?? 0) + (usage.output ?? 0);
+					if (usage) {
+						this.tokens += usageTokens(usage);
+						if (typeof usage.cost?.total === "number") this.cost = (this.cost ?? 0) + usage.cost.total;
+					}
 					if (!last.text) this.items.pop(); // a turn that only called tools
 					this.emit();
 				}
@@ -479,10 +485,11 @@ export class PiSession extends Session {
 }
 
 /** Rebuild the transcript from pi's saved messages: prompts, replies, and tool calls with their output. */
-export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; tokens: number } {
+export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; tokens: number; cost?: number } {
 	const items: TranscriptItem[] = [];
 	const byCallId = new Map<string, TranscriptItem>();
 	let tokens = 0;
+	let cost: number | undefined;
 	for (const m of messages) {
 		if (m?.role === "user") {
 			const text = extractText(m.content);
@@ -501,7 +508,10 @@ export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; t
 				items.push(item);
 				if (b.id) byCallId.set(b.id, item);
 			}
-			if (m.usage) tokens += (m.usage.input ?? 0) + (m.usage.output ?? 0);
+			if (m.usage) {
+				tokens += usageTokens(m.usage);
+				if (typeof m.usage.cost?.total === "number") cost = (cost ?? 0) + m.usage.cost.total;
+			}
 			const err = piError(m);
 			if (err) items.push({ kind: "info", text: err });
 		} else if (m?.role === "toolResult") {
@@ -509,7 +519,12 @@ export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; t
 			if (item?.tool) item.tool.output = extractText(m.content);
 		}
 	}
-	return { items, tokens };
+	return { items, tokens, cost };
+}
+
+/** pi's usage: every token the request read or wrote, cached ones included (like Claude Code's count) */
+function usageTokens(u: any): number {
+	return u.totalTokens ?? (u.input ?? 0) + (u.output ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
 }
 
 /** What to do when pi can't get through: this agent stays on pi, so start one elsewhere. */

@@ -29,6 +29,8 @@ export interface AgentMeta {
 	requestedModel?: string;
 	/** reasoning effort / thinking level (missing = the engine's default) */
 	effort?: string;
+	/** what a CLI agent has used so far (pi keeps its own, in its session history) */
+	usage?: { tokens: number; cost?: number };
 }
 
 /** vigent's folder in git's per-worktree admin dir. */

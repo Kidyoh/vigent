@@ -324,6 +324,7 @@ export class App implements Component {
 	private watchState(s: Session) {
 		const before = this.lastState.get(s);
 		this.lastState.set(s, s.state);
+		if (before === "running" && s.state !== "running") this.persist(s); // its usage totals, for after a restart
 		if (before !== "running" || s.state === "running" || s.state === "paused") return;
 		const visible = s === this.focusedSession && this.terminalFocused;
 		if (visible) return;
@@ -777,6 +778,10 @@ export class App implements Component {
 			case "dash":
 			case "dashboard":
 				this.openDashboard();
+				return;
+			case "cost":
+			case "usage":
+				this.openUsage();
 				return;
 			case "tree":
 				this.openTree();
@@ -1630,6 +1635,7 @@ export class App implements Component {
 				[stateGroup(s.state), s.state.padEnd(8)],
 				["Comment", ` ${truncateToWidth(s.worktree ? `${I.worktree}${s.worktree.branch}` : s.model, 34, "…")}`],
 				...stat,
+				["Comment", s.tokens ? `  ${formatUsage(s)}` : ""],
 				["Comment", s.queue.length ? `  ${I.queued}${s.queue.length}` : ""],
 				[s.state === "error" ? "ErrorMsg" : "WarningMsg", this.unread.has(s) ? `  ${I.unread} new` : ""],
 			]);
@@ -1640,8 +1646,50 @@ export class App implements Component {
 		});
 		const running = this.sessions.filter((s) => s.state === "running").length;
 		lines.push([]);
-		lines.push([["Comment", `${this.sessions.length} agents · ${running} running · j/k move · Enter open`]]);
+		const total = totalUsage(this.sessions);
+		lines.push([
+			["Comment", `${this.sessions.length} agents · ${running} running · `],
+			["NormalFloat", `${formatUsage(total)} in all`],
+			["Comment", " · j/k move · Enter open · :cost for more"],
+		]);
 		this.openFloat("Dashboard", lines, Math.min(110, this.terminal.columns - 4), {
+			selectable: rows,
+			onSelect: (lineIdx) => this.focusSession(rows.indexOf(lineIdx)),
+			initial: rows[this.focusIdx],
+		});
+	}
+
+	/** `:cost`: what each agent has used (tokens, and money where the engine reports it) and the total. */
+	openUsage() {
+		if (this.sessions.length === 0) {
+			this.setMessage("no agents yet (:new <task> starts one)", "Comment");
+			return;
+		}
+		const lines: FloatLine[] = [];
+		const rows: number[] = [];
+		const cell = (s: string, w: number) => truncateToWidth(s, w - 1, "…").padEnd(w);
+		lines.push([["Comment", `${cell("agent", 30)}${cell("engine", 13)}${"tokens".padStart(11)}${"cost".padStart(10)}`]]);
+		this.sessions.forEach((s) => {
+			rows.push(lines.length);
+			lines.push([
+				["Title", cell(s.name, 30)],
+				["Comment", cell(ENGINE_NAMES[s.engine], 13)],
+				["NormalFloat", formatTokens(s.tokens).replace(/ tok$/, "").padStart(11)],
+				[s.cost === undefined ? "Comment" : "String", (s.cost === undefined ? "—" : formatCost(s.cost)).padStart(10)],
+			]);
+		});
+		const total = totalUsage(this.sessions);
+		lines.push([["FloatBorder", "─".repeat(64)]]);
+		lines.push([
+			["Title", cell("all agents", 43)],
+			["NormalFloat", formatTokens(total.tokens).replace(/ tok$/, "").padStart(11)],
+			["String", (total.cost === undefined ? "—" : formatCost(total.cost)).padStart(10)],
+		]);
+		lines.push([]);
+		lines.push([["Comment", "Costs are as each engine reports them. Claude Code prices its"]]);
+		lines.push([["Comment", "tokens at API rates, even on a subscription."]]);
+		if (total.unpriced) lines.push([["Comment", "Codex reports no price (—); its tokens are counted."]]);
+		this.openFloat("Usage", lines, Math.min(72, this.terminal.columns - 4), {
 			selectable: rows,
 			onSelect: (lineIdx) => this.focusSession(rows.indexOf(lineIdx)),
 			initial: rows[this.focusIdx],
@@ -2643,7 +2691,7 @@ export class App implements Component {
 		const changes = st && (st.added || st.removed) ? ` +${st.added} ${this.icons.minus}${st.removed}` : "";
 		const worktree = s?.worktree ? `${this.icons.worktree}${s.worktree.branch}${changes} ` : "";
 		const right = s
-			? ` ${s.model}  ${formatTokens(s.tokens)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
+			? ` ${s.model}  ${formatUsage(s)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
 			: "";
 		const plainLen = visibleWidth(` ${this.mode} `) + (this.demo ? 6 : 0) + visibleWidth(leftText) + visibleWidth(worktree) + visibleWidth(right);
 		const fill = Math.max(0, width - plainLen);
@@ -2771,6 +2819,7 @@ const EX_HELP: [string, string][] = [
 	[":queue <prompt>", "send after the current run (:queue lists)"],
 	[":pause  /  :resume", "hold the agent and its queue / continue"],
 	[":dash", "all agents at a glance"],
+	[":cost", "tokens and money each agent has used, and the total"],
 	[":tree", "the conversation's branches; go back and branch"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],
@@ -2823,9 +2872,35 @@ function describeAttr(a: Attr): string {
 	return parts.join(" ") || "cleared";
 }
 
-function formatTokens(n: number): string {
+export function formatTokens(n: number): string {
+	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
 	if (n >= 1000) return `${(n / 1000).toFixed(1)}k tok`;
 	return `${n} tok`;
+}
+
+/** US dollars: cents, or a tenth of a cent below one cent */
+export function formatCost(usd: number): string {
+	if (usd > 0 && usd < 0.01) return `$${usd.toFixed(3)}`;
+	return `$${usd.toFixed(2)}`;
+}
+
+/** "12.4k tok · $0.31", or just the tokens when the engine reports no price */
+export function formatUsage(u: { tokens: number; cost?: number }): string {
+	return u.cost === undefined ? formatTokens(u.tokens) : `${formatTokens(u.tokens)} · ${formatCost(u.cost)}`;
+}
+
+/** every agent's usage added up; cost counts the agents that report one */
+export function totalUsage(sessions: { tokens: number; cost?: number }[]): { tokens: number; cost?: number; unpriced: number } {
+	let tokens = 0;
+	let cost: number | undefined;
+	let unpriced = 0;
+	for (const s of sessions) {
+		tokens += s.tokens;
+		if (s.cost === undefined) {
+			if (s.tokens) unpriced++;
+		} else cost = (cost ?? 0) + s.cost;
+	}
+	return { tokens, cost, unpriced };
 }
 
 /** A short agent name from a prompt: its first words, without punctuation ("Fix the flaky checkout test, please" -> "fix the flaky checkout test"). */

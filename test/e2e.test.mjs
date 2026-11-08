@@ -138,6 +138,8 @@ test("first run: i, a task, Enter starts an agent on Claude Code in its own work
 		const third = calls()[2].args;
 		assert.deepEqual(third.slice(third.indexOf("--model"), third.indexOf("--model") + 4), ["--model", "opus", "--effort", "high"]);
 		await t.waitFor(/│ done\s*$/m);
+		// three runs at $0.251577 each, as Claude Code reported them
+		await t.waitFor(/tok · \$0\.75 /);
 
 		await t.ex("q");
 		assert.equal(await t.exited, 0);
@@ -151,6 +153,7 @@ test("first run: i, a task, Enter starts an agent on Claude Code in its own work
 		await again.waitFor(/reopened 1 agent from last time/);
 		await again.waitFor(/write hello file/);
 		await again.waitFor(/continuing the Claude Code conversation 3b248a3e/);
+		await again.waitFor(/tok · \$0\.75 /); // the totals came back too
 		await again.ex("q");
 		assert.equal(await again.exited, 0);
 	} finally {

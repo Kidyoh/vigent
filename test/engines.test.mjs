@@ -82,7 +82,7 @@ test("OpenCode: run --format json", () => {
 	assert.deepEqual(evs[1], { type: "tool", id: "call_1", name: "bash", summary: "npm test" });
 	assert.equal(evs[2].output, "1 failing\n");
 	assert.deepEqual(evs[3], { type: "text", text: "The cart test fails on an empty cart." });
-	assert.deepEqual(evs[4], { type: "usage", tokens: 1240 });
+	assert.deepEqual(evs[4], { type: "usage", tokens: 1240, cost: 0 });
 	const err = events("opencode", "opencode-error.jsonl");
 	assert.equal(err[1].type, "error");
 	assert.match(err[1].message, /security token included in the request is invalid/);
