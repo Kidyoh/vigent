@@ -209,6 +209,16 @@ a.tag:hover { text-decoration: underline; }
 .float li.on .tags { color: inherit; opacity: .75; }
 .float li.none { color: var(--s-dim); cursor: default; }
 .float-foot { padding: 0 1ch; color: var(--s-dim); border-top: 1px solid var(--s-sep); font-size: 11.5px; }
+/* the same float over any page without the drawing (SitePicker), in the site's own colors, which it previews */
+.float.site-float {
+  --s-float: var(--panel); --s-fg: var(--fg); --s-sep: var(--line); --s-title: var(--bright); --s-dim: var(--dim);
+  --s-str: var(--green); --s-sel: var(--on); --s-sel-fg: var(--bright);
+  position: fixed; z-index: 8; left: 50%; right: auto; transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top, 0px) + var(--tab-h) + 16px);
+  width: min(52ch, calc(100vw - 32px));
+  max-height: min(64vh, calc(100dvh - var(--tab-h) - var(--status-h) - 48px));
+  font-size: 13px;
+}
 @media (max-width: 640px) {
   .screen pre { padding: 12px 0 0 2ch; }
   .screen-body, .screen { font-size: 12px; }

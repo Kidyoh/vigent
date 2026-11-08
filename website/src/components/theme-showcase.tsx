@@ -1,10 +1,9 @@
 "use client";
 
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { applySiteTheme, STORE } from "../lib/site-theme";
 import { type ThemeColors, THEMES } from "../lib/themes";
-
-const NAMES = Object.keys(THEMES);
+import { ColorschemeFloat, swatch } from "./colorscheme-float";
 
 /** The drawing's colors as CSS variables, from one of vigent's themes. */
 function vars(t: ThemeColors): CSSProperties {
@@ -34,35 +33,17 @@ function vars(t: ThemeColors): CSSProperties {
   return v as CSSProperties;
 }
 
-/** A theme's look in four squares: background, then three accents. */
-const swatch = (t: ThemeColors) => [t.bg ?? "transparent", t.user, t.str, t.spin].filter(Boolean) as string[];
-
-function fuzzy(name: string, q: string) {
-  let i = 0;
-  for (const c of name) if (c === q[i]) i++;
-  return i === q.length;
-}
-
 /**
- * The drawing of vigent, painted with the colorscheme you pick. The picker is
- * vigent's own :colorscheme float: j/k move and preview, Enter keeps it, q or
- * Esc puts the old one back, / searches. Open it from the window's title bar,
- * with :colorscheme or t, or by clicking a theme further down the page.
+ * The drawing of vigent, painted with the colorscheme you pick, and the whole
+ * site with it. The picker is vigent's own :colorscheme float (ColorschemeFloat).
+ * Open it from the window's title bar, with :colorscheme or t, or by clicking a
+ * theme further down the page.
  */
 export function ThemeShowcase({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState("default");
   const [open, setOpen] = useState(false);
-  const [index, setIndex] = useState(0);
-  const [query, setQuery] = useState<string | null>(null); // null: not searching
   const before = useRef("default");
   const box = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLUListElement>(null);
-
-  const shown = useMemo(() => (query ? NAMES.filter((n) => fuzzy(n, query.toLowerCase())) : NAMES), [query]);
-  const current = shown[index];
-  /** what the key handler reads; set at once on open, so the very next key reaches the picker */
-  const live = useRef({ open, shown, query, current });
-  live.current = { ...live.current, open, shown, query, current };
 
   // remember the last pick for this visitor
   const [ready, setReady] = useState(false);
@@ -81,27 +62,19 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
     if (ready) applySiteTheme(theme);
   }, [ready, theme]);
 
-  const openPicker = (preview?: string) => {
+  const openPicker = () => {
     before.current = theme;
-    const start = preview && THEMES[preview] ? preview : theme;
-    setQuery(null);
-    setIndex(Math.max(0, NAMES.indexOf(start)));
-    if (preview && THEMES[preview]) setTheme(preview);
-    live.current = { ...live.current, open: true, query: null, shown: NAMES };
     setOpen(true);
     box.current?.scrollIntoView({ block: "center" });
   };
-  const keep = (name = live.current.current) => {
-    if (!name) return;
+  const keep = (name: string) => {
     setTheme(name);
-    live.current.open = false;
     setOpen(false);
     applySiteTheme(name, true);
     document.dispatchEvent(new CustomEvent("vigent:say", { detail: `colorscheme ${name}` }));
   };
   const cancel = () => {
     setTheme(before.current);
-    live.current.open = false;
     setOpen(false);
   };
 
@@ -122,52 +95,6 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
     document.addEventListener("vigent:colorscheme", onOpen);
     return () => document.removeEventListener("vigent:colorscheme", onOpen);
   });
-
-  // live preview: moving through the list repaints the drawing
-  useEffect(() => {
-    if (open && current) setTheme(current);
-    list.current?.querySelector(".on")?.scrollIntoView({ block: "nearest" });
-  }, [open, current]);
-
-  // the picker's keys, ahead of the page's own vim keys (one listener; it reads `live`)
-  const handlers = useRef({ keep, cancel });
-  handlers.current = { keep, cancel };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const { open: isOpen, shown: list, query: q } = live.current;
-      if (!isOpen || e.metaKey || e.ctrlKey || e.altKey) return;
-      e.stopImmediatePropagation();
-      const k = e.key;
-      const setQ = (next: string | null) => {
-        live.current.query = next;
-        live.current.shown = next ? NAMES.filter((n) => fuzzy(n, next.toLowerCase())) : NAMES;
-        setIndex(0);
-        setQuery(next);
-      };
-      const move = (by: number) => {
-        e.preventDefault();
-        if (list.length) setIndex((i) => (i + by + list.length) % list.length);
-      };
-      if (k === "Enter") return (e.preventDefault(), handlers.current.keep());
-      if (k === "ArrowDown" || k === "Tab") return move(1);
-      if (k === "ArrowUp") return move(-1);
-      if (q !== null) {
-        e.preventDefault();
-        if (k === "Escape") return setQ(null);
-        if (k === "Backspace") return setQ(q ? q.slice(0, -1) : null);
-        if (k.length === 1) return setQ(q + k);
-        return;
-      }
-      if (k === "j") return move(1);
-      if (k === "k") return move(-1);
-      if (k === "g") return (e.preventDefault(), setIndex(0));
-      if (k === "G") return (e.preventDefault(), setIndex(list.length - 1));
-      if (k === "/") return (e.preventDefault(), setQ(""));
-      if (k === "q" || k === "Escape") return (e.preventDefault(), handlers.current.cancel());
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, []);
 
   const t = THEMES[theme];
   return (
@@ -196,43 +123,7 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
       </div>
       <div className="screen-body">
         {children}
-        {open && (
-          <div className="float" role="dialog" aria-label="Colorschemes">
-            <div className="float-title">Colorschemes</div>
-            <div className="float-prompt">{query !== null ? <span className="q">❯ {query}▏</span> : <span className="hint">❯ / to search</span>}</div>
-            <ul ref={list} role="listbox" aria-label="Colorschemes">
-              {shown.map((name, i) => {
-                const th = THEMES[name];
-                return (
-                  <li
-                    key={name}
-                    role="option"
-                    aria-selected={i === index}
-                    className={i === index ? "on" : undefined}
-                    onMouseEnter={() => setIndex(i)}
-                    onClick={() => keep(name)}
-                  >
-                    <span className="mark">{name === before.current ? "●" : " "}</span>
-                    <span className="nm">{name}</span>
-                    <span className="chips" aria-hidden="true">
-                      {swatch(th).map((c, j) => (
-                        <i key={j} style={{ background: c }} />
-                      ))}
-                    </span>
-                    <span className="tags">
-                      {th.background}
-                      {th.transparent ? " transparent" : ""}
-                    </span>
-                  </li>
-                );
-              })}
-              {shown.length === 0 && <li className="none">no match</li>}
-            </ul>
-            <div className="float-foot">
-              {shown.length ? index + 1 : 0}/{shown.length} · {query !== null ? "type to filter · Esc done" : "j/k preview · Enter keep · q close"}
-            </div>
-          </div>
-        )}
+        {open && <ColorschemeFloat current={before.current} onPreview={setTheme} onKeep={keep} onCancel={cancel} />}
       </div>
     </div>
   );
