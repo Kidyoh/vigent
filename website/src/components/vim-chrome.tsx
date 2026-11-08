@@ -50,6 +50,9 @@ export function VimChrome({ file }: { file: string }) {
   const [toast, setToast] = useState<{ ok: boolean; text: string; id: number } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const cursor = useRef(0);
+  /** where V / v started: the selection runs from here to the cursor */
+  const anchor = useRef<number | null>(null);
+  const [visual, setVisual] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
   /** A notice in the corner, so a copy never goes unnoticed. */
@@ -57,6 +60,34 @@ export function VimChrome({ file }: { file: string }) {
     clearTimeout(toastTimer.current);
     setToast({ ok, text, id: Date.now() });
     toastTimer.current = setTimeout(() => setToast(null), 2600);
+  };
+
+  /** Mark the lines between the V anchor and the cursor. */
+  const paintSelection = (all = lines()) => {
+    const a = anchor.current;
+    const [from, to] = a === null ? [-1, -2] : [Math.min(a, cursor.current), Math.max(a, cursor.current)];
+    all.forEach((l, i) => l.classList.toggle("vsel", i >= from && i <= to));
+  };
+  const startVisual = () => {
+    anchor.current = cursor.current;
+    setVisual(true);
+    setMsg({ text: "-- VISUAL LINE -- j/k to extend, y to copy, Esc to cancel" });
+    paintSelection();
+  };
+  const endVisual = (text = "") => {
+    anchor.current = null;
+    setVisual(false);
+    setMsg({ text });
+    paintSelection();
+  };
+  /** y in VISUAL: copy the selected lines, one per line. */
+  const yankSelection = () => {
+    const a = anchor.current ?? cursor.current;
+    const [from, to] = [Math.min(a, cursor.current), Math.max(a, cursor.current)];
+    const picked = lines().slice(from, to + 1).map(lineText);
+    endVisual();
+    moveTo(from, false);
+    yank(picked.join("\n"), picked.length);
   };
 
   /** Ask the drawing of vigent for its colorscheme picker (on a page without it, go to the one that has it). */
@@ -74,6 +105,7 @@ export function VimChrome({ file }: { file: string }) {
     all[n].classList.add("cursor");
     cursor.current = n;
     setLine(n + 1);
+    paintSelection(all);
     if (!scroll) return;
     // like Vim: the first line shows the top of the buffer, the last one the ~ after it
     if (n === 0) scrollTo(0, 0);
@@ -81,11 +113,12 @@ export function VimChrome({ file }: { file: string }) {
     else all[n].scrollIntoView({ block: "nearest" });
   };
 
-  const yank = (text: string) => {
+  const yank = (text: string, count = 1) => {
     const shown = text || "(empty line)";
     const done = () => {
-      setMsg({ text: `1 line yanked: "${shown.length > 60 ? `${shown.slice(0, 60)}…` : shown}"` });
-      notify(true, shown);
+      const first = shown.split("\n")[0];
+      setMsg({ text: count > 1 ? `${count} lines yanked` : `1 line yanked: "${first.length > 60 ? `${first.slice(0, 60)}…` : first}"` });
+      notify(true, count > 1 ? `${count} lines: ${first}…` : shown);
       if (text === INSTALL) {
         document.querySelectorAll<HTMLButtonElement>("[data-yank]").forEach((b) => {
           b.classList.add("done");
@@ -219,6 +252,20 @@ export function VimChrome({ file }: { file: string }) {
         setCmd("");
         return;
       }
+      if (k === "V" || k === "v") {
+        pending = "";
+        if (anchor.current === null) startVisual();
+        else endVisual();
+        return;
+      }
+      if (anchor.current !== null) {
+        if (k === "y") {
+          e.preventDefault();
+          pending = "";
+          return yankSelection();
+        }
+        if (k === "Escape") return endVisual();
+      }
       if (k === "t" && !pending) {
         e.preventDefault();
         return colorscheme();
@@ -278,11 +325,11 @@ export function VimChrome({ file }: { file: string }) {
       )}
       <footer className="status">
         <div className="sl">
-          <span className={cmd !== null ? "mode cmdmode" : "mode"}>{cmd !== null ? "COMMAND" : "NORMAL"}</span>
+          <span className={cmd !== null ? "mode cmdmode" : visual ? "mode visual" : "mode"}>{cmd !== null ? "COMMAND" : visual ? "VISUAL LINE" : "NORMAL"}</span>
           <span className="file">{file}</span>
           <span className="cm hide-sm">[help][RO]</span>
           <span className="fill" />
-          <span className="cm hide-sm">j/k move · yy copy · t theme · : commands</span>
+          <span className="cm hide-sm">j/k move · yy copy · V select · t theme · : commands</span>
           <span className="pos">
             {line}:1 · {pos}
           </span>

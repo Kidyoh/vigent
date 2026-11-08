@@ -75,6 +75,10 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 /* the cursor line: where j/k put you, and what yy copies */
 .l.cursor { background: #18181c; box-shadow: inset 2px 0 0 var(--cyan); }
 .l.cursor::before { color: var(--yellow); font-weight: 600; }
+/* V / v: the lines a y will copy */
+.l.vsel { background: #26314a; }
+.l.vsel::before { color: var(--bright); }
+.sl .mode.visual { background: var(--magenta); }
 .l > * { min-width: 0; }
 .t { overflow-wrap: anywhere; }
 .tilde::before { counter-increment: none; content: "~"; text-align: left; color: var(--faint); padding-left: .5ch; }
