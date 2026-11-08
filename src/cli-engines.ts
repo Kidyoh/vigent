@@ -10,6 +10,7 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { expandPrompt } from "./attach.js";
 import { ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
 import { Session, type TranscriptItem } from "./session.js";
 import type { WorktreeInfo } from "./worktree.js";
@@ -39,6 +40,8 @@ export interface CliRunOptions {
 	cwd: string;
 	/** extra arguments from config ([engines.<id>] args) */
 	extraArgs?: string[];
+	/** files attached with `@path` (OpenCode takes them with -f) */
+	files?: string[];
 }
 
 export interface CliAdapter {
@@ -240,6 +243,7 @@ export const opencodeAdapter: CliAdapter = {
 			...(o.model ? ["-m", o.model] : []),
 			...(o.effort ? ["--variant", o.effort] : []),
 			...(o.resumeId ? ["--session", o.resumeId] : []),
+			...(o.files ?? []).flatMap((f) => ["-f", f]),
 			"--",
 			prompt,
 		];
@@ -357,8 +361,11 @@ export class CliSession extends Session {
 		this.pushUser(text);
 		this.setState("running");
 		this.aborted = false;
-		const args = this.adapter.args(text, {
+		const attached = expandPrompt(text, this.adapter.id, this.cwd);
+		if (attached.skipped.length) this.pushInfo(`not attached: ${attached.skipped.join(", ")}`);
+		const args = this.adapter.args(attached.prompt, {
 			cwd: this.cwd,
+			files: attached.files,
 			model: this.requestedModel,
 			effort: this.effort,
 			resumeId: this.resumeId,

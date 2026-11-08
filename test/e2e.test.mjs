@@ -169,6 +169,36 @@ test("first run: i, a task, Enter starts an agent on Claude Code in its own work
 	}
 });
 
+test("@ in a prompt: pick a file in a real terminal, and Claude Code gets the @path", { skip, timeout: 60000 }, async () => {
+	const repo2 = path.join(tmp, "shop2");
+	fs.mkdirSync(path.join(repo2, "src"), { recursive: true });
+	git(["init", "-q", "-b", "main"], repo2);
+	fs.writeFileSync(path.join(repo2, "src", "cart.js"), "export const total = () => 0;\n");
+	fs.writeFileSync(path.join(repo2, "README.md"), "# shop\n");
+	execFileSync("git", ["add", "-A"], { cwd: repo2 });
+	execFileSync("git", ["commit", "-qm", "init"], { cwd: repo2, env: { ...process.env, ...env } });
+	const before = fs.existsSync(claudeLog) ? fs.readFileSync(claudeLog, "utf8").trim().split("\n").length : 0;
+	const t = new Tty([], { cwd: repo2, env });
+	try {
+		await t.waitFor(/● Claude Code +default/);
+		await t.type("i");
+		await t.type("why is ");
+		await t.type("@");
+		await t.waitFor("Attach a file · shop2");
+		await t.waitFor("src/cart.js");
+		await t.type("cart");
+		await t.waitFor(/1\/1 · type to filter/);
+		await t.type("\r");
+		await t.waitFor("❯ why is @src/cart.js");
+		await t.type("zero?\r");
+		await t.waitFor(/│ done\s*$/m);
+		const calls = fs.readFileSync(claudeLog, "utf8").trim().split("\n").map(JSON.parse).slice(before);
+		assert.equal(calls.at(-1).args.at(-1), "why is @src/cart.js zero?", "Claude Code reads @path itself");
+	} finally {
+		t.kill();
+	}
+});
+
 test("vigent <folder> that isn't a folder says so", () => {
 	const r = spawnSync(process.execPath, [CLI, path.join(os.tmpdir(), "no-such-vigent-folder")], { env, encoding: "utf8" });
 	assert.equal(r.status, 1);

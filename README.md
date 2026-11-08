@@ -43,6 +43,14 @@ When an agent finishes, fails or needs you while you're looking at another one (
 
 Inside a git repository, press `i`, type what you want done, and press Enter. An agent starts on it in its own worktree, using pi if it has an API key, or else the first signed-in CLI (Claude Code, Codex, OpenCode; `:checkhealth` shows which). Watch it work, press `i` again to follow up, and `Esc` to go back to NORMAL mode. `:new <task> --engine codex` starts more agents, and `]s` / `[s` or `1`–`9` switch between them.
 
+### Pointing an agent at files
+
+Type `@` in a prompt and a file picker opens over it with the files in the agent's worktree (what git tracks plus new files, never what `.gitignore` hides). Type to narrow it, `Enter` writes `@src/cart.js`, `Esc` keeps a plain `@`, and `Backspace` takes the `@` back. Each engine gets the files its own way: Claude Code reads `@path` itself, OpenCode gets them with `-f`, and for Codex and pi vigent adds each file's contents under your prompt (text files up to 100 KB; the transcript notes any it left out). The transcript shows what you typed, with the mentions highlighted.
+
+![@ opens a file picker](docs/screenshots/attach-picker.png)
+
+![the prompt with its mentions, and the reply](docs/screenshots/attach-sent.png)
+
 ## From source
 
 ```bash

@@ -8,6 +8,7 @@
  */
 import {
 	type Component,
+	type OverlayOptions,
 	type Terminal,
 	truncateToWidth,
 	type TUI,
@@ -37,6 +38,7 @@ import * as fs from "node:fs";
 import { setDetached } from "./agents.js";
 import { dropPatch, parseDiff, restorePatch } from "./hunks.js";
 import { HunkReview } from "./hunk-review.js";
+import { listFiles, MENTION, mentionable } from "./attach.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
@@ -46,7 +48,7 @@ import { splitView, unifiedView } from "./diffview.js";
 import { TREE_GLYPHS, type TreeRow } from "./tree.js";
 import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
-import { ChoicePicker, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
+import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { EFFORTS, effortChoicesFor, modelChoices } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon } from "./icons.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
@@ -451,6 +453,11 @@ export class App implements Component {
 	}
 
 	private typeText(text: string) {
+		if (this.mode === "INSERT" && text === "@" && (this.inputBuf === "" || /\s$/.test(this.inputBuf))) {
+			this.inputBuf += text;
+			this.openAttach();
+			return;
+		}
 		if (this.mode === "INSERT") this.inputBuf += text;
 		else if (this.mode === "COMMAND" || this.mode === "SEARCH") this.cmdBuf += text;
 	}
@@ -1166,7 +1173,49 @@ export class App implements Component {
 	/** where model lists come from (replaced in tests) */
 	modelChoices: (engine: EngineId) => Promise<PickerChoice[]> = (engine) => modelChoices(engine);
 
-	private openChoices(title: string, items: PickerChoice[] | Promise<PickerChoice[]>, current: string, custom: boolean, done: (v: string) => void) {
+	/** where `@` finds files to attach (replaced in tests) */
+	listFiles: (cwd: string) => Promise<string[]> = (cwd) => listFiles(cwd);
+
+	/** the folder the focused agent works in: its worktree, or this checkout */
+	attachDir(): string {
+		const s = this.focusedSession as (Session & { cwd?: string }) | undefined;
+		return s?.cwd ?? s?.worktree?.path ?? this.workspace.root ?? process.cwd();
+	}
+
+	/**
+	 * `@` in the prompt: pick a file from the agent's folder. Enter writes
+	 * `@path `, Esc keeps a plain `@`, Backspace takes the `@` back.
+	 */
+	openAttach() {
+		const dir = this.attachDir();
+		const items = this.listFiles(dir).then((files) => files.filter(mentionable).map((value) => ({ value })));
+		const takeBack = () => {
+			if (this.inputBuf.endsWith("@")) this.inputBuf = this.inputBuf.slice(0, -1);
+		};
+		this.openChoices(
+			`Attach a file · ${path.basename(dir)}`,
+			items,
+			"",
+			false,
+			(v) => {
+				takeBack();
+				this.inputBuf += `@${v} `;
+			},
+			{ search: true, onBackOut: takeBack, rows: 8 },
+			// a completion menu: just above the prompt, where you're typing
+			{ anchor: "bottom-left", col: this.sidebarWidth(this.terminal.columns) + 2, offsetY: -2, width: Math.min(64, this.terminal.columns - 2) },
+		);
+	}
+
+	private openChoices(
+		title: string,
+		items: PickerChoice[] | Promise<PickerChoice[]>,
+		current: string,
+		custom: boolean,
+		done: (v: string) => void,
+		opts: ChoicePickerOptions = {},
+		place: OverlayOptions = { width: Math.min(72, this.terminal.columns - 4), anchor: "center" },
+	) {
 		this.seq.reset();
 		let handle: { hide(): void } | undefined;
 		const picker = new ChoicePicker(
@@ -1182,8 +1231,18 @@ export class App implements Component {
 				this.repaint();
 			},
 			() => this.tui.requestRender(),
+			{
+				...opts,
+				onBackOut: opts.onBackOut
+					? () => {
+							handle?.hide();
+							opts.onBackOut?.();
+							this.repaint();
+						}
+					: undefined,
+			},
 		);
-		handle = this.tui.showOverlay(picker, { width: Math.min(72, this.terminal.columns - 4), anchor: "center" });
+		handle = this.tui.showOverlay(picker, place);
 		this.tui.requestRender();
 	}
 
@@ -2518,7 +2577,12 @@ export class App implements Component {
 				case "user": {
 					push("", "");
 					wrapTextWithAnsi(item.text, paneW - 2).forEach((l, i) => {
-						push(P.p("VigentUser", I.prompt) + P.s("Normal") + P.p("Keyword", l), I.prompt + stripAnsi(l), {
+						const painted = l
+							.replace(MENTION, (m) => `\0${m}\0`)
+							.split("\0")
+							.map((part, i) => (!part ? "" : P.p(i % 2 ? "VigentMention" : "Keyword", part)))
+							.join("");
+						push(P.p("VigentUser", I.prompt) + P.s("Normal") + painted, I.prompt + stripAnsi(l), {
 							item: n,
 							start: i === 0,
 						});

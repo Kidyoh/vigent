@@ -6,6 +6,7 @@
  * - DemoSession replays a scripted transcript so the UI can be explored
  *   without API keys.
  */
+import { expandPrompt } from "./attach.js";
 import type { EngineId } from "./engines.js";
 import { flattenTree, type TreeGlyphs, type TreeRow } from "./tree.js";
 import { diffStat, type WorktreeInfo } from "./worktree.js";
@@ -450,10 +451,12 @@ export class PiSession extends Session {
 	send(text: string): void {
 		this.pushUser(text);
 		this.setState("running");
+		const attached = expandPrompt(text, "pi", this.cwd);
+		if (attached.skipped.length) this.pushInfo(`not attached: ${attached.skipped.join(", ")}`);
 		this.ready
 			// pi reports agent_end a moment before it accepts the next prompt (queued prompts hit this)
 			.then(() => this.session.agent?.waitForIdle?.())
-			.then(() => this.session.prompt(text))
+			.then(() => this.session.prompt(attached.prompt))
 			.catch((err: any) => {
 				const text = String(err?.message ?? err);
 				// pi's own advice (/login, its docs paths) is for pi's TUI, not vigent: keep its first line

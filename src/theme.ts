@@ -125,6 +125,8 @@ const LINKS: Record<string, string> = {
 	VigentSidebar: "NeoTreeNormal",
 	VigentIndent: "NeoTreeIndentMarker",
 	VigentUser: "Title",
+	/** `@path` in a prompt */
+	VigentMention: "Directory",
 	VigentTool: "Function",
 	VigentToolOutput: "Comment",
 	VigentSpinner: "WarningMsg",

@@ -371,3 +371,4 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<BS>` `<C-h>` | `edit.backspace` (on an empty command line, leaves it) |
 | `<C-w>` | `edit.delete_word` |
 | `<C-u>` | `edit.clear` |
+| `@` | in INSERT, at the start of a word: pick a file to attach (`Esc` keeps a plain `@`) |

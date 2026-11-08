@@ -215,6 +215,7 @@ vigent's own groups:
 | `VigentIndent` | sidebar tree guides | `NeoTreeIndentMarker` → `NonText` |
 | `VigentModeNormal`, `VigentModeInsert`, `VigentModeVisual`, `VigentModeCommand` | statusline mode badge | derived from `Function` / `String` / `Statement` / `WarningMsg` |
 | `VigentUser` | the `❯` before your prompts | `Title` |
+| `VigentMention` | `@path` file mentions in your prompts | `Directory` |
 | `VigentTool` | tool names in the transcript | `Function` |
 | `VigentToolOutput` | unfolded tool output | `Comment` |
 | `VigentSpinner` | running indicator | `WarningMsg` |

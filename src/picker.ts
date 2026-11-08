@@ -232,6 +232,15 @@ export interface PickerChoice {
 	note?: string;
 }
 
+export interface ChoicePickerOptions {
+	/** open with the search already started: typing filters right away */
+	search?: boolean;
+	/** Backspace on an empty search: the picker was opened by a key, and this takes it back */
+	onBackOut?: () => void;
+	/** how many choices show at once */
+	rows?: number;
+}
+
 /**
  * A list to pick from (`:model`, `:effort`), vim-style. `j`/`k` (↓/↑, Ctrl-n/p,
  * Tab) move, `g`/`G` jump to the top/bottom, Enter picks, `q`/Esc closes.
@@ -246,6 +255,8 @@ export class ChoicePicker implements Component {
 	private scroll = 0;
 	private items: PickerChoice[] = [];
 	private loading = true;
+	private onBackOut?: () => void;
+	private rows: number;
 
 	constructor(
 		private painter: Painter,
@@ -256,13 +267,17 @@ export class ChoicePicker implements Component {
 		private custom: boolean,
 		private onDone: (value: string | null) => void,
 		private requestRender: () => void,
+		opts: ChoicePickerOptions = {},
 	) {
+		this.searching = opts.search ?? false;
+		this.rows = opts.rows ?? VISIBLE;
+		this.onBackOut = opts.onBackOut;
 		Promise.resolve(items)
 			.then((list) => {
 				this.items = list;
 				this.loading = false;
 				this.index = Math.max(0, list.findIndex((c) => c.value === current));
-				this.scroll = Math.max(0, this.index - VISIBLE + 1);
+				this.scroll = Math.max(0, this.index - this.rows + 1);
 				this.requestRender();
 			})
 			.catch(() => {
@@ -293,6 +308,7 @@ export class ChoicePicker implements Component {
 			if (key === "escape") this.searching = false; // the filter stays; j/k move through it
 			else if (key === "backspace") {
 				if (this.query) this.query = this.query.slice(0, -1);
+				else if (this.onBackOut) return this.onBackOut();
 				else this.searching = false;
 				this.index = 0;
 			} else if (key === "ctrl+u") {
@@ -331,7 +347,7 @@ export class ChoicePicker implements Component {
 			}
 		}
 		if (this.index < this.scroll) this.scroll = this.index;
-		if (this.index >= this.scroll + VISIBLE) this.scroll = this.index - VISIBLE + 1;
+		if (this.index >= this.scroll + this.rows) this.scroll = this.index - this.rows + 1;
 		this.requestRender();
 	}
 
@@ -346,7 +362,7 @@ export class ChoicePicker implements Component {
 		const row = (content: string, used: number, rowBg = bg) =>
 			border(I.v) + content + P.on("NormalFloat", rowBg) + " ".repeat(Math.max(0, inner - used)) + RESET + border(I.v);
 		const items = this.filtered();
-		const title = ` ${this.title} `;
+		const title = truncateToWidth(` ${this.title} `, Math.max(0, inner - 2), "…");
 		const lines = [border(I.tl + I.h) + P.on("FloatTitle", bg) + title + RESET + border(I.h.repeat(Math.max(0, inner - 1 - visibleWidth(title))) + I.tr)];
 		if (this.searching) {
 			lines.push(row(P.on("Title", bg) + ` ${I.prompt} ` + RESET + P.on("NormalFloat", bg) + this.query + P.on("PmenuSel", undefined) + " " + RESET, visibleWidth(this.query) + 4));
@@ -356,8 +372,8 @@ export class ChoicePicker implements Component {
 			lines.push(row(P.on("Comment", bg) + ` ${I.prompt} ${text}` + RESET, visibleWidth(text) + 3));
 		}
 		lines.push(border(I.lt + I.h.repeat(inner) + I.rt));
-		const shown = items.slice(this.scroll, this.scroll + VISIBLE);
-		for (let i = 0; i < VISIBLE; i++) {
+		const shown = items.slice(this.scroll, this.scroll + this.rows);
+		for (let i = 0; i < this.rows; i++) {
 			const c = shown[i];
 			if (!c) {
 				let text = "";
