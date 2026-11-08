@@ -6,4 +6,8 @@ export default defineConfig({
   theme: {
     default: "dark",
   },
+  // `pnpm build` writes Vercel's prebuilt output (.vercel/output); `pnpm run deploy` uploads it
+  deploy: {
+    target: "vercel",
+  },
 });
