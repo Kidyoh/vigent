@@ -1,6 +1,7 @@
 import type { Metadata } from "@farm.js/core";
 import type { ReactNode } from "react";
 import { Heading, HelpLink, KeyRow, L, Tilde } from "../../components/buffer";
+import { Outline, type OutlineSection } from "../../components/outline";
 import { Tabline } from "../../components/tabline";
 import { VimChrome } from "../../components/vim-chrome";
 import { INSTALL, VERSION } from "../../lib/site";
@@ -18,6 +19,33 @@ const INDEX: [string, [string, string][]][] = [
   ["Harness", [["engines", "engines"], ["worktrees", "worktrees"], ["riftri", "riftri"], ["review", "review & land"]]],
   ["Use", [["keys", "keys"], ["commands", "commands"], ["model", "model & effort"]]],
   ["Make it yours", [["config", "config.toml"], ["themes", "themes & icons"]]],
+];
+
+/** Every heading on the page, in order, for the outline on the right. */
+const OUTLINE: OutlineSection[] = [
+  { id: "start", tag: "vigent-start", title: "Getting started" },
+  { id: "first", tag: "vigent-first", title: "Your first agent" },
+  { id: "engines", tag: "vigent-engines", title: "Engines" },
+  { id: "worktrees", tag: "vigent-worktrees", title: "Worktrees" },
+  { id: "riftri", tag: "vigent-riftri", title: "riftri" },
+  { id: "review", tag: "vigent-review", title: "Review & land" },
+  { id: "keys", tag: "vigent-keys", title: "Keys" },
+  { id: "commands", tag: "vigent-commands", title: "Commands" },
+  { id: "model", tag: "vigent-model", title: "Model & effort" },
+  { id: "config", tag: "vigent-config", title: "config.toml" },
+  { id: "themes", tag: "vigent-themes", title: "Themes & icons" },
+];
+
+const QUICK_KEYS: [string, string][] = [
+  ["i", "prompt the agent"],
+  ["Esc", "back to NORMAL"],
+  [":new", "another agent"],
+  [":engine", "pick the engine"],
+  [":diff", "see its changes"],
+  [":merge", "land it, squashed"],
+  [":pr", "open a pull request"],
+  ["<Space>", "which-key"],
+  ["?", "every key"],
 ];
 
 /** A code block inside the buffer. */
@@ -297,6 +325,7 @@ export default function DocsPage() {
           <L className="cm">vim:tw=78:ts=8:ft=help:norl:</L>
           <Tilde count={2} />
         </main>
+        <Outline sections={OUTLINE} keys={QUICK_KEYS} />
       </div>
       <VimChrome file="doc/vigent.txt" />
     </>

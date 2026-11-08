@@ -259,6 +259,41 @@ button.sw:hover, button.sw:focus-visible { border-color: var(--faint); color: va
   .side a.on::before { content: "▸"; }
 }
 
+/* ---- docs: an outline on the right, like a tagbar split; only where there's room for it ---- */
+.outline { display: none; }
+@media (min-width: 1360px) {
+  .docs { grid-template-columns: 26ch minmax(0, 1fr) 34ch; }
+  /* between two rails, the text sits in the middle like the home page, not against the index */
+  .docs .l { margin-inline: auto; }
+  .outline {
+    --side-top: calc(env(safe-area-inset-top, 0px) + var(--tab-h));
+    display: block;
+    position: sticky; top: var(--side-top); align-self: start;
+    height: calc(100vh - var(--side-top)); height: calc(100dvh - var(--side-top));
+    overflow-y: auto; overscroll-behavior: contain;
+    background: var(--panel); border-left: 1px solid var(--line);
+    padding: 12px max(1ch, env(safe-area-inset-right, 0px)) calc(var(--status-h) + 16px + env(safe-area-inset-bottom, 0px)) 0;
+  }
+  .outline .head { display: flex; justify-content: space-between; color: var(--dim); padding: 0 1.5ch 6px; }
+  .outline .pos { color: var(--faint); }
+  .outline .keys-head { padding-top: 18px; }
+  .outline a {
+    display: block; padding: 0 1.5ch; text-decoration: none; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: color 140ms cubic-bezier(0.22, 1, 0.36, 1), background-color 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .outline a::before { content: "  "; white-space: pre; color: var(--faint); }
+  .outline a:hover { color: var(--bright); background: var(--cursorline); }
+  .outline a:focus-visible { outline: 1px solid var(--cyan); outline-offset: -1px; color: var(--bright); }
+  .outline a.on { color: var(--cyan); background: var(--on, #1a1a1d); }
+  .outline a.on::before { content: "▸ "; color: var(--cyan); }
+  .outline dl { margin: 0; padding: 0 1.5ch; }
+  .outline dl > div { display: grid; grid-template-columns: 9ch minmax(0, 1fr); column-gap: 1ch; }
+  .outline dt { color: var(--yellow); white-space: nowrap; }
+  .outline dd { margin: 0; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+@media (min-width: 1360px) and (prefers-reduced-motion: reduce) { .outline a { transition: none; } }
+
 /* ---- statusline and command line ---- */
 .status {
   position: fixed; inset: auto 0 0 0; z-index: 6; background: var(--bar); border-top: 1px solid var(--line);
