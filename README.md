@@ -85,6 +85,7 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 | NORMAL | `i` / `a` / `o` | Enter INSERT and type a prompt for the focused agent (it waits in a queue if the agent is busy). With no agent yet, the prompt starts one |
 | NORMAL | `j` `k` `gg` `G` `Ctrl-d` `Ctrl-u` `{` `}` | Scroll the transcript, or jump between messages |
 | NORMAL | `]s` `[s` `1`–`9` `Ctrl-^` | Switch agents |
+| NORMAL | `<Space>e` | Move the cursor into the SESSIONS sidebar, like neo-tree: `j`/`k` (or `gg`/`G`, `1`–`9`) pick an agent and show it, Enter / Esc / `l` / `<Space>e` go back to the transcript |
 | NORMAL | `za` `zR` `zM` | Toggle, open or close tool-output folds |
 | NORMAL | `/pattern` `?pattern` `n` `N` | Search the transcript, forward or backward |
 | NORMAL | `V` / `v` | VISUAL: select lines with `j` `k`, `ib` for a code block, `y` to copy |
@@ -113,7 +114,7 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 | `codex` | `codex exec --json` (`exec resume` to continue) | `-c sandbox_mode="workspace-write"` |
 | `opencode` | `opencode run --format json --dir <worktree>` | none |
 
-**Model and effort:** `:model` (`<Space>M`) opens a picker with the models the agent's engine offers (Claude Code's model names, Codex's own catalog from `codex debug models`, OpenCode's `opencode models`, or pi's for the providers you have a key for). In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>e`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
+**Model and effort:** `:model` (`<Space>M`) opens a picker with the models the agent's engine offers (Claude Code's model names, Codex's own catalog from `codex debug models`, OpenCode's `opencode models`, or pi's for the providers you have a key for). In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>R`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 

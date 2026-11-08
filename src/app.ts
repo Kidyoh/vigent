@@ -206,6 +206,10 @@ export class App implements Component {
 	mode: Mode = "NORMAL";
 	sessions: Session[] = [];
 	focusIdx = 0;
+	/** <leader>e: the cursor is in the SESSIONS sidebar (j/k pick an agent, Enter / Esc / l go back) */
+	sidebarFocused = false;
+	/** a key typed in the sidebar that needs a second one (gg, <leader>e) */
+	private sidebarPending = "";
 	altIdx = 0;
 
 	private cmdBuf = "";
@@ -454,6 +458,10 @@ export class App implements Component {
 		}
 		const key = keyFromInput(data);
 		if (!key) return;
+		if (this.sidebarFocused && this.sidebarKey(key)) {
+			this.tui.requestRender();
+			return;
+		}
 		if (this.mode === "NORMAL" && this.seq.pendingKeys.length === 0) this.message = "";
 		for (const k of this.splitEscape(key)) this.seq.feed(k);
 		this.tui.requestRender();
@@ -627,6 +635,8 @@ export class App implements Component {
 				return;
 			case "session.alternate":
 				return this.focusSession(this.altIdx);
+			case "sidebar.focus":
+				return this.toggleSidebarFocus();
 			case "session.goto": {
 				const n = Number(arg);
 				if (!Number.isInteger(n) || n < 1) this.setMessage(`session.goto needs a number, got '${arg ?? ""}'`, "ErrorMsg");
@@ -2744,6 +2754,87 @@ export class App implements Component {
 	 *   winbar header, number column (session index, used by 1-9),
 	 *   tree guides, cursorline on the focused session, ~ filler rows.
 	 */
+	/** <leader>e, like neo-tree in Neovim: move the cursor into the SESSIONS sidebar, or back to the transcript. */
+	toggleSidebarFocus() {
+		if (this.sidebarFocused) return this.leaveSidebar();
+		if (this.sessions.length === 0) {
+			this.setMessage("no agents yet (i or :new starts one)", "Comment");
+			return;
+		}
+		if (this.sidebarWidth(this.terminal.columns) === 0) {
+			// no room for the sidebar (or it's turned off): the same choice as a list
+			this.openDashboard();
+			return;
+		}
+		this.mode = "NORMAL";
+		this.sidebarFocused = true;
+		this.sidebarPending = "";
+		this.sidebarHint();
+	}
+
+	private leaveSidebar() {
+		this.sidebarFocused = false;
+		this.sidebarPending = "";
+		this.message = "";
+	}
+
+	private sidebarHint() {
+		const s = this.focusedSession;
+		this.setMessage(`-- SESSIONS -- ${s ? `${this.focusIdx + 1} ${s.name} · ` : ""}j/k move · Enter open · Esc back`, "ModeMsg");
+	}
+
+	/** A key while the sidebar has the cursor. Keys it doesn't use go back to the transcript and run there. */
+	private sidebarKey(key: string): boolean {
+		const n = this.sessions.length;
+		const pending = this.sidebarPending;
+		this.sidebarPending = "";
+		const go = (i: number) => {
+			if (n === 0) return;
+			this.focusSession(Math.max(0, Math.min(n - 1, i)));
+			this.sidebarHint();
+		};
+		if (pending === this.keymap.leader && key === "e") {
+			this.leaveSidebar();
+			return true;
+		}
+		switch (key) {
+			case "j":
+			case "<Down>":
+				go(this.focusIdx + 1);
+				return true;
+			case "k":
+			case "<Up>":
+				go(this.focusIdx - 1);
+				return true;
+			case "G":
+				go(n - 1);
+				return true;
+			case "g":
+				if (pending === "g") go(0);
+				else this.sidebarPending = "g";
+				return true;
+			case "<CR>":
+			case "l":
+			case "o":
+			case "<Esc>":
+			case "q":
+				this.leaveSidebar();
+				return true;
+		}
+		if (/^[1-9]$/.test(key)) {
+			go(Number(key) - 1);
+			return true;
+		}
+		if (key === this.keymap.leader) {
+			this.sidebarPending = key;
+			return true;
+		}
+		// anything else (:, i, /, ...) works as usual, back in the transcript
+		this.leaveSidebar();
+		if (pending === this.keymap.leader) this.seq.feed(pending);
+		return false;
+	}
+
 	private renderSidebar(w: number, h: number): string[] {
 		const P = this.painter;
 		const base = P.attr("VigentSidebar");
@@ -2767,10 +2858,10 @@ export class App implements Component {
 		// winbar
 		const running = this.sessions.filter((x) => x.state === "running").length;
 		const right = running > 0 ? `${running} running ` : `${this.sessions.length} `;
-		const title = " SESSIONS";
+		const title = this.sidebarFocused ? `${I.folded} SESSIONS` : " SESSIONS";
 		lines.push(
 			row([
-				["WinBar", title],
+				[this.sidebarFocused ? "Title" : "WinBar", title],
 				["VigentSidebar", " ".repeat(Math.max(1, w - visibleWidth(title) - visibleWidth(right)))],
 				["Comment", right],
 			]),
@@ -2779,7 +2870,8 @@ export class App implements Component {
 		this.sessions.forEach((s, i) => {
 			const last = i === this.sessions.length - 1;
 			const focused = i === this.focusIdx;
-			const rowBg = focused ? clBg : bg;
+			// with the cursor in the sidebar, its row reads as a selection
+			const rowBg = focused ? (this.sidebarFocused ? (P.attr("PmenuSel").bg ?? P.attr("Visual").bg ?? clBg) : clBg) : bg;
 			const glyphGroup =
 				s.state === "running"
 					? "String"

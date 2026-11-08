@@ -412,3 +412,39 @@ test("markdown: text after **bold** or `code` keeps the theme's text color", () 
 	const afterBold = line.text.slice(line.text.indexOf("bold") + 4);
 	assert.ok(afterBold.indexOf(P.s("Normal")) < afterBold.indexOf("after") && afterBold.includes(P.s("Normal")), "Normal comes back before 'after'");
 });
+
+test("<Space>e puts the cursor in the sessions sidebar: j/k pick an agent, Enter goes back", () => {
+	const sessions = ["fix flaky test", "auth refactor", "docs pass"].map((name) => {
+		const s = sessionWithReply();
+		s.name = name;
+		return s;
+	});
+	const { app, type, screen } = makeApp({ sessions });
+	app.focusSession(0);
+	type(" ", "e");
+	assert.equal(app.sidebarFocused, true);
+	assert.match(app.message, /-- SESSIONS -- 1 fix flaky test · j\/k move · Enter open · Esc back/);
+	assert.match(screen(), /▸ SESSIONS/, "the sidebar title shows it has the cursor");
+	type("j");
+	assert.equal(app.focusedSession.name, "auth refactor", "j moves down and shows that agent");
+	type("j", "j");
+	assert.equal(app.focusedSession.name, "docs pass", "stops at the last one");
+	type("k");
+	assert.equal(app.focusedSession.name, "auth refactor");
+	type("g", "g");
+	assert.equal(app.focusedSession.name, "fix flaky test");
+	type("3");
+	assert.equal(app.focusedSession.name, "docs pass");
+	type("\r");
+	assert.equal(app.sidebarFocused, false, "Enter goes back to the transcript, on that agent");
+	assert.equal(app.focusedSession.name, "docs pass");
+
+	type(" ", "e");
+	type(" ", "e");
+	assert.equal(app.sidebarFocused, false, "<Space>e again goes back too");
+	type(" ", "e", "\x1b");
+	assert.equal(app.sidebarFocused, false, "and so does Esc");
+	type(" ", "e", ":");
+	assert.equal(app.sidebarFocused, false);
+	assert.equal(app.mode, "COMMAND", "other keys work as usual, back in the transcript");
+});

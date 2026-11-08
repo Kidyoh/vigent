@@ -154,7 +154,8 @@ export default function HomePage() {
         <KeyRow k="]s  [s  1–9">switch agents</KeyRow>
         <KeyRow k="<Space>E">pick the engine</KeyRow>
         <KeyRow k="<Space>M">pick the model</KeyRow>
-        <KeyRow k="<Space>e">reasoning effort</KeyRow>
+        <KeyRow k="<Space>e">sessions sidebar: j/k pick an agent</KeyRow>
+        <KeyRow k="<Space>R">reasoning effort</KeyRow>
         <KeyRow k="/pattern">search the transcript</KeyRow>
         <KeyRow k="yy  yib">copy the last reply / a code block</KeyRow>
         <KeyRow k="?">every key, yours first</KeyRow>

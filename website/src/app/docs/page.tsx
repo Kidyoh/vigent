@@ -267,7 +267,7 @@ export default function DocsPage() {
           <Heading id="model" title="MODEL & EFFORT" tag="vigent-model" />
           <L>
             <HelpLink>:model</HelpLink> (<K>&lt;Space&gt;M</K>) lists what the agent's engine offers: Claude Code's model names, Codex's own catalog, OpenCode's
-            providers. <HelpLink>:effort</HelpLink> (<K>&lt;Space&gt;e</K>) sets reasoning effort. Both apply from the next prompt and survive a restart. In every
+            providers. <HelpLink>:effort</HelpLink> (<K>&lt;Space&gt;R</K>) sets reasoning effort. Both apply from the next prompt and survive a restart. In every
             menu: <K>j</K>/<K>k</K> move, Enter picks, <K>q</K> closes, <K>/</K> searches.
           </L>
           <L />

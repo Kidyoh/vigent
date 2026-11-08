@@ -72,7 +72,7 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	assert.equal(s.chosenModel, "opus");
 	assert.match(app.message, /model for 'racer' \(Claude Code\): opus \(from the next prompt\)/);
 
-	[" ", "e"].forEach((k) => app.handleInput(k)); // <leader>e
+	[" ", "R"].forEach((k) => app.handleInput(k)); // <leader>R
 	await tick();
 	const efforts = overlays.at(-1);
 	screen = plain(efforts.render(70));

@@ -192,7 +192,7 @@ model = "anthropic/claude-sonnet-4-5"         # provider/model
 
 Type to filter. Enter on text that matches nothing uses the typed name as-is.
 
-`:effort` (`<Space>e`) picks the reasoning effort the same way.
+`:effort` (`<Space>R`) picks the reasoning effort the same way.
 
 Both apply from the agent's next prompt, show in the winbar (`claude-fable-5 · high`), and are saved with the agent, so they survive a restart. With no agent open, they set the model and effort for new agents. Those are also in `:settings`. `:model <name>` and `:effort <level>` skip the picker.
 
@@ -373,7 +373,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>r` | `:review<CR>` (keep or drop the agent's changes hunk by hunk) |
 | `<leader>T` | `:templates<CR>` (start an agent from a template) |
 | `<leader>M` | `:model<CR>` (pick the focused agent's model) |
-| `<leader>e` | `:effort<CR>` (pick its reasoning effort) |
+| `<leader>e` | `sidebar.focus` (move the cursor into the sessions sidebar: `j`/`k` pick an agent, Enter or Esc go back) |
+| `<leader>R` | `:effort<CR>` (pick its reasoning effort) |
 | `<leader>E` | `:engine<CR>` (pick the engine new agents run on) |
 
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)

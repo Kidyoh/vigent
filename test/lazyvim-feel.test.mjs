@@ -59,7 +59,8 @@ test("which-key: the panel lists what follows <Space>, in the app", async () => 
 	assert.match(screen, /n → Start an agent in its own worktree/);
 	assert.match(screen, /t → Pick a colorscheme/);
 	assert.match(screen, /M → Pick the agent's model/);
-	assert.match(screen, /e → Pick its reasoning effort/);
+	assert.match(screen, /R → Pick its reasoning effort/);
+	assert.match(screen, /e → Sessions sidebar: j\/k pick an agent/);
 	assert.match(screen, /s → Theme, look, engine/);
 	assert.match(screen, /Esc cancels/);
 	app.handleInput("t");
