@@ -116,6 +116,10 @@ a.link:hover { text-decoration: underline; }
 .install code::before { content: "$ "; color: var(--dim); }
 .yank { font: inherit; font-size: 12.5px; color: var(--dim); background: none; border: 1px solid var(--faint); padding: 1px 1.2ch; cursor: pointer; transition: color .15s, border-color .15s; }
 .yank.done { color: var(--green); border-color: var(--green); }
+.doclink { color: var(--blue); text-decoration: none; margin-left: auto; }
+.doclink:hover { text-decoration: underline; }
+a.tag { text-decoration: none; }
+a.tag:hover { text-decoration: underline; }
 .yank:hover, .yank:focus-visible { color: var(--bright); border-color: var(--bright); outline: none; }
 
 /* what the harness does, in facts people can check */

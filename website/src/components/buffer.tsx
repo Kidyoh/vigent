@@ -32,14 +32,29 @@ export function Rule() {
 }
 
 /** A :help section heading with its *tag* on the right. */
-export function Heading({ id, title, tag }: { id: string; title: string; tag: string }) {
+export function Heading({ id, title, tag, doc }: { id: string; title: string; tag: string; doc?: string }) {
   return (
     <div className="l" id={id}>
       <h2 className="t row">
         <span className="hl">{title}</span>
-        <span className="tag">*{tag}*</span>
+        {doc ? (
+          <a className="tag" href={doc} title="Read this in the docs">
+            *{tag}*
+          </a>
+        ) : (
+          <span className="tag">*{tag}*</span>
+        )}
       </h2>
     </div>
+  );
+}
+
+/** "more: |vigent-x|" at the end of a section, pointing into the docs. */
+export function More({ href, tag, what }: { href: string; tag: string; what: string }) {
+  return (
+    <L className="more">
+      <span className="cm">{what} →</span> <HelpLink href={href}>{tag}</HelpLink>
+    </L>
   );
 }
 

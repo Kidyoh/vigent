@@ -1,5 +1,5 @@
 import type { Metadata } from "@farm.js/core";
-import { Heading, HelpLink, KeyRow, L, Rule, Tilde } from "../components/buffer";
+import { Heading, HelpLink, KeyRow, L, More, Rule, Tilde } from "../components/buffer";
 import { Screen } from "../components/screen";
 import { Tabline } from "../components/tabline";
 import { VimChrome } from "../components/vim-chrome";
@@ -53,7 +53,9 @@ export default function HomePage() {
               yy copy
             </button>
             <span className="cm">then</span> <span className="str">vigent .</span>
-
+            <a className="doclink" href="/docs">
+              read the docs →
+            </a>
           </L>
           <L className="facts">
             <div className="fact">
@@ -75,7 +77,7 @@ export default function HomePage() {
         </section>
 
         <Rule />
-        <Heading id="install" title="1. Install" tag="vigent-install" />
+        <Heading id="install" title="1. Install" tag="vigent-install" doc="/docs#start" />
         <L />
         <L className="indent">
           <span className="str">{INSTALL}</span> <span className="cm">" Node 20+, macOS, Linux, Windows</span>
@@ -91,7 +93,7 @@ export default function HomePage() {
         <L />
 
         <Rule />
-        <Heading id="harness" title="2. Worktrees, fast" tag="vigent-riftri" />
+        <Heading id="harness" title="2. Worktrees, fast" tag="vigent-riftri" doc="/docs#riftri" />
         <L />
         <L>
           A plain worktree is a full copy of your checkout. riftri makes each agent's worktree a real git linked worktree whose unchanged files share storage, so a
@@ -121,10 +123,11 @@ export default function HomePage() {
         <KeyRow k=":diff">what the agent changed, hunk by hunk</KeyRow>
         <KeyRow k=":merge">squash it into your branch as one commit</KeyRow>
         <KeyRow k=":pr">or push the branch and open a pull request</KeyRow>
+        <More href="/docs#worktrees" tag="vigent-worktrees" what="worktrees, riftri and landing work" />
         <L />
 
         <Rule />
-        <Heading id="engines" title="3. Engines" tag="vigent-engines" />
+        <Heading id="engines" title="3. Engines" tag="vigent-engines" doc="/docs#engines" />
         <L />
         <L>vigent is the harness. The agents are the ones you already use, with the logins they already have. vigent never reads their credentials.</L>
         <L />
@@ -139,10 +142,11 @@ export default function HomePage() {
         <L className="indent">
           <span className="str">:new fix the flaky test --engine codex</span>
         </L>
+        <More href="/docs#engines" tag="vigent-engines" what="signing in, auto, per-agent engines" />
         <L />
 
         <Rule />
-        <Heading id="keys" title="4. Keys" tag="vigent-keys" />
+        <Heading id="keys" title="4. Keys" tag="vigent-keys" doc="/docs#keys" />
         <L />
         <L>If you know Neovim, you already know most of it.</L>
         <L />
@@ -154,10 +158,11 @@ export default function HomePage() {
         <KeyRow k="/pattern">search the transcript</KeyRow>
         <KeyRow k="yy  yib">copy the last reply / a code block</KeyRow>
         <KeyRow k="?">every key, yours first</KeyRow>
+        <More href="/docs#keys" tag="vigent-keys" what="every key and command" />
         <L />
 
         <Rule />
-        <Heading id="themes" title="5. Themes" tag="vigent-themes" />
+        <Heading id="themes" title="5. Themes" tag="vigent-themes" doc="/docs#themes" />
         <L />
         <L>
           25 colorschemes built in, any Vim or Neovim theme imports, and Nerd Font icons like AstroNvim. Or follow the theme your Neovim config sets:{" "}
@@ -182,6 +187,7 @@ export default function HomePage() {
             </button>
           ))}
         </L>
+        <More href="/docs#themes" tag="vigent-themes" what="importing your Neovim theme, icons" />
         <L />
         <Rule />
         <L className="cm">vim:tw=78:ts=8:ft=help:norl:</L>
