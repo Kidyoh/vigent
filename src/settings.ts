@@ -7,7 +7,7 @@
  * Changes apply at once. A key row waits for the new keys: type them, then
  * Enter (Esc cancels).
  */
-import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "./tui.js";
 import { keyFromInput } from "./keys.js";
 import type { PickerIcons } from "./picker.js";
 import { type Painter, RESET } from "./theme.js";

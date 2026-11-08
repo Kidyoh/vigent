@@ -240,4 +240,14 @@ test("the packed npm package installs and runs as `vigent`", { skip: skip || (!o
 	assert.equal(execFileSync(vigent, ["--version"], { env, encoding: "utf8" }).trim(), `vigent ${pkg.version}`, "no commit: it's not a clone");
 	assert.match(execFileSync(vigent, ["theme", "list"], { env, encoding: "utf8" }), /^lazyvim\b/m);
 	assert.match(execFileSync(vigent, ["--help"], { env, encoding: "utf8" }), /engines \(what runs new agents/);
+
+	// the light install, for Claude Code / Codex / OpenCode only: no pi engine, a few MB
+	// (npm ignores --omit=optional with -g, so it goes in a folder of its own, as the README says)
+	const light = path.join(tmp, "light");
+	execFileSync("npm", ["install", "--prefix", light, "--omit=optional", "--no-audit", "--no-fund", path.join(out, tgz)], { stdio: "ignore" });
+	const lib = path.join(light, "node_modules");
+	assert.ok(!fs.existsSync(path.join(lib, "@mariozechner", "pi-coding-agent")), "no pi engine");
+	const size = (dir) => fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? size(path.join(dir, e.name)) : e.isFile() ? fs.statSync(path.join(dir, e.name)).size : 0), 0);
+	assert.ok(size(lib) < 15 * 1024 * 1024, `light install is ${(size(lib) / 1024 / 1024).toFixed(1)} MB`);
+	assert.equal(execFileSync(path.join(lib, ".bin", "vigent"), ["--version"], { env, encoding: "utf8" }).trim(), `vigent ${pkg.version}`);
 });

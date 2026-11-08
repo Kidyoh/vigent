@@ -3,7 +3,7 @@
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
+import { ProcessTerminal, TUI } from "./tui.js";
 import { type AgentMeta, loadAgentMeta, reopenableAgents, saveAgentMeta, sessionDir } from "./agents.js";
 import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";

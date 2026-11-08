@@ -7,6 +7,7 @@
  *   without API keys.
  */
 import { expandPrompt } from "./attach.js";
+import { loadPiAi, loadPiSdk } from "./pi-sdk.js";
 import type { EngineId } from "./engines.js";
 import { flattenTree, type TreeGlyphs, type TreeRow } from "./tree.js";
 import { diffStat, type WorktreeInfo } from "./worktree.js";
@@ -318,7 +319,7 @@ export class PiSession extends Session {
 	}
 
 	private async init() {
-		const sdk = await import("@mariozechner/pi-coding-agent");
+		const sdk = await loadPiSdk();
 		const sessionManager = this.opts.sessionDir
 			? sdk.SessionManager.continueRecent(this.cwd, this.opts.sessionDir)
 			: sdk.SessionManager.inMemory();
@@ -560,7 +561,7 @@ function summarizeArgs(args: any): string {
 
 /** A pi-ai model from "provider/model", or a bare id (Anthropic's). Undefined when pi doesn't know it. */
 export async function piModel(id: string): Promise<unknown> {
-	const ai: any = await import("@mariozechner/pi-ai");
+	const ai: any = await loadPiAi();
 	const slash = id.indexOf("/");
 	const [provider, modelId] = slash > 0 ? [id.slice(0, slash), id.slice(slash + 1)] : ["anthropic", id];
 	try {

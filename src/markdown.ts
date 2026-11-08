@@ -4,7 +4,7 @@
  * bullet lists, and > quotes (Comment). Code blocks are numbered so
  * VISUAL-mode `ib` and `yib` can select them.
  */
-import { wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { wrapTextWithAnsi } from "./tui.js";
 import { type Painter, RESET } from "./theme.js";
 
 export interface MdLine {

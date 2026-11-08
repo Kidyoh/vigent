@@ -6,7 +6,7 @@
  *   X  drop the whole file               u  undo the last drop
  *   q / Esc  close
  */
-import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "./tui.js";
 import type { FileDiff, Hunk } from "./hunks.js";
 import { patchFor } from "./hunks.js";
 import { keyFromInput } from "./keys.js";

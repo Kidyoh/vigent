@@ -4,7 +4,7 @@
  * Type to filter, arrows / Ctrl-n / Ctrl-p / Tab to move (each move previews
  * the theme live), Enter to keep it, Esc to go back to the previous theme.
  */
-import { type Component, fuzzyFilter, parseKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Component, fuzzyFilter, parseKey, truncateToWidth, visibleWidth } from "./tui.js";
 import { type Painter, RESET, sgr } from "./theme.js";
 
 /** What the picker shows next to a theme's name: its colors, and dark / light / transparent. */

@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { PI_INSTALL, piInstalled } from "./pi-sdk.js";
 
 export type EngineId = "pi" | "claude" | "codex" | "opencode";
 export const ENGINE_IDS: EngineId[] = ["pi", "claude", "codex", "opencode"];
@@ -120,7 +121,10 @@ function firstVersion(s: string): string | undefined {
 	return /\d+\.\d+\.\d+[\w.-]*/.exec(s)?.[0];
 }
 
-function detectPi(env: NodeJS.ProcessEnv): EngineInfo {
+export function detectPi(env: NodeJS.ProcessEnv, installed = piInstalled()): EngineInfo {
+	if (!installed) {
+		return { id: "pi", name: ENGINE_NAMES.pi, installed: false, connected: false, detail: "not installed (light install)", install: PI_INSTALL };
+	}
 	const keys = PI_KEYS.filter((k) => env[k]);
 	let stored = false;
 	try {

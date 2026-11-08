@@ -14,7 +14,7 @@ import {
 	type TUI,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "./tui.js";
 import { applySetCommand, CONFIG_TEMPLATE, configPath, DEFAULT_UI, type UiOptions } from "./config.js";
 import { setTomlValue, tomlValue } from "./config-edit.js";
 import { type SettingItem, SettingsFloat } from "./settings.js";
@@ -2649,7 +2649,7 @@ export class App implements Component {
 						? e.id === def
 							? "default"
 							: ""
-						: e.id === "pi"
+						: e.id === "pi" && e.installed
 							? "no API key"
 							: e.installed
 								? (e.connect ?? "not signed in")

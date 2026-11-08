@@ -6,6 +6,7 @@
  */
 import { execFile } from "node:child_process";
 import { ENGINE_BINS, type EngineId } from "./engines.js";
+import { loadPiAi } from "./pi-sdk.js";
 
 export interface Choice {
 	value: string;
@@ -55,7 +56,8 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 		case "opencode":
 			return [{ value: "default", note: "OpenCode's own choice" }, ...(await opencodeModels(env)).map((value) => ({ value }))];
 		case "pi": {
-			const ai: any = await import("@mariozechner/pi-ai");
+			const ai: any = await loadPiAi().catch(() => undefined);
+			if (!ai) return [{ value: "default", note: "pi isn't installed" }];
 			const providers = Object.keys(PI_KEYS).filter((p) => PI_KEYS[p].some((k) => env[k]));
 			const out: Choice[] = [];
 			for (const provider of providers.length ? providers : ["anthropic"]) {

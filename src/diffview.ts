@@ -7,7 +7,7 @@
  *
  * Both return the line indices of hunk headers so ]c / [c can jump.
  */
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth, visibleWidth } from "./tui.js";
 import type { FloatLine } from "./float.js";
 import { fileIcon } from "./icons.js";
 

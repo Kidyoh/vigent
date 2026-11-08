@@ -14,7 +14,16 @@ npm install -g @vigent/cli
 
 The package is `@vigent/cli` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`. Run `vigent` in a project, or `vigent <folder>` (`vigent .`, `vigent ~/code/app`) from anywhere.
 
-Requires Node.js 20 or newer and git. Then, inside any git repository:
+If you only run Claude Code, Codex or OpenCode, the light install leaves out the built-in pi engine and its model SDKs. It is 4 MB instead of about 200 MB. npm ignores `--omit=optional` with `-g`, so this installs into a folder of its own:
+
+```bash
+npm install --prefix ~/.vigent --omit=optional @vigent/cli
+ln -s ~/.vigent/node_modules/.bin/vigent ~/.local/bin/vigent   # or put ~/.vigent/node_modules/.bin on PATH
+```
+
+pi then shows as not installed; the same command without `--omit=optional` adds it back. The light install also leaves out the bundled riftri, so worktrees are plain git ones unless riftri is on your PATH.
+
+Requires Node.js 20 or newer and git. On Node 22.1 or newer, vigent keeps Node's compile cache, which makes later starts faster. Then, inside any git repository:
 
 ```bash
 vigent                    # pi with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY), or a signed-in CLI

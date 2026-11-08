@@ -27,7 +27,7 @@
   "author": "KinfeMichael Tariku",
   "type": "module",
   "bin": {
-    "vigent": "./dist/cli.js"
+    "vigent": "./dist/main.js"
   },
   "files": [
     "dist",
@@ -48,8 +48,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.73.1",
-    "@mariozechner/pi-coding-agent": "^0.73.1",
     "@mariozechner/pi-tui": "^0.73.1",
     "smol-toml": "^1.9.1"
   },
@@ -58,6 +56,8 @@
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {
+    "@mariozechner/pi-ai": "^0.73.1",
+    "@mariozechner/pi-coding-agent": "^0.73.1",
     "riftri": "^0.6.7"
   },
   "publishConfig": {

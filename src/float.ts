@@ -3,7 +3,7 @@
  * optionally with selectable rows (`:dash`) and jump points (`]c` / `[c`
  * between diff hunks).
  */
-import { type Component, parseKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Component, parseKey, truncateToWidth, visibleWidth } from "./tui.js";
 import type { PickerIcons } from "./picker.js";
 import { type Painter, RESET } from "./theme.js";
 
