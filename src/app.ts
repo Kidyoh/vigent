@@ -49,6 +49,7 @@ import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
+import { COMMAND_NAME, fillArgs, normalizeStep, type UserCommands } from "./commands.js";
 import { defaultLayout, type Layout, type StatuslinePart, type WinbarPart } from "./layout.js";
 import { allEngineIds, defaultEngine as defaultEngineFor, ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
@@ -774,6 +775,12 @@ export class App implements Component {
 	// ------------------------------------------------------------------ ex commands
 
 	private exec(input: string) {
+		const bang = /^\s*!([\s\S]*)$/.exec(input);
+		if (bang) {
+			if (!bang[1].trim()) this.setMessage("E471: Argument required: :!{command}", "ErrorMsg");
+			else void this.runShell(bang[1].trim());
+			return;
+		}
 		const parsed = /^\s*(\S*)\s*([\s\S]*)$/.exec(input) ?? ["", "", ""];
 		const cmd = parsed[1];
 		// mappings keep trailing whitespace (":nmap x :new " opens ":new "), like vim
@@ -975,6 +982,16 @@ export class App implements Component {
 				if (map) return this.execMap(map[1], rawArg);
 				const unmap = /^([nicvx]?)unmap$/.exec(cmd);
 				if (unmap) return this.execUnmap(unmap[1], arg);
+				if (cmd === "command" || cmd === "command!" || cmd === "com" || cmd === "com!") return this.execCommand(arg, cmd.endsWith("!"));
+				if (cmd === "delcommand" || cmd === "delc") {
+					if (!this.commands[arg]) this.setMessage(`E184: No such user-defined command: ${arg}`, "ErrorMsg");
+					else {
+						delete this.commands[arg];
+						this.setMessage(`deleted :${arg}`, "Comment");
+					}
+					return;
+				}
+				if (this.commands[cmd]) return this.runUserCommand(cmd, arg);
 				this.setMessage(`E492: Not an editor command: ${cmd}`, "ErrorMsg");
 			}
 		}
@@ -1068,6 +1085,9 @@ export class App implements Component {
 	trustProject: () => string = () => `no ${PROJECT_CONFIG} in this project`;
 	/** runs a hook (replaced in tests) */
 	hookRunner: typeof runHook = runHook;
+	/** [commands] and :command: your own ex commands */
+	commands: UserCommands = {};
+	private commandDepth = 0;
 
 	private hookEnv(s: Session, hook: HookName, extra: Record<string, string> = {}): Record<string, string> {
 		return {
@@ -1128,6 +1148,80 @@ export class App implements Component {
 			this.setMessage(`agent_finished hook failed: ${lastLine(r.output) || (r.timedOut ? "timed out" : `exit ${r.code}`)}`, "WarningMsg");
 			this.tui.requestRender();
 		});
+	}
+
+	/** `:!cmd`: a shell command in the focused agent's worktree (else the repository). Resolves to whether it passed. */
+	private async runShell(command: string, label = `:!${command}`): Promise<boolean> {
+		const s = this.focusedSession;
+		const cwd = s?.worktree?.path ?? this.workspace.root ?? process.cwd();
+		this.setMessage(`${label} …`, "Comment");
+		this.tui.requestRender();
+		const env = { VIGENT_AGENT: s?.name ?? "", VIGENT_ENGINE: s?.engine ?? "", VIGENT_BRANCH: s?.worktree?.branch ?? "", VIGENT_WORKTREE: s?.worktree?.path ?? "", VIGENT_REPO: this.workspace.root ?? "" };
+		const r = await this.hookRunner(command, { cwd, env, timeoutMs: 15 * 60_000 });
+		const how = r.ok ? `done in ${took(r.ms)}` : r.timedOut ? `timed out after ${took(r.ms)}` : `failed (exit ${r.code}) after ${took(r.ms)}`;
+		// the output goes in the agent's transcript, where you can read and search it
+		s?.pushInfo(`$ ${command}  (${how})${r.output ? `\n${r.output}` : ""}`);
+		const last = lastLine(r.output);
+		this.setMessage(`${label}: ${how}${last ? ` · ${last}` : ""}`, r.ok ? "Comment" : "ErrorMsg");
+		this.tui.requestRender();
+		return r.ok;
+	}
+
+	/** Run one of your commands: each step in turn; a shell step that fails stops the rest. */
+	private runUserCommand(name: string, args: string) {
+		const steps = this.commands[name].map((st) => fillArgs(st, args));
+		const run = async () => {
+			for (const step of steps) {
+				if (step.startsWith("!")) {
+					if (!(await this.runShell(step.slice(1).trim(), `:${name}`))) return;
+				} else {
+					this.exec(step);
+				}
+				this.tui.requestRender();
+			}
+		};
+		if (this.commandDepth >= 10) {
+			this.setMessage(`E169: :${name} is too recursive`, "ErrorMsg");
+			return;
+		}
+		this.commandDepth++;
+		try {
+			// steps before the first shell step run now, like any ex command
+			void run();
+		} finally {
+			this.commandDepth--;
+		}
+	}
+
+	/** `:command` lists yours, `:command Name` shows one, `:command[!] Name {cmd}` defines one (for this run). */
+	private execCommand(arg: string, bang: boolean) {
+		const m = /^(\S+)(?:\s+([\s\S]+))?$/.exec(arg);
+		if (!m) {
+			const names = Object.keys(this.commands).sort();
+			if (!names.length) this.setMessage("no commands of your own yet: :command Name {cmd}, or [commands] in config.toml", "Comment");
+			else this.setMessage(names.map((n) => `${n} = ${this.commands[n].join(" | ")}`).join("   "), "Normal");
+			return;
+		}
+		const [, name, rhs] = m;
+		if (!COMMAND_NAME.test(name)) {
+			this.setMessage(`E183: User defined commands must start with an uppercase letter: ${name}`, "ErrorMsg");
+			return;
+		}
+		if (!rhs) {
+			const c = this.commands[name];
+			this.setMessage(c ? `${name} = ${c.join(" | ")}` : `E184: No such user-defined command: ${name}`, c ? "Normal" : "ErrorMsg");
+			return;
+		}
+		if (this.commands[name] && !bang) {
+			this.setMessage(`E174: Command already exists: add ! to replace it: ${name}`, "ErrorMsg");
+			return;
+		}
+		// like vim, | separates commands (a shell step keeps the rest of the line)
+		const parts = rhs.split("|");
+		const shell = parts.findIndex((p) => normalizeStep(p).startsWith("!"));
+		const steps = [...(shell < 0 ? parts : parts.slice(0, shell)), ...(shell < 0 ? [] : [parts.slice(shell).join("|")])].map(normalizeStep).filter(Boolean);
+		this.commands[name] = steps;
+		this.setMessage(`:${name} = ${steps.join(" | ")}`, "Comment");
 	}
 
 	/** `:w [file]`: the transcript as Markdown (`:w!` overwrites). */
@@ -3554,6 +3648,9 @@ const EX_HELP: [string, string][] = [
 	[":let mapleader = \",\"", "change the leader key"],
 	[":model id", "switch the focused agent's model"],
 	[":q  /  :q!", "quit (asks if agents are running) / quit anyway"],
+	[":!{cmd}", "run a shell command in the agent's worktree; its output goes in the transcript"],
+	[":command [Name] [cmd]", "your own commands: list them, show one, or define one (| separates steps)"],
+	[":delcommand Name", "forget one of your commands"],
 ];
 
 /** One line of a message for previews: markdown markers and code fences dropped. */

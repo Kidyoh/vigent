@@ -2,7 +2,8 @@
  * Which projects' .vigent.toml may run commands.
  *
  * A project config can set the theme, templates, keys and worktree layout
- * freely. The parts that run programs (hooks, engine arguments, Claude Code
+ * freely. The parts that run programs (hooks, engine arguments, custom
+ * engine commands, shell commands under [commands], Claude Code
  * permission rules) only count once you trust that file, like direnv's
  * `allow`: `:trust` in vigent, or `vigent trust` in the project. Trust is
  * for the file as it is now; if it changes, vigent asks again.

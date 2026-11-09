@@ -189,7 +189,9 @@ Agents survive a restart: quit vigent, start it again in the same repo, and the 
 
 ## Configuration
 
-Everything lives in `~/.config/vigent/config.toml`, and a repository can add its own `.vigent.toml` on top: the team's theme, templates, worktree layout, keys and hooks, committed once. Hooks run commands at points in an agent's life: `worktree_created = "npm ci"` sets each new worktree up before the agent's first prompt goes out, `before_merge = "npm test"` keeps `:merge` and `:pr` from landing a failing branch, and `agent_finished` tells your scripts an agent stopped. A project's hooks and engine arguments only run once you `:trust` its `.vigent.toml` (or run `vigent trust`), and again after it changes ([docs/config.md](docs/config.md#a-projects-own-config-vigenttoml)).
+Everything lives in `~/.config/vigent/config.toml`, and a repository can add its own `.vigent.toml` on top: the team's theme, templates, worktree layout, keys and hooks, committed once. Hooks run commands at points in an agent's life: `worktree_created = "npm ci"` sets each new worktree up before the agent's first prompt goes out, `before_merge = "npm test"` keeps `:merge` and `:pr` from landing a failing branch, and `agent_finished` tells your scripts an agent stopped. A project's hooks, engine arguments and shell commands only run once you `:trust` its `.vigent.toml` (or run `vigent trust`), and again after it changes ([docs/config.md](docs/config.md#a-projects-own-config-vigenttoml)).
+
+Commands of your own work like vim's `:command`. Under `[commands]`, `Test = "!npm test"` makes `:Test` run the tests in the agent's worktree, with the output in its transcript. `Review = "new -t review {args}"` makes an alias. `Land = ["!npm test", "pr"]` opens a pull request only if the tests pass. `:command Name {cmd}` adds one while vigent runs, and `:!{cmd}` runs a shell command once ([docs/config.md](docs/config.md#commands)).
 
 Your own config lives in `~/.config/vigent/config.toml`. `vigent config init` writes a commented starter file, and `vigent config check` validates it. Keys use vim notation, and the right-hand side can be an action, an ex command or other keys:
 

@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { EFFORTS } from "./choices.js";
 import { parseTemplates, type Template } from "./templates.js";
+import { parseCommands, type UserCommands } from "./commands.js";
 import { HOOK_NAMES, type HookName, type Hooks } from "./hooks.js";
 import { defaultLayout, type Layout, parseSections, STATUSLINE_PARTS, WINBAR_PARTS } from "./layout.js";
 import { ICON_SETS, type IconSet } from "./icons.js";
@@ -82,6 +83,8 @@ export interface Config {
 	hooks: Hooks;
 	/** [statusline] and [winbar]: what they show, left and right */
 	layout: Layout;
+	/** [commands]: your own ex commands */
+	commands: UserCommands;
 }
 
 export interface LoadOptions {
@@ -121,7 +124,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath(), opts: LoadOptions = {}): { config: Config; warnings: string[]; gated: string[] } {
-	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {}, layout: defaultLayout() };
+	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {}, layout: defaultLayout(), commands: {} };
 	const warnings: string[] = [];
 	const gated: string[] = [];
 	const where = opts.label ?? "config";
@@ -201,6 +204,9 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 				break;
 			case "templates":
 				config.templates = { ...config.templates, ...parseTemplates(value, warnings) };
+				break;
+			case "commands":
+				config.commands = { ...config.commands, ...parseCommands(value, where, warnings, gated, mayRun) };
 				break;
 			case "statusline":
 				parseSections("statusline", value, STATUSLINE_PARTS, config.layout.statusline, where, warnings);
@@ -501,6 +507,15 @@ engine = "auto"
 # worktree_created = "npm ci"     # before the agent's first prompt goes out
 # before_merge = "npm test"       # :merge and :pr only if it passes
 # agent_finished = "say done"     # whenever an agent stops
+
+# --- Commands --------------------------------------------------------------
+# Your own ex commands, like vim's :command. Names start with a capital letter;
+# {args} is what you type after the name. "!" runs a shell command in the
+# agent's worktree (from a project's .vigent.toml, once you :trust it).
+# [commands]
+# Review = "new -t review {args}"
+# Test = "!npm test"
+# Land = ["!npm test", "pr"]      # one after another; a failing shell step stops the rest
 
 # --- Templates -------------------------------------------------------------
 # Prompts you start agents with often. :new -t fix <task> starts an agent and

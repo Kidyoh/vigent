@@ -306,11 +306,38 @@ Four are built in. A template of yours with the same name replaces it.
 
 What you type wins: `:new -t migrate --engine codex <task>` runs on Codex, without the template's model and effort.
 
+## `[commands]`
+
+Your own ex commands, like vim's `:command`. Each runs ex commands, shell commands, or a list of them:
+
+```toml
+[commands]
+Review = "new -t review {args}"     # :Review the cart → :new -t review the cart
+Test = "!npm test {args}"           # a shell command in the agent's worktree
+Land = ["!npm test", "pr"]          # one after another
+```
+
+- Names start with a capital letter, as in vim, so a command of yours never hides a built-in one.
+- `{args}` (or vim's `<args>`) is whatever you type after the name.
+- An ex command is anything you'd type after `:`; the leading `:` is optional.
+- A step that starts with `!` runs in a shell, in the focused agent's worktree (with no agent, in the repository). Like hooks, it sees `VIGENT_AGENT`, `VIGENT_BRANCH`, `VIGENT_WORKTREE`, `VIGENT_REPO` and `VIGENT_ENGINE`. What it prints goes into the agent's transcript, and its last line shows on the command line. A shell step that fails stops the steps after it, so `Land` opens a pull request only when the tests pass.
+- Map a key to one like any ex command: `"<leader>T" = ":Test<CR>"` under `[keys.normal]`.
+
+While vigent runs:
+
+- `:command` lists your commands.
+- `:command Name` shows one.
+- `:command Name {cmd}` defines one for this run. Steps are separated by `|`; from the first shell step on, the rest of the line belongs to the shell, so pipes work. `:command!` replaces an existing one.
+- `:delcommand Name` forgets one.
+- `:!{cmd}` runs a shell command once, the same way.
+
+In a project's `.vigent.toml`, a command with a shell step waits for `:trust`. Commands made only of ex commands don't.
+
 ## A project's own config: `.vigent.toml`
 
 A `.vigent.toml` at the root of a repository is read on top of your `~/.config/vigent/config.toml`, so a team can commit its theme, templates, engine, worktree layout, keys and hooks once. Where both set something, the project wins; tables merge key by key (setting `model` under `[engines.claude]` keeps your `effort`).
 
-The parts that run programs only count once you trust the file: `[hooks]`, `args` under `[engines.*]`, the `command` of [your own engines](#your-own-engines) and Claude Code's `allow` rules. Until then vigent says what's waiting (`.vigent.toml wants to run commands (hooks.worktree_created): :trust allows them`) and uses the rest. Trust it with **`:trust`** in vigent or **`vigent trust`** in the project. Trust is for the file as it is: when it changes, vigent asks again. Your own config.toml is always trusted.
+The parts that run programs only count once you trust the file: `[hooks]`, `args` under `[engines.*]`, the `command` of [your own engines](#your-own-engines), [commands](#commands) with a shell step, and Claude Code's `allow` rules. Until then vigent says what's waiting (`.vigent.toml wants to run commands (hooks.worktree_created): :trust allows them`) and uses the rest. Trust it with **`:trust`** in vigent or **`vigent trust`** in the project. Trust is for the file as it is: when it changes, vigent asks again. Your own config.toml is always trusted.
 
 ## `[hooks]`
 
