@@ -46,6 +46,8 @@ export abstract class Session {
 	/** reasoning effort / thinking level; undefined = the engine's default */
 	effort?: string;
 	state: SessionState = "idle";
+	/** the model is thinking right now; only Claude Code reports this */
+	thinking = false;
 	items: TranscriptItem[] = [];
 	tokens = 0;
 	/** money spent, in US dollars, as the engine reports it; undefined = the engine doesn't say (Codex) */

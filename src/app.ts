@@ -3214,6 +3214,10 @@ export class App implements Component {
 				}
 			}
 		});
+		if (s?.thinking) {
+			push("", "");
+			push(P.p("Comment", "thinking…"), "thinking…");
+		}
 		this.paneCache = { lines, key };
 		return lines;
 	}

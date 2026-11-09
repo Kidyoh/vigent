@@ -43,9 +43,13 @@ test("Claude Code: stream-json from a real run becomes the transcript", () => {
 	const evs = events("claude", "claude-tool.jsonl");
 	assert.deepEqual(evs[0], { type: "session", id: "3b248a3e-43fd-4fd1-98b5-f36e06e02d85" });
 	assert.deepEqual(evs[1], { type: "model", model: "claude-fable-5" });
-	const tool = evs.find((e) => e.type === "tool");
-	assert.equal(tool.name, "Write");
-	assert.equal(tool.summary, "/work/hello.txt");
+	const [started, finished, ...others] = evs.filter((e) => e.type === "tool");
+	assert.equal(others.length, 0);
+	assert.equal(started.name, "Write");
+	assert.equal(started.summary, "", "shown when it starts, before its input is written");
+	assert.equal(finished.id, started.id);
+	assert.equal(finished.name, "Write");
+	assert.equal(finished.summary, "/work/hello.txt");
 	assert.match(evs.find((e) => e.type === "tool_result").output, /File created successfully/);
 	assert.deepEqual(evs.filter((e) => e.type === "text_delta").map((e) => e.text), ["done"]);
 	assert.deepEqual(evs.filter((e) => e.type === "text").map((e) => e.text), ["done"]);

@@ -25,8 +25,11 @@ export type CliEvent =
 	| { type: "text_delta"; text: string }
 	/** a finished reply (replaces what was streamed for it) */
 	| { type: "text"; text: string }
+	/** a tool call; the same id again updates the line it started */
 	| { type: "tool"; id?: string; name: string; summary: string }
 	| { type: "tool_result"; id?: string; output: string }
+	/** the model started or stopped thinking */
+	| { type: "thinking"; active: boolean }
 	| { type: "usage"; tokens: number; cost?: number }
 	| { type: "error"; message: string }
 	/** tools the CLI's permission settings refused to run (Claude Code's permission_denials) */
@@ -90,6 +93,7 @@ export const claudeAdapter: CliAdapter = {
 		];
 	},
 	parser() {
+		let thinkingBlock: number | undefined;
 		return (e) => {
 			if (!e || typeof e !== "object") return [];
 			// a subagent's own messages: only its result reaches the transcript
@@ -104,8 +108,18 @@ export const claudeAdapter: CliAdapter = {
 					break;
 				case "stream_event": {
 					const ev = e.event ?? {};
+					const block = ev.content_block;
 					if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
 						out.push({ type: "text_delta", text: ev.delta.text });
+					} else if (ev.type === "content_block_start" && block?.type === "tool_use") {
+						// the input is still being written; the assistant event that follows fills it in
+						out.push({ type: "tool", id: block.id, name: block.name, summary: "" });
+					} else if (ev.type === "content_block_start" && block?.type === "thinking") {
+						thinkingBlock = ev.index;
+						out.push({ type: "thinking", active: true });
+					} else if (ev.type === "content_block_stop" && thinkingBlock !== undefined && ev.index === thinkingBlock) {
+						thinkingBlock = undefined;
+						out.push({ type: "thinking", active: false });
 					}
 					break;
 				}
@@ -400,6 +414,12 @@ export class CliSession extends Session {
 		return !!this.opts.ask && this.engine === "claude";
 	}
 
+	private setThinking(active: boolean): void {
+		if (this.thinking === active) return;
+		this.thinking = active;
+		this.emit();
+	}
+
 	/** One run of the CLI; `once` are permission rules for this run only. */
 	private run(text: string, once: string[] = []): void {
 		this.setState("running");
@@ -466,12 +486,20 @@ export class CliSession extends Session {
 				case "tool": {
 					this.endStreaming();
 					const summary = this.relative(ev.summary).slice(0, 80);
-					const item: TranscriptItem = { kind: "tool", text: "", tool: { name: ev.name, summary, output: "", folded: true } };
-					this.items.push(item);
-					if (ev.id) tools.set(ev.id, item);
+					const started = ev.id ? tools.get(ev.id) : undefined;
+					if (started?.tool) {
+						started.tool.summary = summary;
+					} else {
+						const item: TranscriptItem = { kind: "tool", text: "", tool: { name: ev.name, summary, output: "", folded: true } };
+						this.items.push(item);
+						if (ev.id) tools.set(ev.id, item);
+					}
 					this.emit();
 					break;
 				}
+				case "thinking":
+					this.setThinking(ev.active);
+					break;
 				case "tool_result": {
 					const item = (ev.id && tools.get(ev.id)) || [...this.items].reverse().find((i) => i.kind === "tool");
 					if (item?.tool) item.tool.output = ev.output;
@@ -528,6 +556,7 @@ export class CliSession extends Session {
 		child.on("close", (code, signal) => {
 			if (this.child !== child) return; // already failed to start
 			this.child = undefined;
+			this.setThinking(false);
 			this.endStreaming();
 			this.refreshStat(0);
 			if (this.aborted) {
