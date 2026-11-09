@@ -36,13 +36,15 @@ const HELP = `vigent — vim-native orchestrator for the coding agents you have 
 
 usage:
   vigent --version                           which vigent this is (and the commit, from a clone)
-  vigent [folder] [--demo] [--theme <name>] [--model <id>] [--engine pi|claude|codex|opencode]
+  vigent [folder] [--demo] [--theme <name>] [--model <id>] [--engine <id>]
   vigent --serve [--local]                   also follow your agents from your phone (:serve)
 
 engines (what runs new agents; :checkhealth shows which are signed in):
   claude    your installed Claude Code CLI, with its own login
   codex     your installed Codex CLI, with its own login
   opencode  your installed OpenCode CLI, with its own login
+  gemini    your installed Gemini CLI, with its own login
+  cursor    your installed Cursor CLI (cursor-agent), with its own login
   pi        your installed pi (pi --mode rpc), with its keys or login
   <id>      any agent CLI from [engines.<id>] in config.toml
 
