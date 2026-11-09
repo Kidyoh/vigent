@@ -58,7 +58,7 @@ test(":set transparent works with any theme; notransparent and transparent& undo
 	lazy.setTransparency(false);
 	assert.equal(lazy.attr("Normal").bg, "#222436", ":set notransparent makes lazyvim solid");
 
-	const ui = { ...DEFAULT_UI };
+	const ui = { ...DEFAULT_UI, termguicolors: true };
 	assert.equal(ui.transparent, "auto");
 	applySetCommand(ui, "transparent");
 	assert.equal(ui.transparent, true);
@@ -122,7 +122,7 @@ test(":theme save: what's on screen, :hi changes and transparency included", asy
 	const { App } = await import("../dist/app.js");
 	const { Keymap } = await import("../dist/keys.js");
 	const tui = { requestRender() {}, showOverlay: () => ({ hide() {} }) };
-	const app = new App(tui, { rows: 30, columns: 110, write() {} }, new Painter(loadTheme("lazyvim")), { ...DEFAULT_UI }, new Keymap());
+	const app = new App(tui, { rows: 30, columns: 110, write() {} }, new Painter(loadTheme("lazyvim")), { ...DEFAULT_UI, termguicolors: true }, new Keymap());
 	const ex = (cmd) => [":", ...cmd, "\r"].forEach((k) => app.handleInput(k));
 
 	ex("hi Comment guifg=#a0a0ff gui=italic");
@@ -161,7 +161,7 @@ test("a transparent screen never paints Normal's background", async () => {
 	const { Keymap } = await import("../dist/keys.js");
 	const { Session } = await import("../dist/session.js");
 	const tui = { requestRender() {}, showOverlay: () => ({ hide() {} }) };
-	const app = new App(tui, { rows: 24, columns: 100, write() {} }, new Painter(loadTheme("lazyvim")), { ...DEFAULT_UI }, new Keymap());
+	const app = new App(tui, { rows: 24, columns: 100, write() {} }, new Painter(loadTheme("lazyvim")), { ...DEFAULT_UI, termguicolors: true }, new Keymap());
 	class S extends Session {
 		send() {}
 		abort() {}

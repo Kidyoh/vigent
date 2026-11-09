@@ -82,7 +82,7 @@ test("typing @ in insert mode opens a file picker; Enter writes @path, Esc keeps
 	const dir = repo();
 	const overlays = [];
 	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide: () => overlays.splice(overlays.indexOf(c), 1) }) };
-	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
+	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI, termguicolors: true }, new Keymap());
 	const s = new CliSession("racer", "claude", undefined, { cwd: dir, bin: "/bin/true" });
 	app.addSession(s, true);
 	const type = (text) => [...text].forEach((k) => app.handleInput(k));
@@ -130,7 +130,7 @@ test("a Codex agent gets the file's contents; the transcript shows what you type
 	fs.writeFileSync(bin, `#!${process.execPath}\nrequire("fs").writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`);
 	fs.chmodSync(bin, 0o755);
 	const tui = { requestRender() {}, showOverlay: () => ({ hide() {} }) };
-	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
+	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI, termguicolors: true }, new Keymap());
 	const s = new CliSession("racer", "codex", undefined, { cwd: dir, bin });
 	app.addSession(s, true);
 	s.send("why is @src/cart.js wrong? also @logo.png");

@@ -19,7 +19,7 @@ const plain = (lines) => lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 function makeApp() {
 	const overlays = [];
 	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide() {} }) };
-	const app = new App(tui, { rows: 40, columns: 120, write() {} }, new Painter(loadTheme("default")), { ...DEFAULT_UI }, new Keymap(), {
+	const app = new App(tui, { rows: 40, columns: 120, write() {} }, new Painter(loadTheme("default")), { ...DEFAULT_UI, termguicolors: true }, new Keymap(), {
 		root: undefined,
 		config: { enabled: true, dir: "../{repo}-worktrees", branch: "{type}/{name}", backend: "auto" },
 	});

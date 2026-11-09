@@ -352,6 +352,7 @@ test("256-color fallback for terminals without 24-bit color", () => {
 	assert.equal(nearest256("#808080"), 244);
 	assert.equal(sgr({ fg: "#ff0000", bg: "#000000" }, "256"), "\x1b[38;5;196;48;5;16m");
 	const { app, ex } = makeApp({ sessions: [sessionWithReply()] });
+	ex("set termguicolors"); // the default is off in macOS Terminal.app, where this suite may run
 	assert.match(app.render(110).join(""), /38;2;/);
 	ex("set notermguicolors");
 	assert.equal(app.painter.colorMode, "256");
