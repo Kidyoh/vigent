@@ -234,7 +234,7 @@ With `ask = true`, vigent asks you instead, in a picker that names the agent and
 - **always allow:** the same, and adds the rules to `allow` in config.toml, so every Claude Code agent may use them from then on.
 - **no** (or Esc): leaves it blocked.
 
-The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the tool's name for anything else. If an agent you aren't looking at asks, the bell rings. Codex doesn't need this, because it runs in a workspace-write sandbox. pi doesn't either: it has no permission gate unless an extension adds one (see pi extensions in the README).
+The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the tool's name for anything else. If an agent you aren't looking at asks, the bell rings. Codex doesn't need this, because it runs in a workspace-write sandbox. pi doesn't either: it has no permission gate unless an extension adds one (see [pi in the guide](guide.md#pi-extensions-skills-and-prompt-templates)).
 
 `[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`, or any pattern `pi --model` takes), `effort` (pi's thinking level) and `args`: extra arguments for `pi --mode rpc`, such as `["--no-extensions"]` or `["-e", "./my-extension.ts"]`. pi is your own install (`npm install -g @mariozechner/pi-coding-agent`); vigent keeps one `pi --mode rpc` running per agent and saves its conversation in the worktree.
 
