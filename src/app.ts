@@ -49,7 +49,7 @@ import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
-import { defaultEngine as defaultEngineFor, ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
+import { allEngineIds, defaultEngine as defaultEngineFor, ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
 import { splitView, unifiedView } from "./diffview.js";
 import { TREE_GLYPHS, type TreeRow } from "./tree.js";
@@ -1285,7 +1285,7 @@ export class App implements Component {
 
 	/** `:effort <level>` */
 	chooseEffort(level: string, t = this.modelTarget()) {
-		const allowed = ["default", ...EFFORTS[t.engine]];
+		const allowed = ["default", ...(EFFORTS[t.engine] ?? [])];
 		// Codex's levels differ per model and version; Codex itself says if one doesn't fit
 		if (!allowed.includes(level) && !(t.engine === "codex" && /^[a-z]+$/.test(level))) {
 			this.setMessage(`${ENGINE_NAMES[t.engine]} takes: ${allowed.join(", ")}`, "ErrorMsg");
@@ -1313,7 +1313,7 @@ export class App implements Component {
 
 	/** `:engine`: which engine new agents run on, with what's ready on this machine. */
 	openEnginePicker() {
-		const ids = ["auto", "pi", "claude", "codex", "opencode"] as const;
+		const ids: (EngineId | "auto")[] = ["auto", ...allEngineIds()];
 		const items = ids.map((id) => ({ value: id, note: this.engineNote(id) }));
 		this.openChoices("Engine for new agents", items, this.preferredEngine, false, (v) => this.chooseEngine(v));
 	}
@@ -1330,7 +1330,7 @@ export class App implements Component {
 	/** `:engine <name>`: new agents run on it. Agents already open keep theirs (their conversation lives there). */
 	chooseEngine(value: string) {
 		if (value !== "auto" && !isEngineId(value)) {
-			this.setMessage("engines: auto, pi, claude, codex, opencode", "ErrorMsg");
+			this.setMessage(`engines: auto, ${allEngineIds().join(", ")}`, "ErrorMsg");
 			return;
 		}
 		this.preferredEngine = value;
@@ -1576,7 +1576,7 @@ export class App implements Component {
 				value: () => this.newAgentEffort[this.defaultEngine()] ?? "default",
 				change: (d) => {
 					const e = this.defaultEngine();
-					const all = ["default", ...EFFORTS[e]];
+					const all = ["default", ...(EFFORTS[e] ?? [])];
 					const next = cycle(all, this.newAgentEffort[e] ?? "default", d);
 					if (next === "default") delete this.newAgentEffort[e];
 					else this.newAgentEffort[e] = next;

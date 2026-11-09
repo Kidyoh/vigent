@@ -111,7 +111,7 @@ export function parseTemplates(value: unknown, warnings: string[]): Record<strin
 					break;
 				case "engine":
 					if (typeof v === "string" && isEngineId(v)) t.engine = v;
-					else warnings.push(`${where}: 'engine' should be "pi", "claude", "codex" or "opencode"`);
+					else warnings.push(`${where}: 'engine' should be "pi", "claude", "codex", "opencode" or an engine from [engines]`);
 					break;
 				case "worktree":
 					if (typeof v === "boolean") t.worktree = v;
@@ -125,8 +125,8 @@ export function parseTemplates(value: unknown, warnings: string[]): Record<strin
 					warnings.push(`${where}: unknown option '${k}'`);
 			}
 		}
-		if (t.effort && t.engine && !(EFFORTS[t.engine] as string[]).includes(t.effort)) {
-			warnings.push(`${where}: 'effort' should be one of ${EFFORTS[t.engine].join(", ")}`);
+		if (t.effort && t.engine && !((EFFORTS[t.engine] ?? []) as string[]).includes(t.effort)) {
+			warnings.push(`${where}: 'effort' should be one of ${(EFFORTS[t.engine] ?? []).join(", ") || "none for this engine"}`);
 			delete t.effort;
 		}
 		out[name] = t;

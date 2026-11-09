@@ -12,8 +12,64 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { PI_INSTALL, piInstalled } from "./pi-sdk.js";
 
-export type EngineId = "pi" | "claude" | "codex" | "opencode";
-export const ENGINE_IDS: EngineId[] = ["pi", "claude", "codex", "opencode"];
+/** the engines vigent knows by itself */
+export type BuiltinEngineId = "pi" | "claude" | "codex" | "opencode";
+/** a built-in engine, or one defined in config ([engines.<id>] with a command) */
+export type EngineId = BuiltinEngineId | (string & {});
+export const ENGINE_IDS: BuiltinEngineId[] = ["pi", "claude", "codex", "opencode"];
+
+/**
+ * An agent CLI defined in config:
+ *
+ *   [engines.gemini]
+ *   name = "Gemini CLI"
+ *   command = ["gemini", "--yolo", "-p", "{prompt}"]
+ *   output = "text"            # or "claude", "codex", "opencode": it prints their JSON
+ *   model_args = ["-m", "{model}"]
+ *   models = ["gemini-2.5-pro", "gemini-2.5-flash"]
+ *   resume_args = ["--resume", "{id}"]   # with a JSON output: continue its conversation
+ */
+export interface CustomEngine {
+	id: string;
+	name: string;
+	/** the program and its arguments; {prompt} is the prompt (added at the end without it), {model} the model */
+	command: string[];
+	/** how to read what it prints: plain text, or the JSON events of a CLI vigent knows */
+	output: "text" | "claude" | "codex" | "opencode";
+	/** added when a model is picked, e.g. ["-m", "{model}"] */
+	modelArgs?: string[];
+	/** offered by :model */
+	models?: string[];
+	/** with a JSON output: added to continue the conversation, e.g. ["--resume", "{id}"] */
+	resumeArgs?: string[];
+}
+
+export const CUSTOM_ENGINES = new Map<string, CustomEngine>();
+
+/** Make a custom engine known everywhere engines are listed (the sidebar, :engine, :checkhealth, --engine). */
+export function registerCustomEngine(e: CustomEngine) {
+	CUSTOM_ENGINES.set(e.id, e);
+	ENGINE_NAMES[e.id] = e.name;
+	ENGINE_BINS[e.id] = e.command[0];
+	INSTALL[e.id] = `put ${e.command[0]} on your PATH`;
+}
+
+/** Every engine, built-in ones first. */
+export function allEngineIds(): EngineId[] {
+	return [...ENGINE_IDS, ...CUSTOM_ENGINES.keys()];
+}
+
+function customInfo(e: CustomEngine, env: NodeJS.ProcessEnv): EngineInfo {
+	const installed = onPath(e.command[0], env);
+	return {
+		id: e.id,
+		name: e.name,
+		installed,
+		connected: installed, // vigent can't know a custom CLI's login; it runs as you set it up
+		detail: installed ? `from your config · runs ${e.command[0]}` : `${e.command[0]} isn't on PATH`,
+		install: INSTALL[e.id],
+	};
+}
 
 export interface EngineInfo {
 	id: EngineId;
@@ -64,7 +120,7 @@ const INSTALL: Record<Exclude<EngineId, "pi">, string> = {
 const PI_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY"];
 
 export function isEngineId(s: string): s is EngineId {
-	return (ENGINE_IDS as string[]).includes(s);
+	return (ENGINE_IDS as string[]).includes(s) || CUSTOM_ENGINES.has(s);
 }
 
 /** Is this command on PATH? (a quick check, without running it) */
@@ -253,6 +309,7 @@ export function quickEngines(env: NodeJS.ProcessEnv = process.env): EngineInfo[]
 				install: INSTALL[id],
 			};
 		}),
+		...[...CUSTOM_ENGINES.values()].map((e) => customInfo(e, env)),
 	];
 }
 
@@ -263,5 +320,6 @@ export async function detectEngines(env: NodeJS.ProcessEnv = process.env, timeou
 		detectClaude(env, timeoutMs),
 		detectCodex(env, timeoutMs),
 		detectOpenCode(env, timeoutMs),
+		...[...CUSTOM_ENGINES.values()].map((e) => Promise.resolve(customInfo(e, env))),
 	]);
 }

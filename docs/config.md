@@ -77,7 +77,7 @@ Move with `j`/`k`, change with `Enter`/`Space` (or step with `h`/`l`), and press
 |---|---|---|
 | `theme` | `"default"` | Colorscheme at startup. `colorscheme` is accepted as an alias. See [themes.md](themes.md). |
 | `model` | `"claude-sonnet-4-5"` | Model for new pi agents. `--model` on the command line wins. |
-| `engine` | `"auto"` | What runs new agents: `"pi"`, `"claude"`, `"codex"`, `"opencode"`, or `"auto"` (the first signed-in CLI, else pi if it has an API key; with neither, starting an agent says how to connect one). `--engine` on the command line wins; `:new <task> --engine <id>` picks one per agent. See [`[engines]`](#engines). |
+| `engine` | `"auto"` | What runs new agents: `"pi"`, `"claude"`, `"codex"`, `"opencode"`, [one of your own](#your-own-engines), or `"auto"` (the first signed-in CLI, else pi if it has an API key; with neither, starting an agent says how to connect one). `--engine` on the command line wins; `:new <task> --engine <id>` picks one per agent. See [`[engines]`](#engines). |
 | `leader` | `"<Space>"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader` (vim's own default is `"\"`). `mapleader` is accepted as an alias. |
 
 ## `[ui]`
@@ -199,6 +199,38 @@ The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the 
 
 `[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`; a bare name means Anthropic's) and `effort` too.
 
+### Your own engines
+
+Any agent CLI that takes a prompt on its command line can be an engine. Give a table a `command` and it becomes one, listed in the sidebar, `:engine`, `:checkhealth`, `:model`, templates and `--engine` like the built-in ones:
+
+```toml
+engine = "gemini"                  # new agents use it
+
+[engines.gemini]
+name = "Gemini CLI"                # how vigent shows it (default: the table's name)
+command = ["gemini", "--yolo", "-p", "{prompt}"]
+output = "text"                    # the default
+model_args = ["-m", "{model}"]     # added when an agent has a model
+models = ["gemini-2.5-pro", "gemini-2.5-flash"]   # offered by :model
+
+[engines.my-agent]                 # a wrapper that prints Claude Code's stream-json
+command = ["my-agent", "--json"]
+output = "claude"
+resume_args = ["--resume", "{id}"]
+```
+
+| Option | Meaning |
+|---|---|
+| `command` | The program and its arguments, as a list. `{prompt}` is replaced by the prompt; without it, the prompt goes last. The program must be on your `PATH`. |
+| `output` | How vigent reads what it prints. `"text"`: everything it prints is the reply. `"claude"`, `"codex"` or `"opencode"`: it prints the same JSON events as that CLI (`claude -p --output-format stream-json` and friends, or a wrapper around them), so vigent also shows its tool calls, tokens and cost. |
+| `model_args` | Arguments added when the agent has a model, with `{model}` replaced by it. |
+| `models` | Models `:model` offers for this engine, besides its own default. |
+| `resume_args` | With a JSON `output`: arguments that continue the CLI's conversation, with `{id}` replaced by the id it reported (`["--resume", "{id}"]` for Claude Code's format). Follow-ups and a restarted vigent then pick the conversation up. |
+
+Each prompt runs the command once, in the agent's worktree, with your environment. Without `resume_args` each prompt starts a fresh conversation, unless the CLI keeps its own history. vigent can't tell whether a custom CLI is signed in, so it counts as ready when its program is on your `PATH`.
+
+In a project's `.vigent.toml`, a `command` is a program to run, so it waits for `:trust` like hooks do.
+
 ### Choosing a model and effort while vigent runs
 
 `:model` (`<Space>M`) opens one plain list: each model's name and version, like `Claude Fable 5.1` or `GPT-5.5 Codex`, with its id next to it. It lists the models of every engine that's ready (`:checkhealth`), the focused agent's own first:
@@ -246,7 +278,7 @@ What you type wins: `:new -t migrate --engine codex <task>` runs on Codex, witho
 
 A `.vigent.toml` at the root of a repository is read on top of your `~/.config/vigent/config.toml`, so a team can commit its theme, templates, engine, worktree layout, keys and hooks once. Where both set something, the project wins; tables merge key by key (setting `model` under `[engines.claude]` keeps your `effort`).
 
-The parts that run programs only count once you trust the file: `[hooks]`, `args` under `[engines.*]` and Claude Code's `allow` rules. Until then vigent says what's waiting (`.vigent.toml wants to run commands (hooks.worktree_created): :trust allows them`) and uses the rest. Trust it with **`:trust`** in vigent or **`vigent trust`** in the project. Trust is for the file as it is: when it changes, vigent asks again. Your own config.toml is always trusted.
+The parts that run programs only count once you trust the file: `[hooks]`, `args` under `[engines.*]`, the `command` of [your own engines](#your-own-engines) and Claude Code's `allow` rules. Until then vigent says what's waiting (`.vigent.toml wants to run commands (hooks.worktree_created): :trust allows them`) and uses the rest. Trust it with **`:trust`** in vigent or **`vigent trust`** in the project. Trust is for the file as it is: when it changes, vigent asks again. Your own config.toml is always trusted.
 
 ## `[hooks]`
 

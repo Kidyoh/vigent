@@ -23,7 +23,7 @@ import { EFFORTS } from "./choices.js";
 import { parseTemplates, type Template } from "./templates.js";
 import { HOOK_NAMES, type HookName, type Hooks } from "./hooks.js";
 import { ICON_SETS, type IconSet } from "./icons.js";
-import { type EngineId, isEngineId } from "./engines.js";
+import { CUSTOM_ENGINES, type CustomEngine, ENGINE_IDS, type EngineId, isEngineId, registerCustomEngine } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
 import { KEY_MODES, type KeyMode } from "./keys.js";
 import { type Attr, configDir, normalizeGroups } from "./theme.js";
@@ -130,7 +130,9 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 		return { config, warnings, gated };
 	}
 
-	for (const [key, value] of Object.entries(raw)) {
+	// [engines] first: engine = "gemini" and templates may name an engine it defines
+	const entries = Object.entries(raw).sort(([a], [b]) => Number(b === "engines") - Number(a === "engines"));
+	for (const [key, value] of entries) {
 		switch (key) {
 			case "theme":
 			case "colorscheme":
@@ -144,7 +146,7 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 				break;
 			case "engine":
 				if (typeof value === "string" && (value === "auto" || isEngineId(value))) config.engine = value;
-				else warnings.push(`${where}: 'engine' should be "auto", "pi", "claude", "codex" or "opencode"`);
+				else warnings.push(`${where}: 'engine' should be "auto", "pi", "claude", "codex", "opencode" or an engine from [engines]`);
 				break;
 			case "engines":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -152,10 +154,21 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 					break;
 				}
 				for (const [id, opts] of Object.entries(value)) {
-					if (!isEngineId(id)) {
-						warnings.push(`${where}: unknown engine [engines.${id}] (pi, claude, codex or opencode)`);
+					// a table with a command defines an engine of your own
+					if (opts && typeof opts === "object" && !Array.isArray(opts) && "command" in opts && !(ENGINE_IDS as string[]).includes(id)) {
+						if (!mayRun) {
+							gated.push(`engines.${id}.command`);
+							continue;
+						}
+						const custom = parseCustomEngine(id, opts as Record<string, unknown>, `${where} [engines.${id}]`, warnings);
+						if (custom) registerCustomEngine(custom);
 						continue;
 					}
+					if (!isEngineId(id)) {
+						warnings.push(`${where}: unknown engine [engines.${id}] (pi, claude, codex, opencode, or give it a command = [...] to add your own)`);
+						continue;
+					}
+					if (CUSTOM_ENGINES.has(id)) continue; // defined above (a later file may set its model)
 					if (!opts || typeof opts !== "object" || Array.isArray(opts)) {
 						warnings.push(`${where}: [engines.${id}] should be a table`);
 						continue;
@@ -168,13 +181,13 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 						}
 						if (k === "args" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.args = v;
 						else if (k === "model" && typeof v === "string") e.model = v;
-						else if (k === "effort" && typeof v === "string" && (EFFORTS[id as EngineId] as string[]).includes(v)) e.effort = v;
+						else if (k === "effort" && typeof v === "string" && ((EFFORTS[id as EngineId] ?? []) as string[]).includes(v)) e.effort = v;
 						else if ((k === "allow" || k === "ask") && id !== "claude") warnings.push(`${where} [engines.${id}]: '${k}' is for [engines.claude] (Claude Code's permission rules)`);
 						else if (k === "allow" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.allow = v;
 						else if (k === "ask" && typeof v === "boolean") e.ask = v;
 						else if (k === "allow") warnings.push(`${where} [engines.${id}]: 'allow' should be a list of permission rules, e.g. ["Bash(gh:*)"]`);
 						else if (k === "ask") warnings.push(`${where} [engines.${id}]: 'ask' should be true or false`);
-						else if (k === "effort") warnings.push(`${where} [engines.${id}]: 'effort' should be one of ${EFFORTS[id as EngineId].join(", ")}`);
+						else if (k === "effort") warnings.push(`${where} [engines.${id}]: 'effort' should be one of ${(EFFORTS[id as EngineId] ?? []).join(", ")}`);
 						else warnings.push(`${where} [engines.${id}]: ${k === "args" ? "'args' should be a list of strings" : k === "model" ? "'model' should be a string" : `unknown option '${k}'`}`);
 					}
 					config.engines[id as EngineId] = { ...config.engines[id as EngineId], ...e };
@@ -242,6 +255,33 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 		}
 	}
 	return { config, warnings, gated };
+}
+
+const OUTPUTS = ["text", "claude", "codex", "opencode"] as const;
+
+/** [engines.<id>] with a command: an agent CLI of your own. */
+function parseCustomEngine(id: string, raw: Record<string, unknown>, where: string, warnings: string[]): CustomEngine | undefined {
+	const strings = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every((a) => typeof a === "string");
+	if (!/^[a-z0-9][a-z0-9_-]*$/i.test(id)) {
+		warnings.push(`${where}: an engine name is letters, digits, - and _`);
+		return undefined;
+	}
+	if (!strings(raw.command)) {
+		warnings.push(`${where}: 'command' should be the program and its arguments, e.g. ["gemini", "-p", "{prompt}"]`);
+		return undefined;
+	}
+	const e: CustomEngine = { id, name: id, command: raw.command as string[], output: "text" };
+	for (const [k, v] of Object.entries(raw)) {
+		if (k === "command") continue;
+		if (k === "name" && typeof v === "string" && v.trim()) e.name = v.trim();
+		else if (k === "output" && typeof v === "string" && (OUTPUTS as readonly string[]).includes(v)) e.output = v as CustomEngine["output"];
+		else if (k === "model_args" && strings(v)) e.modelArgs = v as string[];
+		else if (k === "models" && strings(v)) e.models = v as string[];
+		else if (k === "resume_args" && strings(v)) e.resumeArgs = v as string[];
+		else if (k === "output") warnings.push(`${where}: 'output' should be "text", "claude", "codex" or "opencode"`);
+		else warnings.push(`${where}: ${k === "name" ? "'name' should be a string" : k === "model_args" || k === "models" || k === "resume_args" ? `'${k}' should be a list of strings` : `unknown option '${k}' (name, command, output, model_args, models, resume_args)`}`);
+	}
+	return e;
 }
 
 function setWorktreeOption(wt: WorktreeConfig, name: string, value: unknown): string | undefined {
@@ -427,6 +467,12 @@ engine = "auto"
 # args = ["-c", 'sandbox_mode="workspace-write"']  # the default
 # [engines.opencode]
 # model = "anthropic/claude-sonnet-4-5"
+# Any other agent CLI, with a command; {prompt} is the prompt:
+# [engines.gemini]
+# name = "Gemini CLI"
+# command = ["gemini", "--yolo", "-p", "{prompt}"]
+# model_args = ["-m", "{model}"]
+# models = ["gemini-2.5-pro", "gemini-2.5-flash"]
 
 # --- Hooks -----------------------------------------------------------------
 # Commands at points in an agent's life, run in its worktree. They see

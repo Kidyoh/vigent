@@ -9,7 +9,7 @@ import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
-import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
+import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig, PROJECT_CONFIG } from "./config.js";
 import { isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
@@ -294,7 +294,7 @@ async function main(): Promise<number | undefined> {
 		return 1;
 	}
 	const chosenEngine = (engineArg ?? (config.engine === "auto" ? undefined : config.engine)) as EngineId | undefined;
-	const anyCli = (["claude", "codex", "opencode"] as const).some((id) => onPath(ENGINE_BINS[id]));
+	const anyCli = (["claude", "codex", "opencode"] as const).some((id) => onPath(ENGINE_BINS[id])) || [...CUSTOM_ENGINES.values()].some((e) => onPath(e.command[0]));
 	const demo = argv.includes("--demo") || (!chosenEngine && !piConnected() && !anyCli);
 	const modelArg = flag(argv, "--model");
 	const model = modelArg ?? config.model ?? "claude-sonnet-4-5";

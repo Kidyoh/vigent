@@ -310,7 +310,7 @@ model = 5
 	const { config, warnings } = loadConfig(file);
 	assert.equal(config.engine, "codex");
 	assert.deepEqual(config.engines.claude, { args: ["--permission-mode", "plan"], model: "opus" });
-	assert.deepEqual(warnings, ["config [engines.codex]: 'model' should be a string", "config: unknown engine [engines.gemini] (pi, claude, codex or opencode)"]);
+	assert.deepEqual(warnings, ["config [engines.codex]: 'model' should be a string", "config: unknown engine [engines.gemini] (pi, claude, codex, opencode, or give it a command = [...] to add your own)"]);
 	fs.writeFileSync(file, `engine = "gpt"\n`);
 	assert.match(loadConfig(file).warnings[0], /'engine' should be "auto", "pi"/);
 });

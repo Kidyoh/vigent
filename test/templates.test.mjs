@@ -98,7 +98,7 @@ engine = "gemini"
 		"config [templates.nothing]: 'prompt' is required",
 		"config [templates.loud]: unknown option 'color'",
 		"config [templates.loud]: 'effort' should be one of low, medium, high, xhigh, max",
-		'config [templates.weird]: \'engine\' should be "pi", "claude", "codex" or "opencode"',
+		'config [templates.weird]: \'engine\' should be "pi", "claude", "codex", "opencode" or an engine from [engines]',
 	]);
 	const all = allTemplates(config.templates);
 	assert.deepEqual(all.map((t) => t.name), ["fix", "test", "review", "explain", "migrate", "loud", "weird"]);

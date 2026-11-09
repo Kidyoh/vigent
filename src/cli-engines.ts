@@ -11,7 +11,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import { expandPrompt } from "./attach.js";
-import { ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
+import { CUSTOM_ENGINES, type CustomEngine, ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
 import { Session, type TranscriptItem } from "./session.js";
 import type { WorktreeInfo } from "./worktree.js";
 
@@ -65,6 +65,8 @@ export interface CliAdapter {
 	args(prompt: string, o: CliRunOptions): string[];
 	/** a fresh parser for one run (parsers keep a little state) */
 	parser(): (event: any) => CliEvent[];
+	/** it prints plain text, not JSON events: every line goes into the reply */
+	raw?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +328,47 @@ export const CLI_ADAPTERS: Record<CliEngineId, CliAdapter> = {
 	opencode: opencodeAdapter,
 };
 
+/**
+ * An engine from your config: its command, with {prompt} and {model} filled
+ * in, read as plain text or as the JSON of a CLI vigent already knows.
+ */
+export function customAdapter(e: CustomEngine): CliAdapter {
+	const json = e.output === "text" ? undefined : CLI_ADAPTERS[e.output];
+	return {
+		id: e.id,
+		bin: e.command[0],
+		defaultArgs: [],
+		raw: !json,
+		args(prompt, o) {
+			const fill = (a: string) => a.split("{prompt}").join(prompt).split("{model}").join(o.model ?? "").split("{id}").join(o.resumeId ?? "");
+			const rest = e.command.slice(1);
+			const placed = rest.some((a) => a.includes("{prompt}"));
+			return [
+				...rest.map(fill),
+				...(o.extraArgs ?? []),
+				...(o.model && e.modelArgs ? e.modelArgs.map(fill) : []),
+				...(o.resumeId && e.resumeArgs ? e.resumeArgs.map(fill) : []),
+				...(placed ? [] : [prompt]),
+			];
+		},
+		parser: () => {
+			if (!json) return () => [];
+			const parse = json.parser();
+			// without resume_args vigent can't pass a conversation back, so it doesn't keep one
+			return e.resumeArgs ? parse : (ev) => parse(ev).filter((x) => x.type !== "session");
+		},
+	};
+}
+
+/** The adapter for a built-in CLI or an engine from your config. */
+export function adapterFor(engine: CliEngineId): CliAdapter {
+	const custom = CUSTOM_ENGINES.get(engine);
+	if (custom) return customAdapter(custom);
+	const a = CLI_ADAPTERS[engine];
+	if (!a) throw new Error(`unknown engine '${engine}'`);
+	return a;
+}
+
 // ---------------------------------------------------------------------------
 // The session
 // ---------------------------------------------------------------------------
@@ -371,7 +414,7 @@ export class CliSession extends Session {
 	constructor(name: string, engine: CliEngineId, model: string | undefined, private opts: CliSessionOptions) {
 		super(name, model ?? ENGINE_NAMES[engine], opts.worktree);
 		this.engine = engine;
-		this.adapter = CLI_ADAPTERS[engine];
+		this.adapter = adapterFor(engine);
 		this.cwd = opts.cwd;
 		this.requestedModel = model;
 		this.effort = opts.effort;
@@ -529,8 +572,14 @@ export class CliSession extends Session {
 			buf += chunk;
 			let nl: number;
 			while ((nl = buf.indexOf("\n")) >= 0) {
-				const line = buf.slice(0, nl).trim();
+				const rawLine = buf.slice(0, nl);
 				buf = buf.slice(nl + 1);
+				// a plain-text CLI: what it prints is the reply
+				if (this.adapter.raw) {
+					handle({ type: "text_delta", text: `${rawLine.replace(/\r$/, "")}\n` });
+					continue;
+				}
+				const line = rawLine.trim();
 				if (!line.startsWith("{")) continue;
 				let json: unknown;
 				try {
@@ -557,6 +606,13 @@ export class CliSession extends Session {
 			if (this.child !== child) return; // already failed to start
 			this.child = undefined;
 			this.setThinking(false);
+			if (this.adapter.raw) {
+				// the last line may not end with a newline; and no trailing blank lines in the reply
+				if (buf) handle({ type: "text_delta", text: buf });
+				buf = "";
+				const last = this.items.at(-1);
+				if (last?.kind === "agent" && last.streaming) last.text = last.text.trimEnd();
+			}
 			this.endStreaming();
 			this.refreshStat(0);
 			if (this.aborted) {

@@ -5,7 +5,7 @@
  * name can still be typed in the picker.
  */
 import { execFile } from "node:child_process";
-import { ENGINE_BINS, type EngineId } from "./engines.js";
+import { CUSTOM_ENGINES, ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
 import { loadPiAi } from "./pi-sdk.js";
 
 export interface Choice {
@@ -65,7 +65,7 @@ export const EFFORTS: Record<EngineId, string[]> = {
 };
 
 export function effortChoices(engine: EngineId): Choice[] {
-	return [{ value: "default", note: "what the engine uses" }, ...EFFORTS[engine].map((value) => ({ value }))];
+	return [{ value: "default", note: "what the engine uses" }, ...(EFFORTS[engine] ?? []).map((value) => ({ value }))];
 }
 
 /** pi providers whose key is in the environment (the ones pi can call now). */
@@ -119,6 +119,11 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 				}
 			}
 			return out;
+		}
+		default: {
+			// a custom engine: its own choice, and the models its config lists
+			const custom = CUSTOM_ENGINES.get(engine);
+			return [{ value: "default", label: "Default", note: `${ENGINE_NAMES[engine] ?? engine}'s own choice` }, ...(custom?.models ?? []).map((value) => ({ value, label: value }))];
 		}
 	}
 }

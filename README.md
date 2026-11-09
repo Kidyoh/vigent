@@ -119,6 +119,15 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
+**Your own engines:** any other agent CLI that takes a prompt can be an engine too. Give it a table with a `command` (`{prompt}` is where the prompt goes) and it shows up in the sidebar, `:engine`, `:model` and `--engine` like the rest. By default what it prints is the reply; a CLI that prints Claude Code's, Codex's or OpenCode's JSON gets tool calls and costs as well ([details](https://github.com/farming-labs/vigent/blob/main/docs/config.md#your-own-engines)):
+
+```toml
+[engines.gemini]
+name = "Gemini CLI"
+command = ["gemini", "--yolo", "-p", "{prompt}"]
+model_args = ["-m", "{model}"]
+```
+
 **Permissions:** with `-p`, Claude Code can't stop to ask before running a command it isn't allowed, so it refuses it (for example `gh` or `cargo` under `acceptEdits`). vigent shows what was refused. You can allow commands up front with `[engines.claude] allow = ["Bash(gh:*)"]`. Or opt in with `ask = true`: vigent then asks **allow once / always allow / no** and runs the agent again with the permission ([details](https://github.com/farming-labs/vigent/blob/main/docs/config.md#when-claude-code-is-refused-a-tool)).
 
 ### pi extensions, skills and prompt templates
