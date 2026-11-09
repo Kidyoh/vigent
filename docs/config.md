@@ -21,6 +21,7 @@ leader = "<Space>"              # what <leader> means below (vim's default is "\
 [ui]
 sidebar = true
 sidebar_width = 32
+sidebar_position = "left"       # or "right"
 number = true                   # session numbers in the sidebar
 tilde = true                    # ~ on empty sidebar rows
 icons = "unicode"               # or "ascii"
@@ -65,7 +66,7 @@ branch = "{type}/{name}"        # "fix flaky test" -> fix/flaky-test
 | Section | What you can change |
 |---|---|
 | Look | theme (Enter opens the picker), transparent background, icons, 24-bit color |
-| Layout | sidebar, its width, session numbers, `~` rows |
+| Layout | sidebar, its width and side, session numbers, `~` rows |
 | Agents | the engine for new agents, a worktree per agent, worktree storage (riftri or git) |
 | Keys | the leader, and every NORMAL-mode key: Enter, type the new keys, Enter again |
 
@@ -88,6 +89,7 @@ Each option can also be changed while vigent runs, with vim's `:set` syntax: `:s
 |---|---|---|
 | `sidebar` | `true` | show the session sidebar (hidden anyway on narrow terminals) |
 | `sidebar_width` | `30` | sidebar width in columns, 16–80 |
+| `sidebar_position` | `"left"` | `"right"` puts the sidebar on the right; the window keys follow it (`<C-l>` goes to it, `<C-h>` back). Alias `sbp` |
 | `number` | `true` | session numbers in the sidebar (they match the `1`–`9` keys) |
 | `tilde` | `true` | `~` on empty sidebar rows |
 | `icons` | `"unicode"` | `"ascii"` swaps every glyph for plain ASCII |
@@ -96,6 +98,36 @@ Each option can also be changed while vigent runs, with vim's `:set` syntax: `:s
 | `notify` | `"auto"` | when an agent finishes, fails or needs you while you're looking at another one (or another window): `"auto"` rings the bell and, in terminals that show one (iTerm2, WezTerm, Ghostty, kitty; also inside tmux), sends a desktop notification. `"bell"`, `"desktop"` or `"off"` choose. The agent gets a mark in the sidebar until you open it |
 | `whichkey` | `true` | after `<leader>` (or any key that starts mappings), pause and a panel lists what each next key does, like which-key.nvim. `Esc` closes it (alias `wk`) |
 | `transparent` | `"auto"` | draw on the terminal's own background, so its blur, opacity or wallpaper shows through. `"auto"` does what the theme says (`lazyvim` is transparent); `true` or `false` forces it for every theme. Live: `:set transparent`, `:set notransparent`, `:set transparent!`, and `:set transparent&` back to `"auto"` |
+
+## `[statusline]` and `[winbar]`
+
+What the statusline (the bottom bar) and the winbar (the line over the transcript) show, in order, like lualine's sections. Each takes a `left` and a `right` list; leave one out to keep its default.
+
+```toml
+[statusline]                         # the defaults
+left = ["mode", "agent", "branch"]
+right = ["model", "usage", "agents"]
+
+[winbar]
+left = ["agent", "model", "status"]
+right = ["path"]
+```
+
+| Part | Shows | In |
+|---|---|---|
+| `mode` | the mode badge (`NORMAL`, `INSERT`…) | statusline |
+| `agent` | the focused agent's name | both |
+| `branch` | its worktree branch (on the statusline with `+added -removed`) | both |
+| `engine` | its engine, like `Claude Code` | both |
+| `model` | its model (on the winbar with the engine and effort, like `Claude Code · sonnet · high`) | both |
+| `effort` | its reasoning effort | both |
+| `usage` | tokens and cost, like `74.8k tok · $0.50` | both |
+| `agents` | running / all agents, with a spinner while any run | statusline |
+| `path` | where it works: its worktree, or `this checkout` | both |
+| `clock` | the time, `HH:MM` | statusline |
+| `status` | `paused`, `setting up`, queued prompts, pi extension status | winbar |
+
+A part with nothing to show (no effort set, no worktree) is left out. On the winbar, the right side gives way first when the line is too narrow.
 
 ## `[highlights]`
 
@@ -405,8 +437,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `app.help` | show every key |
 | `app.dashboard` | all agents at a glance (`:dash`) |
 | `app.redraw` | redraw the screen |
-| `window.left` | move to the sessions sidebar (like `<C-w>h`) |
-| `window.right` | move back to the transcript (like `<C-w>l`); there, redraw the screen |
+| `window.left` | the window to the left (like `<C-w>h`): the sessions sidebar, or the transcript when the sidebar is on the right |
+| `window.right` | the window to the right (like `<C-w>l`): back to the transcript, or the sidebar when it's on the right; with nowhere to go, redraw the screen |
 | `app.quit` | quit vigent; refuses while agents are running, like vim's `:q` |
 | `app.quit_force` | quit even with agents running (`:q!`) |
 | `app.quit_hint` | explain how to quit |
@@ -436,7 +468,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `dd` | `session.kill` (asks first) |
 | `<Esc>` | `search.clear` (also `:noh`) |
 | `<C-c>` | `session.abort` |
-| `<C-l>` | `window.right` (from the sidebar back to the transcript; in the transcript, redraw) |
+| `<C-l>` | `window.right` (from the sidebar back to the transcript; in the transcript, redraw. With `sidebar_position = "right"`, the two swap) |
 | `<C-h>` `<BS>` | `window.left` (most terminals send `<C-h>` as Backspace) |
 | `<C-w>h` | `window.left` |
 | `<C-w>l` | `window.right` |

@@ -49,6 +49,7 @@ import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
 import { backendName, formatBytes, riftriBackends, type RiftriHealth, RIFTRI_INSTALL } from "./riftri.js";
+import { defaultLayout, type Layout, type StatuslinePart, type WinbarPart } from "./layout.js";
 import { allEngineIds, defaultEngine as defaultEngineFor, ENGINE_NAMES, type EngineId, type EngineInfo, isEngineId } from "./engines.js";
 import { copyToClipboard } from "./clipboard.js";
 import { splitView, unifiedView } from "./diffview.js";
@@ -650,11 +651,16 @@ export class App implements Component {
 			case "sidebar.focus":
 				return this.toggleSidebarFocus();
 			case "window.left":
-				if (!this.sidebarFocused) this.toggleSidebarFocus();
-				return;
-			case "window.right":
-				// already in the transcript: <C-l> keeps vim's meaning, redraw
-				return this.sidebarFocused ? this.leaveSidebar() : this.repaint();
+			case "window.right": {
+				// toward the sidebar focuses it, away from it comes back; <C-l> with nowhere to go keeps vim's meaning, redraw
+				const toSidebar = (name === "window.left") === (this.ui.sidebar_position !== "right");
+				if (toSidebar) {
+					if (!this.sidebarFocused) this.toggleSidebarFocus();
+					return;
+				}
+				if (this.sidebarFocused) return this.leaveSidebar();
+				return name === "window.right" ? this.repaint() : undefined;
+			}
 			case "session.goto": {
 				const n = Number(arg);
 				if (!Number.isInteger(n) || n < 1) this.setMessage(`session.goto needs a number, got '${arg ?? ""}'`, "ErrorMsg");
@@ -1056,6 +1062,8 @@ export class App implements Component {
 
 	/** [hooks] from config.toml and a trusted .vigent.toml */
 	hooks: Hooks = {};
+	/** [statusline] and [winbar]: what they show */
+	layout: Layout = defaultLayout();
 	/** :trust (set by the CLI; it knows where the project's config is) */
 	trustProject: () => string = () => `no ${PROJECT_CONFIG} in this project`;
 	/** runs a hook (replaced in tests) */
@@ -1457,7 +1465,7 @@ export class App implements Component {
 			},
 			{ search: true, onBackOut: takeBack, rows: 8 },
 			// a completion menu: just above the prompt, where you're typing
-			{ anchor: "bottom-left", col: this.sidebarWidth(this.terminal.columns) + 2, offsetY: -2, width: Math.min(64, this.terminal.columns - 2) },
+			{ anchor: "bottom-left", col: (this.ui.sidebar_position === "right" ? 0 : this.sidebarWidth(this.terminal.columns)) + 2, offsetY: -2, width: Math.min(64, this.terminal.columns - 2) },
 		);
 	}
 
@@ -1549,6 +1557,12 @@ export class App implements Component {
 				change: (d) => ((ui.sidebar_width = Math.max(16, Math.min(80, ui.sidebar_width + 2 * d))), refresh()),
 				hint: "h / l: 2 columns narrower / wider",
 			},
+			{
+				section: "Layout",
+				label: "Sidebar side",
+				value: () => ui.sidebar_position,
+				change: () => ((ui.sidebar_position = ui.sidebar_position === "left" ? "right" : "left"), refresh()),
+			},
 			{ section: "Layout", label: "Session numbers", value: () => onOff(ui.number), change: () => ((ui.number = !ui.number), refresh()) },
 			{ section: "Layout", label: "~ on empty sidebar rows", value: () => onOff(ui.tilde), change: () => ((ui.tilde = !ui.tilde), refresh()) },
 			{
@@ -1556,7 +1570,7 @@ export class App implements Component {
 				label: "Engine for new agents",
 				value: () => (this.preferredEngine === "auto" ? `auto (${ENGINE_NAMES[this.defaultEngine()]})` : ENGINE_NAMES[this.preferredEngine]),
 				change: (d) => {
-					this.preferredEngine = cycle<EngineId | "auto">(["auto", "pi", "claude", "codex", "opencode"], this.preferredEngine, d);
+					this.preferredEngine = cycle<EngineId | "auto">(["auto", ...allEngineIds()], this.preferredEngine, d);
 				},
 				hint: "auto: the first signed-in CLI, else pi with an API key · :engine picks it from anywhere",
 			},
@@ -1686,7 +1700,7 @@ export class App implements Component {
 			set(undefined, "theme", this.painter.theme.name);
 			set(undefined, "engine", this.preferredEngine);
 			set(undefined, "leader", this.keymap.leader);
-			for (const k of ["sidebar", "sidebar_width", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey", "notify"] as const) set("ui", k, ui[k]);
+			for (const k of ["sidebar", "sidebar_width", "sidebar_position", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey", "notify"] as const) set("ui", k, ui[k]);
 			set("worktree", "enabled", this.workspace.config.enabled);
 			set("worktree", "backend", this.workspace.config.backend ?? "auto");
 			for (const [lhs, rhs] of this.keyChanges) set("keys.normal", lhs, rhs);
@@ -2775,10 +2789,12 @@ export class App implements Component {
 		const out: string[] = [];
 		const sep = P.p("WinSeparator", this.icons.sep);
 		const normalBg = P.s("Normal");
+		const onRight = this.ui.sidebar_position === "right";
 		for (let r = 0; r < sideH; r++) {
-			const left = sbW > 0 ? sidebar[r] + sep : "";
+			const left = sbW > 0 && !onRight ? sidebar[r] + sep : "";
+			const right = sbW > 0 && onRight ? sep + sidebar[r] : "";
 			if (r === 0) {
-				out.push(left + this.renderWinbar(paneW + 2));
+				out.push(left + this.renderWinbar(paneW + 2) + right);
 				continue;
 			}
 			const vi = r - 1 - (paneH - view.length);
@@ -2796,7 +2812,7 @@ export class App implements Component {
 				text = paintMatches(line.text, term, P.s("Search"), normalBg, current, P.s(this.mode === "SEARCH" ? "IncSearch" : "CurSearch"));
 			}
 			const pad = Math.max(0, paneW + 2 - 1 - visibleWidth(line?.plain ?? ""));
-			out.push(left + bg + " " + text + bg + " ".repeat(pad) + RESET);
+			out.push(left + bg + " " + text + bg + " ".repeat(pad) + RESET + right);
 		}
 		if (this.seq.waiting) {
 			// which-key: what can follow the keys typed so far, over the bottom of the screen
@@ -2901,35 +2917,58 @@ export class App implements Component {
 		return lines.map((l) => truncateToWidth(l, width));
 	}
 
-	/** Neovim-style 'winbar' over the transcript: which agent, its model, where it works. */
+	/** Neovim-style 'winbar' over the transcript: which agent, its model, where it works ([winbar] picks the parts). */
 	private renderWinbar(w: number): string {
 		const P = this.painter;
 		const bg = P.attr("WinBar").bg ?? P.attr("Normal").bg;
 		const s = this.focusedSession;
-		const left = s ? ` ${this.icons.open_agent} ${s.name}` : ` ${this.icons.open_agent} [no agent]`;
-		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}${s.effort ? ` · ${s.effort}` : ""}` : "";
-		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? ` ${this.icons.light}` : ""}` : s ? "this checkout" : "";
-		const ext = s && "extensionStatus" in s ? [...(s as PiSession).extensionStatus.values()].join(" · ") : "";
-		const status = (s?.state === "paused" ? `  ${s.holdReason ?? "paused"}` : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "") + (ext ? `  ${ext}` : "");
-		// the path gives way first (from its start: the end names the worktree), always two spaces before it
-		const pathRoom = w - visibleWidth(left) - visibleWidth(model) - visibleWidth(status) - 3;
-		const shownWhere = !where ? "" : visibleWidth(where) <= pathRoom ? where : pathRoom > 4 ? `…${where.slice(where.length - pathRoom + 1)}` : "";
-		const right = shownWhere ? `${shownWhere} ` : "";
-		const room = Math.max(0, w - visibleWidth(left) - visibleWidth(model) - visibleWidth(right));
-		return (
-			P.on("WinBar", bg) +
-			left +
-			RESET +
-			P.on("Comment", bg) +
-			model +
-			P.on("WarningMsg", bg) +
-			status +
-			P.on("Normal", bg) +
-			" ".repeat(Math.max(0, room - visibleWidth(status))) +
-			P.on("Comment", bg) +
-			right +
-			RESET
-		);
+		const part = (p: WinbarPart): { text: string; group: string } | undefined => {
+			const text = this.winbarPart(p);
+			return text ? { text, group: p === "agent" ? "WinBar" : p === "status" ? "WarningMsg" : "Comment" } : undefined;
+		};
+		const lefts = this.layout.winbar.left.map(part).filter((x) => x !== undefined);
+		const rights = this.layout.winbar.right.map(part).filter((x) => x !== undefined);
+		// with no agent there's still a name for the window
+		if (!s && !lefts.some((x) => x.group === "WinBar")) lefts.unshift({ text: `${this.icons.open_agent} [no agent]`, group: "WinBar" });
+		let left = "";
+		let leftW = 0;
+		lefts.forEach((x, i) => {
+			const t = `${i ? "  " : " "}${x.text}`;
+			left += (x.group === "WinBar" ? P.on("WinBar", bg) : RESET + P.on(x.group, bg)) + t;
+			leftW += visibleWidth(t);
+		});
+		// the right side gives way first (from its start: a path's end names the worktree), always two spaces before it
+		const where = rights.map((x) => x.text).join("  ");
+		const room = w - leftW - 3;
+		const shown = !where ? "" : visibleWidth(where) <= room ? where : room > 4 ? `…${where.slice(where.length - room + 1)}` : "";
+		const right = shown ? `${shown} ` : "";
+		const fill = Math.max(0, w - leftW - visibleWidth(right));
+		return left + P.on("Normal", bg) + " ".repeat(fill) + P.on("Comment", bg) + right + RESET;
+	}
+
+	private winbarPart(p: WinbarPart): string {
+		const s = this.focusedSession;
+		switch (p) {
+			case "agent":
+				return `${this.icons.open_agent} ${s ? s.name : "[no agent]"}`;
+			case "model":
+				return s ? `${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}${s.effort ? ` · ${s.effort}` : ""}` : "";
+			case "engine":
+				return s ? ENGINE_NAMES[s.engine] : "";
+			case "effort":
+				return s?.effort ?? "";
+			case "status": {
+				const ext = s && "extensionStatus" in s ? [...(s as PiSession).extensionStatus.values()].join(" · ") : "";
+				const st = s?.state === "paused" ? (s.holdReason ?? "paused") : s?.queue.length ? `${this.icons.queued}${s.queue.length} queued` : "";
+				return [st, ext].filter(Boolean).join("  ");
+			}
+			case "path":
+				return s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? ` ${this.icons.light}` : ""}` : s ? "this checkout" : "";
+			case "branch":
+				return s?.worktree ? `${this.icons.worktree}${s.worktree.branch}` : "";
+			case "usage":
+				return s ? formatUsage(s) : "";
+		}
 	}
 
 	/** Shown when no agent is running, like Neovim's intro screen. */
@@ -3034,20 +3073,22 @@ export class App implements Component {
 			this.leaveSidebar();
 			return true;
 		}
-		// neovim's window keys: <C-w>l / <C-w>w go back, <C-w>h stays
+		// neovim's window keys: toward the transcript (<C-w>l, or <C-w>h with the sidebar on the right) and <C-w>w go back
+		const right = this.ui.sidebar_position === "right";
 		if (pending === "<C-w>") {
-			if (key === "l" || key === "w" || key === "p" || key === "<C-w>") this.leaveSidebar();
+			if (key === (right ? "h" : "l") || key === "w" || key === "p" || key === "<C-w>") this.leaveSidebar();
 			return true;
 		}
 		if (key === "<C-w>") {
 			this.sidebarPending = key;
 			return true;
 		}
-		if (key === "<C-l>") {
+		const back = right ? key === "<C-h>" || key === "<BS>" : key === "<C-l>";
+		if (back) {
 			this.leaveSidebar();
 			return true;
 		}
-		if (key === "<C-h>" || key === "<BS>") return true;
+		if (key === "<C-h>" || key === "<BS>" || key === "<C-l>") return true;
 		// act on the agent under the cursor, like neo-tree's file actions
 		if (key === "d") {
 			if (pending === "d") this.runAction("session.kill");
@@ -3312,33 +3353,67 @@ export class App implements Component {
 		return lines;
 	}
 
+	/** mode and agent on the left, model, usage and agents on the right ([statusline] picks the parts) */
 	private renderStatusline(width: number): string {
 		const P = this.painter;
 		const s = this.focusedSession;
-		const modeBadge = P.p(MODE_GROUP[this.mode], ` ${this.mode} `) + (this.demo ? P.p("VigentModeCommand", " DEMO ") : "");
-		const running = this.sessions.filter((x) => x.state === "running").length;
-		const leftText = s ? ` ${s.name} ` : " [no session] ";
-		const st = s?.worktree?.stat;
-		const changes = st && (st.added || st.removed) ? ` +${st.added} ${this.icons.minus}${st.removed}` : "";
-		const worktree = s?.worktree ? `${this.icons.worktree}${s.worktree.branch}${changes} ` : "";
-		const right = s
-			? ` ${this.server ? this.icons.serve : ""}${s.model}  ${formatUsage(s)}  ${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""} `
-			: this.server
-				? ` ${this.icons.serve}serving `
-				: "";
-		const plainLen = visibleWidth(` ${this.mode} `) + (this.demo ? 6 : 0) + visibleWidth(leftText) + visibleWidth(worktree) + visibleWidth(right);
-		const fill = Math.max(0, width - plainLen);
-		return (
-			modeBadge +
-			P.s("StatusLine") +
-			leftText +
-			P.s("StatusLineNC") +
-			worktree +
-			" ".repeat(Math.max(0, fill - (worktree ? 0 : 0))) +
-			P.s("StatusLine") +
-			right +
-			RESET
-		);
+		const { left: leftParts, right: rightParts } = this.layout.statusline;
+		let left = "";
+		let leftW = 0;
+		let first = true;
+		for (const p of leftParts) {
+			if (p === "mode") {
+				const badge = ` ${this.mode} `;
+				left += P.p(MODE_GROUP[this.mode], badge) + (this.demo ? P.p("VigentModeCommand", " DEMO ") : "");
+				leftW += visibleWidth(badge) + (this.demo ? 6 : 0);
+				continue;
+			}
+			const text = p === "agent" && !s ? "[no session]" : this.statuslinePart(p);
+			if (!text) continue;
+			// the first part stands out, the rest are quieter; a branch keeps its space after
+			const t = p === "branch" ? `${text} ` : ` ${text} `;
+			left += P.s(first ? "StatusLine" : "StatusLineNC") + t;
+			leftW += visibleWidth(t);
+			first = false;
+		}
+		const parts = s ? rightParts.map((p) => (p === "mode" ? ` ${this.mode} ` : this.statuslinePart(p))).filter(Boolean) : [];
+		const serve = this.server ? this.icons.serve : "";
+		const right = s ? (parts.length || serve ? ` ${serve}${parts.join("  ")} ` : "") : this.server ? ` ${serve}serving ` : "";
+		const fill = Math.max(0, width - leftW - visibleWidth(right));
+		return left + P.s(first ? "StatusLine" : "StatusLineNC") + " ".repeat(fill) + P.s("StatusLine") + right + RESET;
+	}
+
+	private statuslinePart(p: StatuslinePart): string {
+		const s = this.focusedSession;
+		switch (p) {
+			case "mode":
+				return this.mode;
+			case "agent":
+				return s ? s.name : "";
+			case "branch": {
+				const st = s?.worktree?.stat;
+				const changes = st && (st.added || st.removed) ? ` +${st.added} ${this.icons.minus}${st.removed}` : "";
+				return s?.worktree ? `${this.icons.worktree}${s.worktree.branch}${changes}` : "";
+			}
+			case "engine":
+				return s ? ENGINE_NAMES[s.engine] : "";
+			case "model":
+				return s?.model ?? "";
+			case "effort":
+				return s?.effort ?? "";
+			case "usage":
+				return s ? formatUsage(s) : "";
+			case "agents": {
+				const running = this.sessions.filter((x) => x.state === "running").length;
+				return `${running}/${this.sessions.length}${running > 0 ? ` ${this.spinner()}` : ""}`;
+			}
+			case "path":
+				return s?.worktree?.path ? this.shortPath(s.worktree.path) : s ? "this checkout" : "";
+			case "clock": {
+				const d = new Date();
+				return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+			}
+		}
 	}
 
 	private renderCmdline(width: number): string {

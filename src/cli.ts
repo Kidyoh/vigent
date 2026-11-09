@@ -380,6 +380,7 @@ async function main(): Promise<number | undefined> {
 	// model and effort for new agents, per engine, from [engines.<id>]
 	app.templates = config.templates;
 	app.hooks = config.hooks;
+	app.layout = config.layout;
 	// :trust: let this project's .vigent.toml run its commands, from now on
 	app.trustProject = () => {
 		if (!projectFile || !fs.existsSync(projectFile)) return `no ${PROJECT_CONFIG} in this project`;
@@ -388,6 +389,7 @@ async function main(): Promise<number | undefined> {
 		const { gated } = loadConfig(projectFile, { trusted: false, label: PROJECT_CONFIG });
 		loadConfig(projectFile, { base: config, trusted: true, label: PROJECT_CONFIG });
 		app.hooks = config.hooks;
+		app.layout = config.layout;
 		return `trusted ${PROJECT_CONFIG}${gated.length ? `: ${gated.join(", ")} now run` : ""}`;
 	};
 	for (const [id, opts] of Object.entries(config.engines)) {

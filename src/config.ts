@@ -22,6 +22,7 @@ import { parse as parseToml } from "smol-toml";
 import { EFFORTS } from "./choices.js";
 import { parseTemplates, type Template } from "./templates.js";
 import { HOOK_NAMES, type HookName, type Hooks } from "./hooks.js";
+import { defaultLayout, type Layout, parseSections, STATUSLINE_PARTS, WINBAR_PARTS } from "./layout.js";
 import { ICON_SETS, type IconSet } from "./icons.js";
 import { CUSTOM_ENGINES, type CustomEngine, ENGINE_IDS, type EngineId, isEngineId, registerCustomEngine } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
@@ -32,6 +33,8 @@ import { DEFAULT_WORKTREE, type WorktreeConfig } from "./worktree.js";
 export interface UiOptions {
 	sidebar: boolean;
 	sidebar_width: number;
+	/** which side the sidebar is on */
+	sidebar_position: "left" | "right";
 	number: boolean;
 	tilde: boolean;
 	icons: IconSet;
@@ -77,6 +80,8 @@ export interface Config {
 	templates: Record<string, Template>;
 	/** [hooks]: commands at points in an agent's life */
 	hooks: Hooks;
+	/** [statusline] and [winbar]: what they show, left and right */
+	layout: Layout;
 }
 
 export interface LoadOptions {
@@ -98,6 +103,7 @@ export const PROJECT_CONFIG = ".vigent.toml";
 export const DEFAULT_UI: UiOptions = {
 	sidebar: true,
 	sidebar_width: 30,
+	sidebar_position: "left",
 	number: true,
 	tilde: true,
 	icons: "unicode",
@@ -115,7 +121,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath(), opts: LoadOptions = {}): { config: Config; warnings: string[]; gated: string[] } {
-	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {} };
+	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {}, layout: defaultLayout() };
 	const warnings: string[] = [];
 	const gated: string[] = [];
 	const where = opts.label ?? "config";
@@ -195,6 +201,12 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 				break;
 			case "templates":
 				config.templates = { ...config.templates, ...parseTemplates(value, warnings) };
+				break;
+			case "statusline":
+				parseSections("statusline", value, STATUSLINE_PARTS, config.layout.statusline, where, warnings);
+				break;
+			case "winbar":
+				parseSections("winbar", value, WINBAR_PARTS, config.layout.winbar, where, warnings);
 				break;
 			case "hooks":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -316,6 +328,8 @@ const ALIASES: Record<string, keyof UiOptions> = {
 	sidebar_width: "sidebar_width",
 	sidebarwidth: "sidebar_width",
 	sbw: "sidebar_width",
+	sidebar_position: "sidebar_position",
+	sbp: "sidebar_position",
 	number: "number",
 	nu: "number",
 	tilde: "tilde",
@@ -350,6 +364,10 @@ export function setOption(ui: UiOptions, name: string, value: unknown): string |
 			ui.sidebar_width = n;
 			return;
 		}
+		case "sidebar_position":
+			if (value !== "left" && value !== "right") return `'${name}' should be "left" or "right"`;
+			ui.sidebar_position = value;
+			return;
 		case "notify":
 			if (!NOTIFY_MODES.includes(value as NotifyMode)) return `'${name}' should be "auto", "bell", "desktop" or "off"`;
 			ui.notify = value as NotifyMode;
@@ -503,6 +521,7 @@ leader = "<Space>"
 [ui]
 sidebar = true
 sidebar_width = 30
+sidebar_position = "left"   # or "right"
 number = true          # session numbers in the sidebar
 tilde = true           # ~ on empty sidebar rows
 icons = "unicode"      # "nerd" for Nerd Font icons (like AstroNvim/LazyVim), "ascii" for fonts without box-drawing characters
@@ -511,6 +530,17 @@ timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
 # transparent = true    # use the terminal's background with any theme ("auto": the theme decides)
 whichkey = true          # after <leader>, show what each next key does (like which-key.nvim)
 notify = "auto"          # an agent finished while you looked elsewhere: "auto", "bell", "desktop", "off"
+
+# --- Statusline and winbar -------------------------------------------------
+# What each shows, in order. Statusline parts: mode, agent, branch, engine,
+# model, effort, usage, agents, path, clock. Winbar parts: agent, model,
+# engine, effort, status, path, branch, usage.
+# [statusline]
+# left = ["mode", "agent", "branch"]
+# right = ["model", "usage", "agents"]
+# [winbar]
+# left = ["agent", "model", "status"]
+# right = ["path"]
 
 # --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
 # Applied on top of whichever theme is active. A value is a table, a vim

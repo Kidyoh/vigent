@@ -252,6 +252,8 @@ CursorLine = "guibg=#2a2f3a"
 
 25 built in, including `lazyvim` (LazyVim's look, transparent), the tokyonight, catppuccin and rose-pine families, `dracula`, `onedark`, `everforest`, `nightfox`, `gruvbox`, `kanagawa`, `nord`, `monokai-pro`, `ayu-mirage`, and GitHub and solarized in dark and light. The picker shows each one's colors.
 
+**Layout:** `sidebar_position = "right"` under `[ui]` moves the sidebar to the right, and `[statusline]` / `[winbar]` pick what those lines show and in which order, like lualine's sections: `left = ["mode", "agent", "engine"]`, `right = ["usage", "agents", "clock"]` ([parts](docs/config.md#statusline-and-winbar)).
+
 **`:settings`** (`<Space>s`) changes the theme, transparency, layout, engine, worktrees and any key in one place. Press `w` and it's saved to config.toml.
 
 The full guide covers importing, theme files, palettes, every option and every highlight group: **[docs/themes.md](https://github.com/farming-labs/vigent/blob/main/docs/themes.md)**.
