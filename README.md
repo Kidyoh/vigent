@@ -1,6 +1,6 @@
 # vigent
 
-A vim-style, lightweight terminal app for running several coding agents at once, built on the [pi](https://github.com/badlogic/pi-mono) engine. It can also drive the Claude Code, Codex and OpenCode CLIs you already have installed, with their own logins.
+A vim-native terminal app for running several coding agents at once, each in its own git worktree. It drives the agents you already have installed (Claude Code, Codex, OpenCode, [pi](https://github.com/badlogic/pi-mono), or any CLI you add), with their own logins, and bundles none of them, so it stays small.
 
 **Website:** [vigent.farming-labs.dev](https://vigent.farming-labs.dev) · **Docs:** [vigent.farming-labs.dev/docs](https://vigent.farming-labs.dev/docs)
 
@@ -14,19 +14,10 @@ npm install -g @vigent/cli
 
 The package is `@vigent/cli` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`. Run `vigent` in a project, or `vigent <folder>` (`vigent .`, `vigent ~/code/app`) from anywhere.
 
-If you only run Claude Code, Codex or OpenCode, the light install leaves out the built-in pi engine and its model SDKs. It is 4 MB instead of about 200 MB. npm ignores `--omit=optional` with `-g`, so this installs into a folder of its own:
-
-```bash
-npm install --prefix ~/.vigent --omit=optional @vigent/cli
-ln -s ~/.vigent/node_modules/.bin/vigent ~/.local/bin/vigent   # or put ~/.vigent/node_modules/.bin on PATH
-```
-
-pi then shows as not installed; the same command without `--omit=optional` adds it back. The light install also leaves out the bundled riftri, so worktrees are plain git ones unless riftri is on your PATH.
-
 Requires Node.js 20 or newer and git. On Node 22.1 or newer, vigent keeps Node's compile cache, which makes later starts faster. Then, inside any git repository:
 
 ```bash
-vigent                    # your signed-in CLI (Claude Code, Codex, OpenCode), or pi with ANTHROPIC_API_KEY (or OPENAI_API_KEY / GEMINI_API_KEY)
+vigent                    # your signed-in CLI (Claude Code, Codex, OpenCode), or pi when it has a key or login
 vigent --engine claude    # new agents run your installed Claude Code (also: codex, opencode, pi)
 vigent --demo             # scripted agents, nothing needed
 vigent --help
@@ -99,7 +90,7 @@ Copies go to the system clipboard through the terminal (OSC 52), so they work ov
 
 ## Engines: pi, Claude Code, Codex, OpenCode
 
-pi runs inside vigent. Claude Code, Codex and OpenCode are the CLIs you may already use: vigent runs them as installed, in the agent's worktree, so each one uses its own login and settings. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected. If `ANTHROPIC_API_KEY` is set and Claude Code is also signed in with a Claude account, vigent runs Claude Code without that variable, so it uses your account (a key that isn't scoped to a workspace, or is out of credit, would otherwise fail every request). `:checkhealth` says so: *signed in (Claude account; ANTHROPIC_API_KEY left out)*.
+Each engine is an agent you install yourself: vigent runs it as installed, in the agent's worktree, so each one uses its own login and settings, and runs its own agent loop (tools, retries, context). vigent is the screen around them. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected. If `ANTHROPIC_API_KEY` is set and Claude Code is also signed in with a Claude account, vigent runs Claude Code without that variable, so it uses your account (a key that isn't scoped to a workspace, or is out of credit, would otherwise fail every request). `:checkhealth` says so: *signed in (Claude account; ANTHROPIC_API_KEY left out)*.
 
 ```vim
 :new fix the race --engine codex            " this agent runs Codex
@@ -114,8 +105,9 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 | `claude` | `claude -p --output-format stream-json` | `--permission-mode acceptEdits` |
 | `codex` | `codex exec --json` (`exec resume` to continue) | `-c sandbox_mode="workspace-write"` |
 | `opencode` | `opencode run --format json --dir <worktree>` | none |
+| `pi` | `pi --mode rpc` (one per agent, kept running) | none |
 
-**Model and effort:** `:model` (`<Space>M`) opens one plain list of every model by name and version (`Claude Fable 5.1`, `Claude Opus 5.5`, `GPT-5.5 Codex`…) with its id beside it, from every engine that's signed in (Codex's catalog comes from `codex debug models`, OpenCode's from `opencode models`, pi's from the providers you have a key for). An open agent keeps its engine, so a model from another engine is used for new agents. In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>R`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
+**Model and effort:** `:model` (`<Space>M`) opens one plain list of every model by name and version (`Claude Fable 5.1`, `Claude Opus 5.5`, `GPT-5.5 Codex`…) with its id beside it, from every engine that's signed in (Codex's catalog comes from `codex debug models`, OpenCode's from `opencode models`, pi's from `pi --list-models`). An open agent keeps its engine, so a model from another engine is used for new agents. In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>R`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
 
 Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#engines)).
 
@@ -130,13 +122,13 @@ model_args = ["-m", "{model}"]
 
 **Permissions:** with `-p`, Claude Code can't stop to ask before running a command it isn't allowed, so it refuses it (for example `gh` or `cargo` under `acceptEdits`). vigent shows what was refused. You can allow commands up front with `[engines.claude] allow = ["Bash(gh:*)"]`. Or opt in with `ask = true`: vigent then asks **allow once / always allow / no** and runs the agent again with the permission ([details](https://github.com/farming-labs/vigent/blob/main/docs/config.md#when-claude-code-is-refused-a-tool)).
 
-### pi extensions, skills and prompt templates
+### pi: extensions, skills and prompt templates
 
-A pi agent loads what pi itself would load. That covers extensions from `~/.pi/agent/extensions/` and `.pi/extensions/`, and the packages you installed with pi. It also covers skills, prompt templates, and the project's `AGENTS.md`.
+Install pi with `npm install -g @mariozechner/pi-coding-agent` (and give it a key, or log in with pi's `/login`). vigent keeps one `pi --mode rpc` running per agent, in its worktree, and talks to it over stdin and stdout: prompts go in, pi's events come out, and the conversation is saved in pi's session file in the worktree, so the agent survives a restart. A pi agent loads what pi itself would load. That covers extensions from `~/.pi/agent/extensions/` and `.pi/extensions/`, and the packages you installed with pi. It also covers skills, prompt templates, and the project's `AGENTS.md`.
 
 vigent gives extensions a UI of their own. When an extension asks for confirmation, vigent shows a y/n question in the command line. Choices and text input open pickers. Notifications go to the transcript and the message line, and statuses show in the winbar. Each one names the agent it came from, and a question from an agent you aren't looking at rings the bell. So pi's permission gate works the same as in pi: it asks before an `rm -rf`, and **No** blocks the command.
 
-Type an extension's command (`/deploy`), a skill (`/skill:changelog`) or a prompt template (`/tidy src/cart.js`) as a prompt. **`:pi`** lists everything the focused agent loaded, including extensions that failed and why. Press Enter on a command, skill or prompt template to start a prompt with it.
+Type an extension's command (`/deploy`), a skill (`/skill:changelog`) or a prompt template (`/tidy src/cart.js`) as a prompt. **`:pi`** lists everything the focused agent loaded. Press Enter on a command, skill or prompt template to start a prompt with it. An extension that doesn't load stops pi, as it does in pi itself; the agent's transcript says which one and why.
 
 ## Worktrees
 

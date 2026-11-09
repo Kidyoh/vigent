@@ -173,28 +173,17 @@ test("lists and finds only vigent's worktrees", () => {
 });
 
 test("a pi agent's tools run inside its worktree", async () => {
-	const { PiSession } = await import("../dist/session.js");
-	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-	const { registerFauxProvider, fauxAssistantMessage, fauxToolCall } = await import("@mariozechner/pi-ai");
-
-	const faux = registerFauxProvider();
-	faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("bash", { command: "pwd > where.txt" }), { stopReason: "toolUse" }),
-		fauxAssistantMessage(fauxToolCall("write", { path: "notes.md", content: "hello\nworld\n" }), { stopReason: "toolUse" }),
-		fauxAssistantMessage("Done: wrote notes.md."),
+	const { PiSession } = await import("../dist/pi-session.js");
+	const { realPi } = await import("./support/pi.mjs");
+	const faux = await realPi(tmp, [
+		{ tool: "bash", args: { command: "pwd > where.txt" } },
+		{ tool: "write", args: { path: "notes.md", content: "hello\nworld\n" } },
+		{ text: "Done: wrote notes.md." },
 	]);
-	const authStorage = AuthStorage.inMemory();
-	authStorage.setRuntimeApiKey(faux.getModel().provider, "test");
-	const agentDir = path.join(tmp, "pi-agent");
+	faux.unregister = faux.close;
 
 	const wt = createWorktree(repo, "docs agent notes");
-	const s = new PiSession("docs agent notes", "faux", {
-		cwd: wt.path,
-		worktree: wt,
-		modelObject: faux.getModel(),
-		authStorage,
-		agentDir,
-	});
+	const s = new PiSession("docs agent notes", "default", { cwd: wt.path, worktree: wt, env: faux.env });
 	try {
 		await s.ready;
 		const idle = new Promise((resolve) => s.onChange(() => s.state === "idle" && s.items.some((i) => i.kind === "agent" && !i.streaming) && resolve()));

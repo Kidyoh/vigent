@@ -77,7 +77,7 @@ Move with `j`/`k`, change with `Enter`/`Space` (or step with `h`/`l`), and press
 | Key | Default | Meaning |
 |---|---|---|
 | `theme` | `"default"` | Colorscheme at startup. `colorscheme` is accepted as an alias. See [themes.md](themes.md). |
-| `model` | `"claude-sonnet-4-5"` | Model for new pi agents. `--model` on the command line wins. |
+| `model` | pi's own default | Model for new pi agents, as `provider/model` (anything `pi --model` takes). `--model` on the command line wins. |
 | `engine` | `"auto"` | What runs new agents: `"pi"`, `"claude"`, `"codex"`, `"opencode"`, [one of your own](#your-own-engines), or `"auto"` (the first signed-in CLI, else pi if it has an API key; with neither, starting an agent says how to connect one). `--engine` on the command line wins; `:new <task> --engine <id>` picks one per agent. See [`[engines]`](#engines). |
 | `leader` | `"<Space>"` | The key `<leader>` stands for in `[keys]`, like vim's `mapleader` (vim's own default is `"\"`). `mapleader` is accepted as an alias. |
 
@@ -229,7 +229,7 @@ With `ask = true`, vigent asks you instead, in a picker that names the agent and
 
 The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the tool's name for anything else. If an agent you aren't looking at asks, the bell rings. Codex doesn't need this, because it runs in a workspace-write sandbox. pi doesn't either: it has no permission gate unless an extension adds one (see pi extensions in the README).
 
-`[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`; a bare name means Anthropic's) and `effort` too.
+`[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`, or any pattern `pi --model` takes), `effort` (pi's thinking level) and `args`: extra arguments for `pi --mode rpc`, such as `["--no-extensions"]` or `["-e", "./my-extension.ts"]`. pi is your own install (`npm install -g @mariozechner/pi-coding-agent`); vigent keeps one `pi --mode rpc` running per agent and saves its conversation in the worktree.
 
 ### Your own engines
 
@@ -269,7 +269,7 @@ In a project's `.vigent.toml`, a `command` is a program to run, so it waits for 
 - Claude Code's: Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.
 - Codex's own catalog, from `codex debug models` (the GPT models your account has).
 - everything `opencode models` lists.
-- pi's catalog for each provider you have a key for.
+- pi's: what `pi --list-models` lists (the providers you have a key or login for, and your `models.json`).
 
 An open agent keeps its engine, because its conversation lives there. So a model from another engine is used by new agents instead, and `:new <task>` starts one. `:model codex:gpt-5.5` does this without the picker.
 

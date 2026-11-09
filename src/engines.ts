@@ -10,7 +10,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PI_INSTALL, piInstalled } from "./pi-sdk.js";
+import { PI_BIN, PI_INSTALL } from "./pi-cli.js";
 
 /** the engines vigent knows by itself */
 export type BuiltinEngineId = "pi" | "claude" | "codex" | "opencode";
@@ -140,7 +140,7 @@ export function onPath(bin: string, env: NodeJS.ProcessEnv = process.env): boole
 	return false;
 }
 
-/** pi can run: an API key in the environment, or a saved pi login. */
+/** pi can run: installed, with an API key in the environment, a saved pi login or providers of its own. */
 export function piConnected(env: NodeJS.ProcessEnv = process.env): boolean {
 	return detectPi(env).connected;
 }
@@ -191,28 +191,39 @@ function firstVersion(s: string): string | undefined {
 	return /\d+\.\d+\.\d+[\w.-]*/.exec(s)?.[0];
 }
 
-export function detectPi(env: NodeJS.ProcessEnv, installed = piInstalled()): EngineInfo {
+/** pi's config folder: $PI_CODING_AGENT_DIR, else ~/.pi/agent */
+export function piAgentDir(env: NodeJS.ProcessEnv = process.env): string {
+	const dir = env.PI_CODING_AGENT_DIR;
+	if (dir) return dir.startsWith("~/") ? path.join(env.HOME ?? os.homedir(), dir.slice(2)) : dir;
+	return path.join(env.HOME ?? os.homedir(), ".pi", "agent");
+}
+
+export function detectPi(env: NodeJS.ProcessEnv, installed = onPath(PI_BIN, env)): EngineInfo {
 	if (!installed) {
-		return { id: "pi", name: ENGINE_NAMES.pi, installed: false, connected: false, detail: "not installed (light install)", install: PI_INSTALL };
+		return { id: "pi", name: ENGINE_NAMES.pi, installed: false, connected: false, detail: "not installed", install: PI_INSTALL };
 	}
 	const keys = PI_KEYS.filter((k) => env[k]);
-	let stored = false;
-	try {
-		const auth = JSON.parse(fs.readFileSync(path.join(env.HOME ?? os.homedir(), ".pi", "agent", "auth.json"), "utf8"));
-		stored = Object.keys(auth ?? {}).length > 0;
-	} catch {
-		// no pi login stored
-	}
-	const connected = keys.length > 0 || stored;
+	const has = (file: string, ok: (v: any) => boolean) => {
+		try {
+			return ok(JSON.parse(fs.readFileSync(path.join(piAgentDir(env), file), "utf8")));
+		} catch {
+			return false;
+		}
+	};
+	// a saved login (pi's /login), or providers of your own in models.json (Ollama, a proxy...)
+	const stored = has("auth.json", (v) => Object.keys(v ?? {}).length > 0);
+	const custom = has("models.json", (v) => Object.keys(v?.providers ?? {}).length > 0);
+	const connected = keys.length > 0 || stored || custom;
 	return {
 		id: "pi",
 		name: ENGINE_NAMES.pi,
 		installed: true,
 		connected,
 		detail: connected
-			? `built in · ${keys.length > 0 ? `using ${keys.join(", ")}` : "using pi's saved login"}`
-			: "built in · no API key found",
-		connect: connected ? undefined : "export ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY)",
+			? `using ${keys.length > 0 ? keys.join(", ") : stored ? "pi's saved login" : "your models.json providers"}`
+			: "no API key found",
+		connect: connected ? undefined : "export ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY), or pi's /login",
+		install: PI_INSTALL,
 	};
 }
 

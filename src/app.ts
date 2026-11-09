@@ -62,7 +62,8 @@ import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice
 import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon } from "./icons.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
-import type { PiSession, Session, SessionState } from "./session.js";
+import type { PiSession } from "./pi-session.js";
+import type { Session, SessionState } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
 import {

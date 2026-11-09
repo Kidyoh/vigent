@@ -475,8 +475,8 @@ theme = "default"
 # model = "claude-sonnet-4-5"
 
 # --- Engines ---------------------------------------------------------------
-# What runs new agents: "pi" (built in), or a coding-agent CLI you already
-# have installed and signed in: "claude" (Claude Code), "codex", "opencode".
+# What runs new agents: a coding agent you already have installed and signed
+# in: "claude" (Claude Code), "codex", "opencode", "pi", or one of your own.
 # "auto" picks the first signed-in CLI (your own login), else pi if it has an API key.
 # Per agent: :new fix the race --engine codex.   Status: :checkhealth
 engine = "auto"

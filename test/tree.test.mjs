@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { flattenTree, TREE_GLYPHS } from "../dist/tree.js";
+import { realPi } from "./support/pi.mjs";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vigent-tree-"));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -51,24 +52,10 @@ test("flattening: straight runs stay flat, branches get guides, tool results fol
 });
 
 test("a pi agent branches: back to a prompt, edit and resend; old branches stay, even after a restart", async () => {
-	const { PiSession } = await import("../dist/session.js");
-	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-	const { registerFauxProvider, fauxAssistantMessage } = await import("@mariozechner/pi-ai");
-	const faux = registerFauxProvider();
-	const authStorage = AuthStorage.inMemory();
-	authStorage.setRuntimeApiKey(faux.getModel().provider, "test");
-	const seen = [];
-	const reply = (text) => (context) => {
-		seen.push(context.messages.filter((m) => m.role === "user").map((m) => (typeof m.content === "string" ? m.content : m.content[0].text)));
-		return fauxAssistantMessage(text);
-	};
-	const opts = {
-		cwd: tmp,
-		modelObject: faux.getModel(),
-		authStorage,
-		agentDir: path.join(tmp, "pi"),
-		sessionDir: path.join(tmp, "sessions"),
-	};
+	const { PiSession } = await import("../dist/pi-session.js");
+	const pi = await realPi(tmp, [{ text: "a" }, { text: "b" }, { text: "b2" }, { text: "c" }]);
+	const userTexts = (req) => req.messages.filter((m) => m.role === "user").map((m) => (typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")));
+	const opts = { cwd: tmp, env: pi.env, sessionDir: path.join(tmp, "sessions") };
 	const run = (s, prompt) =>
 		new Promise((resolve) => {
 			const off = s.onChange(() => {
@@ -80,9 +67,8 @@ test("a pi agent branches: back to a prompt, edit and resend; old branches stay,
 			s.send(prompt);
 		});
 
-	const s = new PiSession("racer", "faux", opts);
+	const s = new PiSession("racer", "default", opts);
 	await s.ready;
-	faux.setResponses([reply("a"), reply("b"), reply("b2"), reply("c")]);
 	await run(s, "A");
 	await run(s, "B");
 
@@ -93,7 +79,7 @@ test("a pi agent branches: back to a prompt, edit and resend; old branches stay,
 	assert.deepEqual(s.items.map((i) => i.text), ["A", "a"], "the transcript is the branch we're on");
 
 	await run(s, "B2");
-	assert.deepEqual(seen.at(-1), ["A", "B2"], "the model never sees the abandoned prompt");
+	assert.deepEqual(userTexts(pi.model.requests.at(-1)), ["A", "B2"], "the model never sees the abandoned prompt");
 	rows = s.tree();
 	assert.deepEqual(
 		rows.map((r) => `${r.guide}${r.text}${r.current ? " *" : ""}`),
@@ -103,19 +89,20 @@ test("a pi agent branches: back to a prompt, edit and resend; old branches stay,
 	const replyA = rows.find((r) => r.text === "a");
 	assert.deepEqual(await s.navigate(replyA.id), { editorText: undefined }, "going back to a reply continues from it");
 	await run(s, "C");
-	assert.deepEqual(seen.at(-1), ["A", "C"]);
+	assert.deepEqual(userTexts(pi.model.requests.at(-1)), ["A", "C"]);
 	assert.equal(s.tree().filter((r) => r.kind === "user").length, 4);
 	s.dispose();
 
 	// restart: every branch is still in the session file
-	const again = new PiSession("racer", "faux", opts);
+	const again = new PiSession("racer", "default", opts);
 	try {
 		await again.ready;
 		const texts = again.tree().map((r) => r.text);
 		for (const t of ["A", "B", "B2", "C", "b", "b2", "c"]) assert.ok(texts.includes(t), `${t} survives a restart`);
+		assert.deepEqual(again.items.filter((i) => i.kind !== "info").map((i) => i.text), ["A", "a", "C", "c"], "it reopens on the branch it was on");
 	} finally {
 		again.dispose();
-		faux.unregister();
+		await pi.close();
 	}
 });
 
@@ -172,14 +159,9 @@ test("the app: :tree, then Enter on a prompt opens it for editing", async () => 
 });
 
 test("a prompt sent the moment a pi run ends isn't rejected as 'already processing'", async () => {
-	const { PiSession } = await import("../dist/session.js");
-	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-	const { registerFauxProvider, fauxAssistantMessage } = await import("@mariozechner/pi-ai");
-	const faux = registerFauxProvider();
-	const authStorage = AuthStorage.inMemory();
-	authStorage.setRuntimeApiKey(faux.getModel().provider, "test");
-	faux.setResponses([fauxAssistantMessage("first done"), fauxAssistantMessage("second done")]);
-	const s = new PiSession("q", "faux", { cwd: tmp, modelObject: faux.getModel(), authStorage, agentDir: path.join(tmp, "pi2") });
+	const { PiSession } = await import("../dist/pi-session.js");
+	const pi = await realPi(tmp, [{ text: "first done" }, { text: "second done" }]);
+	const s = new PiSession("q", "default", { cwd: tmp, env: pi.env });
 	try {
 		await s.ready;
 		let sentSecond = false;
@@ -190,7 +172,7 @@ test("a prompt sent the moment a pi run ends isn't rejected as 'already processi
 					sentSecond = true;
 					s.send("two");
 				}
-				if (s.state === "error" || s.items.some((i) => i.text === "second done")) resolve();
+				if (s.state === "error" || (s.state === "idle" && s.items.some((i) => i.text === "second done"))) resolve();
 			});
 		});
 		s.send("one");
@@ -199,6 +181,6 @@ test("a prompt sent the moment a pi run ends isn't rejected as 'already processi
 		assert.deepEqual(s.items.map((i) => i.text), ["one", "first done", "two", "second done"]);
 	} finally {
 		s.dispose();
-		faux.unregister();
+		await pi.close();
 	}
 });

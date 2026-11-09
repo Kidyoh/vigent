@@ -8,7 +8,7 @@ import { EFFORTS, effortChoices, effortChoicesFor, modelChoices, parseCodexModel
 import { CLI_ADAPTERS, CliSession } from "../dist/cli-engines.js";
 import { DEFAULT_UI, loadConfig } from "../dist/config.js";
 import { Keymap } from "../dist/keys.js";
-import { piModel } from "../dist/session.js";
+import { realPi } from "./support/pi.mjs";
 import { BUILTIN_THEMES, Painter } from "../dist/theme.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vigent-model-"));
@@ -31,11 +31,17 @@ test("model lists per engine; pi models as provider/model", async () => {
 	assert.deepEqual(claude.map((c) => c.value), ["default", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
 	assert.deepEqual(claude.map((c) => c.label), ["Default", "Claude Fable 5.1", "Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"], "names with their versions");
 	assert.deepEqual((await modelChoices("codex", { PATH: "" })).map((c) => c.value), ["default"], "no Codex installed: its default, and any name can be typed");
-	const pi = await modelChoices("pi", { OPENAI_API_KEY: "x" });
-	assert.ok(pi.length > 0 && pi.every((c) => c.value.startsWith("openai/")), "the providers you have a key for");
-	assert.ok(await piModel("claude-sonnet-4-5"), "a bare name is Anthropic's");
-	assert.ok(await piModel(pi[0].value));
-	assert.equal(await piModel("nope/nothing"), undefined);
+	// pi's: what your pi lists (pi --list-models), as provider/model
+	const real = await realPi(tmp);
+	try {
+		const pi = await modelChoices("pi", real.env);
+		assert.equal(pi[0].value, "default");
+		assert.ok(pi.some((c) => c.value === "fake/test"), "models.json providers included");
+		assert.ok(pi.slice(1).every((c) => /^[^/]+\/.+/.test(c.value)));
+	} finally {
+		await real.close();
+	}
+	assert.deepEqual((await modelChoices("pi", { PATH: "" })).map((c) => c.value), ["default"], "no pi installed");
 });
 
 test(":model and :effort pick for the focused agent; the next prompt uses them, and they're saved", async () => {

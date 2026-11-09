@@ -1,16 +1,12 @@
 /**
  * Session layer: one Session per agent.
  *
- * - PiSession runs a real pi coding agent in-process, with its read / write /
- *   edit / bash tools rooted in the agent's own git worktree.
+ * - PiSession (pi-session.ts) drives your installed pi in its RPC mode.
  * - DemoSession replays a scripted transcript so the UI can be explored
  *   without API keys.
  */
-import { expandPrompt } from "./attach.js";
-import { loadPiAi, loadPiSdk } from "./pi-sdk.js";
-import { extensionUi, type PiResources, piResources, type PiUiHost } from "./pi-ui.js";
 import type { EngineId } from "./engines.js";
-import { flattenTree, type TreeGlyphs, type TreeRow } from "./tree.js";
+import type { TreeGlyphs, TreeRow } from "./tree.js";
 import { diffStat, type WorktreeInfo } from "./worktree.js";
 
 export type SessionState = "running" | "waiting" | "idle" | "paused" | "error";
@@ -308,277 +304,6 @@ export class DemoSession extends Session {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Pi session: real engine, in-process, working inside the agent's worktree
-// ---------------------------------------------------------------------------
-
-export interface PiSessionOptions {
-	/** where the agent's tools run: its worktree, or your checkout without one */
-	cwd: string;
-	worktree?: WorktreeInfo;
-	/** a pi-ai Model object; overrides the model id (used by tests) */
-	modelObject?: unknown;
-	/** pi AuthStorage; default: pi's own (~/.pi/agent/auth.json and env keys) */
-	authStorage?: unknown;
-	/** pi's config dir; default ~/.pi/agent */
-	agentDir?: string;
-	/** keep the conversation in this folder so the agent survives a restart (default: memory only) */
-	sessionDir?: string;
-	/** thinking level to start with: off, minimal, low, medium, high, xhigh */
-	effort?: string;
-}
-
-export class PiSession extends Session {
-	private session: any;
-	readonly ready: Promise<void>;
-	readonly cwd: string;
-
-	constructor(name: string, model: string, private opts: PiSessionOptions) {
-		super(name, model, opts.worktree);
-		this.cwd = opts.cwd;
-		this.effort = opts.effort;
-		this.ready = this.init();
-	}
-
-	private async init() {
-		const sdk = await loadPiSdk();
-		const sessionManager = this.opts.sessionDir
-			? sdk.SessionManager.continueRecent(this.cwd, this.opts.sessionDir)
-			: sdk.SessionManager.inMemory();
-		const resuming = sessionManager.buildSessionContext().messages.length > 0;
-		let model = this.opts.modelObject;
-		if (!model && !resuming) {
-			model = await piModel(this.model); // undefined: let pi pick its default
-		}
-		// a resumed conversation keeps the model it was saved with, unless one is given
-		const { session } = await sdk.createAgentSession({
-			cwd: this.cwd,
-			...(this.effort ? { thinkingLevel: this.effort as any } : {}),
-			...(model ? { model: model as any } : {}),
-			sessionManager,
-			...(this.opts.authStorage ? { authStorage: this.opts.authStorage as any } : {}),
-			...(this.opts.agentDir ? { agentDir: this.opts.agentDir } : {}),
-		});
-		this.session = session;
-		await this.bindExtensions(sdk, session);
-		if (resuming) {
-			const restored = itemsFromMessages(session.messages ?? []);
-			this.items.push(...restored.items);
-			this.tokens += restored.tokens;
-			if (restored.cost !== undefined) this.cost = (this.cost ?? 0) + restored.cost;
-			this.pushInfo(`resumed: ${restored.items.filter((i) => i.kind === "user").length} earlier prompts`);
-			this.refreshStat(0);
-		}
-		session.subscribe((event: any) => this.onEvent(event));
-	}
-
-	/** the run ended on a failed request (shown as an error, not as silence) */
-	private failed = false;
-
-	private onEvent(event: any) {
-		switch (event.type) {
-			case "agent_start":
-				this.failed = false;
-				this.setState("running");
-				break;
-			case "agent_end":
-				this.setState(this.failed ? "error" : "idle");
-				this.refreshStat(0);
-				break;
-			case "message_start": {
-				if (event.message?.role === "assistant") {
-					this.items.push({ kind: "agent", text: "", streaming: true });
-					this.emit();
-				}
-				break;
-			}
-			case "message_update": {
-				const last = this.items[this.items.length - 1];
-				if (last?.kind === "agent" && event.message?.content) {
-					last.text = extractText(event.message.content);
-					this.emit();
-				}
-				break;
-			}
-			case "message_end": {
-				const last = this.items[this.items.length - 1];
-				if (last?.kind === "agent") {
-					if (event.message?.content) last.text = extractText(event.message.content);
-					last.streaming = false;
-					const usage = event.message?.usage;
-					if (usage) {
-						this.tokens += usageTokens(usage);
-						if (typeof usage.cost?.total === "number") this.cost = (this.cost ?? 0) + usage.cost.total;
-					}
-					if (!last.text) this.items.pop(); // a turn that only called tools
-					this.emit();
-				}
-				// a failed request ends the reply with an error instead of throwing: say so
-				const err = piError(event.message);
-				if (err) {
-					this.failed = true;
-					this.pushInfo(err);
-				}
-				break;
-			}
-			case "tool_execution_start": {
-				this.items.push({
-					kind: "tool",
-					text: "",
-					tool: { name: event.toolName, summary: summarizeArgs(event.args), output: "", folded: true },
-				});
-				this.emit();
-				break;
-			}
-			case "tool_execution_end": {
-				const item = [...this.items].reverse().find((i) => i.kind === "tool" && i.tool?.name === event.toolName);
-				if (item?.tool) {
-					item.tool.output = extractText(event.result?.content ?? []) || JSON.stringify(event.result ?? "");
-					this.emit();
-				}
-				this.refreshStat();
-				break;
-			}
-		}
-	}
-
-	async setModel(model: string | undefined): Promise<void> {
-		if (!model || model === "default") return;
-		const m = await piModel(model);
-		if (!m) throw new Error(`pi doesn't know the model '${model}' (provider/model, e.g. anthropic/claude-sonnet-4-5)`);
-		await this.ready;
-		await this.session.setModel(m);
-		this.model = model;
-		this.emit();
-	}
-
-	async setEffort(effort: string | undefined): Promise<void> {
-		await this.ready;
-		const level = !effort || effort === "default" ? "off" : effort;
-		this.session.setThinkingLevel(level);
-		this.effort = level === "off" ? undefined : level;
-		this.emit();
-	}
-
-	tree(glyphs?: TreeGlyphs): TreeRow[] | undefined {
-		const sm = this.session?.sessionManager;
-		if (!sm) return undefined;
-		return flattenTree(sm.getTree(), sm.getLeafId(), glyphs);
-	}
-
-	async navigate(id: string): Promise<{ editorText?: string }> {
-		await this.ready;
-		if (this.state === "running") throw new Error(`'${this.name}' is running; wait for it or :pause it first`);
-		await this.session.agent?.waitForIdle?.();
-		const r = await this.session.navigateTree(id);
-		if (r.cancelled) throw new Error("cancelled");
-		// the transcript shows the branch the agent is on now
-		this.items = itemsFromMessages(this.session.messages ?? []).items;
-		this.emit();
-		return { editorText: r.editorText };
-	}
-
-	/** where this agent's extensions show dialogs and messages (set by the app) */
-	uiHost?: PiUiHost;
-	/** statuses extensions keep up to date (ctx.ui.setStatus), shown in the winbar */
-	extensionStatus = new Map<string, string>();
-
-	/**
-	 * Hand pi's extensions their UI and start them (session_start), as pi's
-	 * own modes do. Without this, an extension's confirm() always answers no
-	 * and its notify() goes nowhere.
-	 */
-	private async bindExtensions(sdk: any, session: any) {
-		const THEME = Symbol.for("@mariozechner/pi-coding-agent:theme");
-		try {
-			if (!(globalThis as any)[THEME]) sdk.initTheme?.(undefined, false);
-		} catch {
-			// extensions that style text get plain text
-		}
-		const ui = extensionUi(
-			() => this.uiHost ?? this.fallbackUi,
-			() => (globalThis as any)[THEME],
-		);
-		try {
-			await session.bindExtensions({
-				uiContext: ui,
-				commandContextActions: {
-					waitForIdle: () => session.agent.waitForIdle(),
-					// one conversation per agent in vigent: :new starts another agent
-					newSession: async () => ({ cancelled: true }),
-					fork: async () => ({ cancelled: true }),
-					switchSession: async () => ({ cancelled: true }),
-					navigateTree: async (targetId: string) => {
-						const r = await session.navigateTree(targetId, {});
-						return { cancelled: r.cancelled };
-					},
-					reload: async () => {
-						await session.reload();
-					},
-				},
-				onError: (err: any) => this.pushInfo(`extension error (${shortExtPath(err?.extensionPath)}${err?.event ? `, ${err.event}` : ""}): ${err?.error ?? err}`),
-			});
-		} catch (err: any) {
-			this.pushInfo(`pi extensions didn't start: ${String(err?.message ?? err)}`);
-		}
-		const failed = piResources(session).extensions.filter((e) => e.error);
-		for (const e of failed) this.pushInfo(`extension ${shortExtPath(e.path)} didn't load: ${e.error}`);
-	}
-
-	/** with no screen to ask on: messages still reach the transcript, dialogs answer no */
-	private fallbackUi: PiUiHost = {
-		select: async () => undefined,
-		confirm: async () => false,
-		input: async () => undefined,
-		notify: (message) => this.pushInfo(message),
-		setStatus: (key, text) => this.setExtensionStatus(key, text),
-	};
-
-	setExtensionStatus(key: string, text: string | undefined) {
-		if (text) this.extensionStatus.set(key, text);
-		else this.extensionStatus.delete(key);
-		this.emit();
-	}
-
-	/** What pi loaded for this agent: extensions, their commands, skills, prompt templates, AGENTS.md files. */
-	resources(): PiResources | undefined {
-		return this.session ? piResources(this.session) : undefined;
-	}
-
-	send(text: string): void {
-		this.pushUser(text);
-		this.setState("running");
-		const attached = expandPrompt(text, "pi", this.cwd);
-		if (attached.skipped.length) this.pushInfo(`not attached: ${attached.skipped.join(", ")}`);
-		this.ready
-			// pi reports agent_end a moment before it accepts the next prompt (queued prompts hit this)
-			.then(() => this.session.agent?.waitForIdle?.())
-			.then(() => this.session.prompt(attached.prompt))
-			// an extension command (/name) or a handled input runs no turn: nothing else will end it
-			.then(() => {
-				if (this.state === "running") this.setState("idle");
-			})
-			.catch((err: any) => {
-				const text = String(err?.message ?? err);
-				// pi's own advice (/login, its docs paths) is for pi's TUI, not vigent: keep its first line
-				const key = /api key|login|auth/i.test(text);
-				this.pushInfo(`error: ${key ? text.split("\n")[0] : text}`);
-				if (key) this.pushInfo(PI_KEY_HINT);
-				this.setState("error");
-			});
-	}
-
-	abort(): void {
-		this.session?.abort?.();
-		this.setState("idle");
-	}
-
-	dispose() {
-		super.dispose();
-		this.session?.dispose?.();
-	}
-}
-
 /** Rebuild the transcript from pi's saved messages: prompts, replies, and tool calls with their output. */
 export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; tokens: number; cost?: number } {
 	const items: TranscriptItem[] = [];
@@ -618,7 +343,7 @@ export function itemsFromMessages(messages: any[]): { items: TranscriptItem[]; t
 }
 
 /** pi's usage: every token the request read or wrote, cached ones included (like Claude Code's count) */
-function usageTokens(u: any): number {
+export function usageTokens(u: any): number {
 	return u.totalTokens ?? (u.input ?? 0) + (u.output ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
 }
 
@@ -637,7 +362,7 @@ export function piError(message: any): string | undefined {
 	return auth ? `error: ${text}\n${PI_KEY_HINT}` : `error: ${text}`;
 }
 
-function extractText(content: any): string {
+export function extractText(content: any): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
@@ -646,27 +371,15 @@ function extractText(content: any): string {
 		.join("\n");
 }
 
-function summarizeArgs(args: any): string {
+export function summarizeArgs(args: any): string {
 	if (!args) return "";
 	if (typeof args === "string") return args.slice(0, 80);
 	const v = args.command ?? args.path ?? args.file_path ?? args.filePath ?? JSON.stringify(args);
 	return String(v).slice(0, 80);
 }
 
-/** A pi-ai model from "provider/model", or a bare id (Anthropic's). Undefined when pi doesn't know it. */
-export async function piModel(id: string): Promise<unknown> {
-	const ai: any = await loadPiAi();
-	const slash = id.indexOf("/");
-	const [provider, modelId] = slash > 0 ? [id.slice(0, slash), id.slice(slash + 1)] : ["anthropic", id];
-	try {
-		return ai.getModel(provider, modelId) ?? undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 /** ~/.pi/agent/extensions/guard.ts → extensions/guard.ts */
-function shortExtPath(p: unknown): string {
+export function shortExtPath(p: unknown): string {
 	const parts = String(p ?? "extension").split(/[\\/]/);
 	return parts.slice(-2).join("/");
 }

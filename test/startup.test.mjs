@@ -5,24 +5,27 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { detectPi } from "../dist/engines.js";
-import { loadPiSdk, PI_INSTALL, piInstalled } from "../dist/pi-sdk.js";
+import { PI_INSTALL } from "../dist/pi-cli.js";
+import { PiSession } from "../dist/pi-session.js";
 
 const root = path.join(import.meta.dirname, "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-test("the pi engine is optional: the light install leaves it out, and vigent says how to add it back", async () => {
+test("vigent bundles no agent: pi is your own install, like Claude Code or Codex", async () => {
 	assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["@mariozechner/pi-tui", "smol-toml"], "only what every engine needs");
-	for (const p of ["@mariozechner/pi-coding-agent", "@mariozechner/pi-ai", "riftri"]) assert.ok(pkg.optionalDependencies[p], p);
+	assert.deepEqual(Object.keys(pkg.optionalDependencies ?? {}), ["riftri"]);
+	assert.ok(!pkg.dependencies["@mariozechner/pi-coding-agent"] && !pkg.optionalDependencies?.["@mariozechner/pi-coding-agent"], "the pi agent isn't shipped");
 
-	assert.equal(piInstalled(), true, "a normal install has it");
-	assert.equal(piInstalled(() => {
-		throw Object.assign(new Error("nope"), { code: "ERR_MODULE_NOT_FOUND" });
-	}), false);
-	assert.ok(await loadPiSdk());
-
-	const missing = detectPi({ ANTHROPIC_API_KEY: "x" }, false);
-	assert.deepEqual(missing, { id: "pi", name: "pi", installed: false, connected: false, detail: "not installed (light install)", install: PI_INSTALL });
+	const missing = detectPi({ ANTHROPIC_API_KEY: "x", PATH: "" });
+	assert.deepEqual(missing, { id: "pi", name: "pi", installed: false, connected: false, detail: "not installed", install: PI_INSTALL });
+	assert.equal(PI_INSTALL, "npm install -g @mariozechner/pi-coding-agent");
 	assert.equal(detectPi({ ANTHROPIC_API_KEY: "x" }, true).connected, true);
+	assert.equal(detectPi({ HOME: "/nowhere", PI_CODING_AGENT_DIR: "/nowhere" }, true).connected, false, "no key, no login, no providers");
+
+	// starting a pi agent without pi says how to get it
+	const s = new PiSession("x", "default", { cwd: root, bin: "pi-not-here-anywhere" });
+	await assert.rejects(s.ready, /pi isn't installed: npm install -g @mariozechner\/pi-coding-agent/);
+	assert.ok(s.items.some((i) => /pi isn't installed/.test(i.text)));
 });
 
 test("startup loads no more of pi-tui than vigent draws, and none of the pi engine", () => {

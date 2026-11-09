@@ -134,7 +134,7 @@ export default function HomePage() {
         <KeyRow k="Claude Code">your installed CLI, signed in as usual</KeyRow>
         <KeyRow k="Codex">your installed CLI, with its own model list</KeyRow>
         <KeyRow k="OpenCode">your installed CLI and its providers</KeyRow>
-        <KeyRow k="pi">built in, when you'd rather bring an API key</KeyRow>
+        <KeyRow k="pi">your installed pi, with its keys or login</KeyRow>
         <L />
         <L>
           Pick with <HelpLink href="/docs#engines">:engine</HelpLink>, or give one agent its own:

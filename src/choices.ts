@@ -6,7 +6,7 @@
  */
 import { execFile } from "node:child_process";
 import { CUSTOM_ENGINES, ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
-import { loadPiAi } from "./pi-sdk.js";
+import { piModels } from "./pi-cli.js";
 
 export interface Choice {
 	value: string;
@@ -102,23 +102,13 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 				...(await opencodeModels(env)).map((value) => ({ value, label: modelLabel(value), note: value })),
 			];
 		case "pi": {
-			const ai: any = await loadPiAi().catch(() => undefined);
-			if (!ai) return [{ value: "default", note: "pi isn't installed" }];
-			const providers = Object.keys(PI_KEYS).filter((p) => PI_KEYS[p].some((k) => env[k]));
-			const out: Choice[] = [];
-			for (const provider of providers.length ? providers : ["anthropic"]) {
-				let models: { id: string; name?: string }[] = [];
-				try {
-					models = ai.getModels(provider);
-				} catch {
-					continue;
-				}
-				for (const m of models) {
-					const value = provider === "anthropic" ? m.id : `${provider}/${m.id}`;
-					out.push({ value, label: m.name && m.name !== m.id ? m.name : modelLabel(m.id), note: value });
-				}
-			}
-			return out;
+			// what your pi can use now: its providers with a key or login, and models.json's
+			const models = await piModels(env);
+			if (!models.length) return [{ value: "default", label: "Default", note: "pi's own choice (pi isn't installed or lists no models)" }];
+			return [
+				{ value: "default", label: "Default", note: "pi's own choice" },
+				...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: modelLabel(m.id), note: `${m.provider}/${m.id}` })),
+			];
 		}
 		default: {
 			// a custom engine: its own choice, and the models its config lists

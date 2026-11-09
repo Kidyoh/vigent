@@ -2,8 +2,7 @@
 /**
  * The `vigent` command. Before anything else loads, it turns on Node's
  * compile cache (Node 22.1 and later): the compiled code of vigent and its
- * packages is kept on disk, so later starts skip compiling it again. That
- * matters most for the pi engine's SDK, which is large. Set
+ * packages is kept on disk, so later starts skip compiling it again. Set
  * NODE_DISABLE_COMPILE_CACHE=1 to turn it off.
  */
 import module from "node:module";

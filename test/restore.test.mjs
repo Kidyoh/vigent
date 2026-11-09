@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { after, before, test } from "node:test";
 import { agentStateDir, loadAgentMeta, reopenableAgents, restorableAgents, saveAgentMeta, sessionDir, setDetached } from "../dist/agents.js";
 import { itemsFromMessages } from "../dist/session.js";
+import { realPi } from "./support/pi.mjs";
 import { createWorktree, DEFAULT_WORKTREE, removeWorktree } from "../dist/worktree.js";
 
 // these tests cover plain git worktrees; riftri has its own (riftri.test.mjs)
@@ -101,15 +102,10 @@ test("transcripts are rebuilt from pi's saved messages", () => {
 });
 
 test("a pi agent's conversation survives a restart", async () => {
-	const { PiSession } = await import("../dist/session.js");
-	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-	const { registerFauxProvider, fauxAssistantMessage, fauxToolCall } = await import("@mariozechner/pi-ai");
-	const faux = registerFauxProvider();
-	const authStorage = AuthStorage.inMemory();
-	authStorage.setRuntimeApiKey(faux.getModel().provider, "test");
-	const agentDir = path.join(tmp, "pi");
+	const { PiSession } = await import("../dist/pi-session.js");
+	const pi = await realPi(tmp, [{ tool: "bash", args: { command: "echo 41 > total.txt" } }, { text: "Wrote the total." }, { text: "It was 41." }]);
 	const wt = createWorktree(repo, "fix totals");
-	const opts = { cwd: wt.path, worktree: wt, modelObject: faux.getModel(), authStorage, agentDir, sessionDir: sessionDir(wt.path) };
+	const opts = { cwd: wt.path, worktree: wt, env: pi.env, sessionDir: sessionDir(wt.path) };
 	const runOnce = (s, prompt) =>
 		new Promise((resolve) => {
 			const off = s.onChange(() => {
@@ -121,24 +117,14 @@ test("a pi agent's conversation survives a restart", async () => {
 			s.send(prompt);
 		});
 
-	faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("bash", { command: "echo 41 > total.txt" }), { stopReason: "toolUse" }),
-		fauxAssistantMessage("Wrote the total."),
-	]);
-	const first = new PiSession("fix totals", "faux", opts);
+	const first = new PiSession("fix totals", "default", opts);
 	await first.ready;
 	await runOnce(first, "compute the total");
+	assert.equal(fs.readFileSync(path.join(wt.path, "total.txt"), "utf8").trim(), "41", "pi's bash tool ran in the worktree");
 	first.dispose();
 
-	// vigent restarts: a new session object over the same saved conversation
-	let seenByModel;
-	faux.setResponses([
-		(context) => {
-			seenByModel = context.messages.map((m) => m.role);
-			return fauxAssistantMessage("It was 41.");
-		},
-	]);
-	const second = new PiSession("fix totals", "faux", opts);
+	// vigent restarts: a new pi over the same saved conversation
+	const second = new PiSession("fix totals", "default", opts);
 	try {
 		await second.ready;
 		assert.deepEqual(
@@ -151,11 +137,12 @@ test("a pi agent's conversation survives a restart", async () => {
 		assert.match(second.items[3].text, /resumed: 1 earlier prompt/);
 
 		await runOnce(second, "what was the total?");
-		assert.deepEqual(seenByModel, ["user", "assistant", "toolResult", "assistant", "user"], "the model sees the earlier conversation");
+		const roles = pi.model.requests.at(-1).messages.map((m) => m.role).filter((r) => r !== "system");
+		assert.deepEqual(roles, ["user", "assistant", "tool", "assistant", "user"], "the model sees the earlier conversation");
 		assert.equal(second.items.at(-1).text, "It was 41.");
 	} finally {
 		second.dispose();
-		faux.unregister();
+		await pi.close();
 	}
 });
 
@@ -200,18 +187,13 @@ test("the app: :kill keeps the agent for :attach; :attach focuses one already op
 });
 
 test("a pi request that fails shows its error instead of nothing, now and after a restart", async () => {
-	const { PiSession, piError } = await import("../dist/session.js");
-	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-	const { registerFauxProvider, fauxAssistantMessage } = await import("@mariozechner/pi-ai");
-	const faux = registerFauxProvider();
-	const authStorage = AuthStorage.inMemory();
-	authStorage.setRuntimeApiKey(faux.getModel().provider, "test");
+	const { PiSession } = await import("../dist/pi-session.js");
+	const { piError } = await import("../dist/session.js");
+	const pi = await realPi(tmp, [{ status: 401, error: "invalid x-api-key" }]);
 	const wt = createWorktree(repo, "say hi");
-	const opts = { cwd: wt.path, worktree: wt, modelObject: faux.getModel(), authStorage, agentDir: path.join(tmp, "pi-err"), sessionDir: sessionDir(wt.path) };
-	const refused = '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}';
-	faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: refused })]);
+	const opts = { cwd: wt.path, worktree: wt, env: pi.env, sessionDir: sessionDir(wt.path) };
 
-	const s = new PiSession("say hi", "faux", opts);
+	const s = new PiSession("say hi", "default", opts);
 	try {
 		await s.ready;
 		await new Promise((resolve) => {
@@ -221,45 +203,46 @@ test("a pi request that fails shows its error instead of nothing, now and after 
 			s.send("hello");
 		});
 		assert.deepEqual(s.items.map((i) => i.kind), ["user", "info"]);
-		assert.match(s.items[1].text, /^error: 401 .*invalid x-api-key/);
+		assert.match(s.items[1].text, /^error: .*401.*invalid x-api-key/s);
 		assert.match(s.items[1].text, /this agent runs on pi, and pi has no working API key.*:new <task>.*:engine/, "a hint when the key was refused");
 	} finally {
 		s.dispose();
 	}
 
-	const again = new PiSession("say hi", "faux", opts);
+	const again = new PiSession("say hi", "default", opts);
 	try {
 		await again.ready;
 		assert.ok(again.items.some((i) => i.kind === "info" && /invalid x-api-key/.test(i.text)), "the error is still there after a restart");
 	} finally {
 		again.dispose();
-		faux.unregister();
+		await pi.close();
 	}
 
 	assert.equal(piError({ role: "assistant", stopReason: "stop" }), undefined);
 	assert.equal(piError({ role: "assistant", stopReason: "error", errorMessage: "overloaded" }), "error: overloaded", "no key hint for other errors");
 });
 
-test("a pi agent with no API key says what to do, without pi's own /login advice", async () => {
-	const { PiSession } = await import("../dist/session.js");
-	const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-	const { registerFauxProvider } = await import("@mariozechner/pi-ai");
-	const faux = registerFauxProvider();
+test("a pi agent with no API key says what to do", async () => {
+	const { PiSession } = await import("../dist/pi-session.js");
+	const pi = await realPi(tmp);
+	fs.rmSync(path.join(pi.agentDir, "models.json"));
+	fs.rmSync(path.join(pi.agentDir, "settings.json"));
+	const env = pi.env;
 	const wt = createWorktree(repo, "no key");
-	const s = new PiSession("no key", "faux", { cwd: wt.path, worktree: wt, modelObject: faux.getModel(), authStorage: AuthStorage.inMemory(), agentDir: path.join(tmp, "pi-nokey") });
+	const s = new PiSession("no key", "default", { cwd: wt.path, worktree: wt, env });
 	try {
-		await s.ready;
+		await s.ready.catch(() => {});
 		await new Promise((resolve) => {
+			if (s.state === "error") return resolve();
 			const off = s.onChange(() => s.state === "error" && (off(), resolve()));
 			s.send("hello");
 		});
 		const info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
-		assert.match(info[0], /^error: No API key found/);
-		assert.doesNotMatch(info.join("\n"), /\/login|providers\.md/, "pi's TUI advice is left out");
-		assert.match(info[1], /this agent runs on pi.*:new <task>.*:engine.*:kill/);
+		assert.match(info[0], /^error: /);
+		assert.ok(info.some((t) => /this agent runs on pi.*:new <task>.*:engine.*:kill/.test(t)), info.join("\n"));
 	} finally {
 		s.dispose();
-		faux.unregister();
+		await pi.close();
 	}
 });
 

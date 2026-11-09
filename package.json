@@ -52,12 +52,12 @@
     "smol-toml": "^1.9.1"
   },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@types/node": "^26.6.6",
     "@xterm/headless": "^5.5.0",
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {
-    "@mariozechner/pi-ai": "^0.73.1",
-    "@mariozechner/pi-coding-agent": "^0.73.1",
     "riftri": "^0.6.7"
   },
   "publishConfig": {

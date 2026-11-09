@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** vigent — vim-native agent orchestrator on the pi engine. */
+/** vigent — a vim-native screen for the coding agents you have installed. */
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -16,7 +16,8 @@ import { setTomlValue } from "./config-edit.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
 import { formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
-import { DemoSession, PiSession, type Session } from "./session.js";
+import { PiSession } from "./pi-session.js";
+import { DemoSession, type Session } from "./session.js";
 import { followedColorscheme, followTheme, isFollow, refreshFollow } from "./follow.js";
 import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./theme.js";
 import { themeNewTemplate } from "./theme-new.js";
@@ -31,7 +32,7 @@ import {
 	worktreesDir,
 } from "./worktree.js";
 
-const HELP = `vigent — vim-native agent orchestrator (pi engine)
+const HELP = `vigent — vim-native orchestrator for the coding agents you have installed
 
 usage:
   vigent --version                           which vigent this is (and the commit, from a clone)
@@ -39,10 +40,11 @@ usage:
   vigent --serve [--local]                   also follow your agents from your phone (:serve)
 
 engines (what runs new agents; :checkhealth shows which are signed in):
-  pi        built in, uses ANTHROPIC_API_KEY / OPENAI_API_KEY / ... or pi's login
   claude    your installed Claude Code CLI, with its own login
   codex     your installed Codex CLI, with its own login
   opencode  your installed OpenCode CLI, with its own login
+  pi        your installed pi (pi --mode rpc), with its keys or login
+  <id>      any agent CLI from [engines.<id>] in config.toml
 
 themes:
   vigent theme list                          built-in and installed themes
@@ -353,6 +355,11 @@ async function main(): Promise<number | undefined> {
 		}
 	};
 
+	/** A pi agent: your pi in RPC mode; its conversation is kept in the worktree's session folder. */
+	const piModel = modelArg && (!engineArg || engineArg === "pi") ? modelArg : (config.engines.pi?.model ?? config.model ?? "default");
+	const piSession = (name: string, m: string, o: { cwd: string; worktree?: WorktreeInfo; sessionDir?: string; effort?: string }) =>
+		new PiSession(name, m, { ...o, extraArgs: config.engines.pi?.args });
+
 	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
 	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string) =>
 		new CliSession(name, engine, requested, {
@@ -421,7 +428,7 @@ async function main(): Promise<number | undefined> {
 		}
 		// a CLI uses its own default model unless one is asked for
 		const requested = engine === "pi" ? undefined : (perAgent ?? config.engines[engine]?.model ?? (modelArg && engineArg === engine ? modelArg : undefined));
-		const m = engine === "pi" ? (perAgent ?? model) : (requested ?? "");
+		const m = engine === "pi" ? (perAgent ?? piModel) : (requested ?? "");
 		const wt = worktree && root ? createWorktree(root, name, config.worktree) : undefined;
 		if (wt?.path) {
 			saveAgentMeta(wt.path, {
@@ -435,8 +442,8 @@ async function main(): Promise<number | undefined> {
 		}
 		const cwd = wt?.path ?? process.cwd();
 		if (engine !== "pi") return cliSession(name, engine, requested, cwd, wt?.path ? wt : undefined, undefined, effort);
-		if (!wt?.path) return new PiSession(name, m, { cwd, effort });
-		return new PiSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path), effort });
+		if (!wt?.path) return piSession(name, m, { cwd, effort });
+		return piSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path), effort });
 	};
 	/** Reopen a saved agent with the engine it was started with. */
 	const reopen = (meta: AgentMeta, worktree: WorktreeInfo): Session => {
@@ -448,7 +455,7 @@ async function main(): Promise<number | undefined> {
 			s.cost = meta.usage?.cost;
 			return s;
 		}
-		return new PiSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!), effort: meta.effort });
+		return piSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!), effort: meta.effort });
 	};
 	app.attachSession = (wt) => {
 		if (demo || !wt.path) throw new Error("attaching needs a real agent (not --demo)");

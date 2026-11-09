@@ -107,7 +107,7 @@ test("engines show at once as 'checking…' while their sign-in checks run", () 
 		assert.deepEqual(
 			engines.map((e) => [e.id, e.installed, e.connected, Boolean(e.checking), e.detail]),
 			[
-				["pi", true, false, false, "built in · no API key found"],
+				["pi", false, false, false, "not installed"],
 				["claude", true, false, true, "checking sign-in…"],
 				["codex", false, false, false, "not installed"],
 				["opencode", false, false, false, "not installed"],

@@ -127,8 +127,7 @@ else if (a === "login status") { console.error("Not logged in"); process.exit(1)
 	const engines = await detectEngines(env, 5000);
 	const by = Object.fromEntries(engines.map((e) => [e.id, e]));
 	assert.deepEqual(engines.map((e) => e.id), ["pi", "claude", "codex", "opencode"]);
-	assert.equal(by.pi.connected, false);
-	assert.match(by.pi.connect, /ANTHROPIC_API_KEY/);
+	assert.deepEqual([by.pi.installed, by.pi.connected, by.pi.detail, by.pi.install], [false, false, "not installed", "npm install -g @mariozechner/pi-coding-agent"], "pi is your own install, like the others");
 	assert.deepEqual(
 		[by.claude.installed, by.claude.connected, by.claude.version, by.claude.detail],
 		[true, true, "2.1.319", "signed in (Claude account)"],
@@ -144,8 +143,13 @@ else if (a === "login status") { console.error("Not logged in"); process.exit(1)
 	assert.equal(onPath("codex", env), true);
 	assert.equal(onPath("opencode", env), false);
 
-	const pi = (await detectEngines({ ...env, PATH: "" , GEMINI_API_KEY: "x" }, 5000))[0];
-	assert.deepEqual([pi.connected, pi.detail], [true, "built in · using GEMINI_API_KEY"]);
+	const piBin = path.join(tmp, "pi-bin");
+	fakeBin(piBin, "pi", "");
+	const pi = (await detectEngines({ PATH: piBin, HOME: home, GEMINI_API_KEY: "x" }, 5000))[0];
+	assert.deepEqual([pi.installed, pi.connected, pi.detail], [true, true, "using GEMINI_API_KEY"]);
+	const noKey = (await detectEngines({ PATH: piBin, HOME: home }, 5000))[0];
+	assert.deepEqual([noKey.installed, noKey.connected], [true, false]);
+	assert.match(noKey.connect, /ANTHROPIC_API_KEY.*\/login/);
 });
 
 test("auto: a signed-in CLI before pi, pi only when no CLI is ready", () => {
