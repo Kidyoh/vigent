@@ -242,6 +242,31 @@ Four are built in. A template of yours with the same name replaces it.
 
 What you type wins: `:new -t migrate --engine codex <task>` runs on Codex, without the template's model and effort.
 
+## A project's own config: `.vigent.toml`
+
+A `.vigent.toml` at the root of a repository is read on top of your `~/.config/vigent/config.toml`, so a team can commit its theme, templates, engine, worktree layout, keys and hooks once. Where both set something, the project wins; tables merge key by key (setting `model` under `[engines.claude]` keeps your `effort`).
+
+The parts that run programs only count once you trust the file: `[hooks]`, `args` under `[engines.*]` and Claude Code's `allow` rules. Until then vigent says what's waiting (`.vigent.toml wants to run commands (hooks.worktree_created): :trust allows them`) and uses the rest. Trust it with **`:trust`** in vigent or **`vigent trust`** in the project. Trust is for the file as it is: when it changes, vigent asks again. Your own config.toml is always trusted.
+
+## `[hooks]`
+
+Shell commands vigent runs at points in an agent's life, in the agent's worktree:
+
+```toml
+[hooks]
+worktree_created = "npm ci"     # in each new worktree; the agent's first prompt waits for it
+before_merge = "npm test"       # before :merge and :pr; if it fails, nothing is merged or pushed
+agent_finished = "say done"     # whenever an agent stops: finished, failed or needs you
+```
+
+| Hook | When | If it fails |
+|---|---|---|
+| `worktree_created` | right after a new agent's worktree is made; prompts wait in its queue (the winbar says "setting up") | the output goes in the transcript and the agent starts anyway |
+| `before_merge` | before `:merge` and `:pr` | nothing is merged or pushed; the output goes in the transcript |
+| `agent_finished` | when an agent stops running | a warning in the message line |
+
+Each hook sees `VIGENT_HOOK`, `VIGENT_AGENT`, `VIGENT_BRANCH`, `VIGENT_WORKTREE`, `VIGENT_REPO` and `VIGENT_ENGINE`, and `agent_finished` also gets `VIGENT_STATE` (`finished`, `failed` or `needs-you`). `worktree_created` and `before_merge` may run for 15 minutes, `agent_finished` for one.
+
 ## `[keys]`
 
 One table per mode: `[keys.normal]`, `[keys.insert]`, `[keys.visual]` and `[keys.command]` (the `:`, `/` and `?` command line). Entries placed directly under `[keys]` count as normal mode.

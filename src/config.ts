@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { EFFORTS } from "./choices.js";
 import { parseTemplates, type Template } from "./templates.js";
+import { HOOK_NAMES, type HookName, type Hooks } from "./hooks.js";
 import { ICON_SETS, type IconSet } from "./icons.js";
 import { type EngineId, isEngineId } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
@@ -74,7 +75,25 @@ export interface Config {
 	worktree: WorktreeConfig;
 	/** [templates.<name>]: prompts to start agents with (:new -t <name>) */
 	templates: Record<string, Template>;
+	/** [hooks]: commands at points in an agent's life */
+	hooks: Hooks;
 }
+
+export interface LoadOptions {
+	/** layer this file over an existing config (a project's .vigent.toml over yours) */
+	base?: Config;
+	/**
+	 * false: leave out what runs programs (hooks, engine args, Claude Code
+	 * permission rules) and name it in `gated`. A project file counts only once trusted.
+	 */
+	trusted?: boolean;
+	/** how warnings name the file ("config" or ".vigent.toml") */
+	label?: string;
+}
+
+/** The project's own config, at the repository root. */
+export const PROJECT_CONFIG = ".vigent.toml";
+
 
 export const DEFAULT_UI: UiOptions = {
 	sidebar: true,
@@ -95,17 +114,20 @@ export function configPath(): string {
 }
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
-export function loadConfig(file = configPath()): { config: Config; warnings: string[] } {
-	const config: Config = { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {} };
+export function loadConfig(file = configPath(), opts: LoadOptions = {}): { config: Config; warnings: string[]; gated: string[] } {
+	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {} };
 	const warnings: string[] = [];
-	if (!fs.existsSync(file)) return { config, warnings };
+	const gated: string[] = [];
+	const where = opts.label ?? "config";
+	const mayRun = opts.trusted !== false;
+	if (!fs.existsSync(file)) return { config, warnings, gated };
 
 	let raw: Record<string, unknown>;
 	try {
 		raw = parseToml(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
 	} catch (err) {
 		warnings.push(`${path.basename(file)}: ${(err as Error).message.split("\n")[0]}`);
-		return { config, warnings };
+		return { config, warnings, gated };
 	}
 
 	for (const [key, value] of Object.entries(raw)) {
@@ -118,55 +140,76 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 				if (typeof value === "string") {
 					const field = key === "colorscheme" ? "theme" : key === "mapleader" ? "leader" : key;
 					config[field as "theme" | "model" | "leader"] = value;
-				} else warnings.push(`config: '${key}' should be a string`);
+				} else warnings.push(`${where}: '${key}' should be a string`);
 				break;
 			case "engine":
 				if (typeof value === "string" && (value === "auto" || isEngineId(value))) config.engine = value;
-				else warnings.push("config: 'engine' should be \"auto\", \"pi\", \"claude\", \"codex\" or \"opencode\"");
+				else warnings.push(`${where}: 'engine' should be "auto", "pi", "claude", "codex" or "opencode"`);
 				break;
 			case "engines":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
-					warnings.push("config: [engines] should be a table");
+					warnings.push(`${where}: [engines] should be a table`);
 					break;
 				}
 				for (const [id, opts] of Object.entries(value)) {
 					if (!isEngineId(id)) {
-						warnings.push(`config: unknown engine [engines.${id}] (pi, claude, codex or opencode)`);
+						warnings.push(`${where}: unknown engine [engines.${id}] (pi, claude, codex or opencode)`);
 						continue;
 					}
 					if (!opts || typeof opts !== "object" || Array.isArray(opts)) {
-						warnings.push(`config: [engines.${id}] should be a table`);
+						warnings.push(`${where}: [engines.${id}] should be a table`);
 						continue;
 					}
 					const e: EngineOptions = {};
 					for (const [k, v] of Object.entries(opts)) {
+						if ((k === "args" || k === "allow") && !mayRun) {
+							gated.push(`engines.${id}.${k}`);
+							continue;
+						}
 						if (k === "args" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.args = v;
 						else if (k === "model" && typeof v === "string") e.model = v;
 						else if (k === "effort" && typeof v === "string" && (EFFORTS[id as EngineId] as string[]).includes(v)) e.effort = v;
-						else if ((k === "allow" || k === "ask") && id !== "claude") warnings.push(`config [engines.${id}]: '${k}' is for [engines.claude] (Claude Code's permission rules)`);
+						else if ((k === "allow" || k === "ask") && id !== "claude") warnings.push(`${where} [engines.${id}]: '${k}' is for [engines.claude] (Claude Code's permission rules)`);
 						else if (k === "allow" && Array.isArray(v) && v.every((a) => typeof a === "string")) e.allow = v;
 						else if (k === "ask" && typeof v === "boolean") e.ask = v;
-						else if (k === "allow") warnings.push(`config [engines.${id}]: 'allow' should be a list of permission rules, e.g. ["Bash(gh:*)"]`);
-						else if (k === "ask") warnings.push(`config [engines.${id}]: 'ask' should be true or false`);
-						else if (k === "effort") warnings.push(`config [engines.${id}]: 'effort' should be one of ${EFFORTS[id as EngineId].join(", ")}`);
-						else warnings.push(`config [engines.${id}]: ${k === "args" ? "'args' should be a list of strings" : k === "model" ? "'model' should be a string" : `unknown option '${k}'`}`);
+						else if (k === "allow") warnings.push(`${where} [engines.${id}]: 'allow' should be a list of permission rules, e.g. ["Bash(gh:*)"]`);
+						else if (k === "ask") warnings.push(`${where} [engines.${id}]: 'ask' should be true or false`);
+						else if (k === "effort") warnings.push(`${where} [engines.${id}]: 'effort' should be one of ${EFFORTS[id as EngineId].join(", ")}`);
+						else warnings.push(`${where} [engines.${id}]: ${k === "args" ? "'args' should be a list of strings" : k === "model" ? "'model' should be a string" : `unknown option '${k}'`}`);
 					}
-					config.engines[id as EngineId] = e;
+					config.engines[id as EngineId] = { ...config.engines[id as EngineId], ...e };
 				}
 				break;
 			case "templates":
-				config.templates = parseTemplates(value, warnings);
+				config.templates = { ...config.templates, ...parseTemplates(value, warnings) };
+				break;
+			case "hooks":
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					warnings.push(`${where}: [hooks] should be a table`);
+					break;
+				}
+				for (const [name, cmd] of Object.entries(value)) {
+					if (!(HOOK_NAMES as readonly string[]).includes(name)) {
+						warnings.push(`${where} [hooks]: unknown hook '${name}' (${HOOK_NAMES.join(", ")})`);
+					} else if (typeof cmd !== "string" || !cmd.trim()) {
+						warnings.push(`${where} [hooks]: '${name}' should be a command, e.g. "npm ci"`);
+					} else if (!mayRun) {
+						gated.push(`hooks.${name}`);
+					} else {
+						config.hooks[name as HookName] = cmd.trim();
+					}
+				}
 				break;
 			case "keys":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
-					warnings.push("config: [keys] should be a table");
+					warnings.push(`${where}: [keys] should be a table`);
 					break;
 				}
 				for (const [k, v] of Object.entries(value)) {
 					if ((KEY_MODES as string[]).includes(k) && v && typeof v === "object" && !Array.isArray(v)) {
 						config.keys[k as KeyMode] = { ...config.keys[k as KeyMode], ...(v as Record<string, unknown>) };
 					} else if ((KEY_MODES as string[]).includes(k)) {
-						warnings.push(`config: [keys.${k}] should be a table`);
+						warnings.push(`${where}: [keys.${k}] should be a table`);
 					} else {
 						// keys directly under [keys] are normal-mode mappings
 						config.keys.normal = { ...config.keys.normal, [k]: v };
@@ -177,28 +220,28 @@ export function loadConfig(file = configPath()): { config: Config; warnings: str
 				if (value && typeof value === "object") {
 					for (const [opt, v] of Object.entries(value)) {
 						const msg = setOption(config.ui, opt, v);
-						if (msg) warnings.push(`config [ui]: ${msg}`);
+						if (msg) warnings.push(`${where} [ui]: ${msg}`);
 					}
 				}
 				break;
 			case "highlights":
-				config.highlights = normalizeGroups(value as Record<string, unknown>);
+				config.highlights = { ...config.highlights, ...normalizeGroups(value as Record<string, unknown>) };
 				break;
 			case "worktree":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
-					warnings.push("config: [worktree] should be a table");
+					warnings.push(`${where}: [worktree] should be a table`);
 					break;
 				}
 				for (const [opt, v] of Object.entries(value)) {
 					const msg = setWorktreeOption(config.worktree, opt, v);
-					if (msg) warnings.push(`config [worktree]: ${msg}`);
+					if (msg) warnings.push(`${where} [worktree]: ${msg}`);
 				}
 				break;
 			default:
-				warnings.push(`config: unknown key '${key}'`);
+				warnings.push(`${where}: unknown key '${key}'`);
 		}
 	}
-	return { config, warnings };
+	return { config, warnings, gated };
 }
 
 function setWorktreeOption(wt: WorktreeConfig, name: string, value: unknown): string | undefined {
@@ -384,6 +427,16 @@ engine = "auto"
 # args = ["-c", 'sandbox_mode="workspace-write"']  # the default
 # [engines.opencode]
 # model = "anthropic/claude-sonnet-4-5"
+
+# --- Hooks -----------------------------------------------------------------
+# Commands at points in an agent's life, run in its worktree. They see
+# VIGENT_AGENT, VIGENT_BRANCH, VIGENT_WORKTREE, VIGENT_REPO, VIGENT_ENGINE
+# (and VIGENT_STATE for agent_finished). A project can set them in its own
+# .vigent.toml too, once you :trust it.
+# [hooks]
+# worktree_created = "npm ci"     # before the agent's first prompt goes out
+# before_merge = "npm test"       # :merge and :pr only if it passes
+# agent_finished = "say done"     # whenever an agent stops
 
 # --- Templates -------------------------------------------------------------
 # Prompts you start agents with often. :new -t fix <task> starts an agent and

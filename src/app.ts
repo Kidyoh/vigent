@@ -43,6 +43,8 @@ import { allTemplates, fillTemplate, needsTask, type Template } from "./template
 import type { PiUiHost } from "./pi-ui.js";
 import { type AllowChoice, type CliSession, type Denial, describeDenial } from "./cli-engines.js";
 import { type ServeHandle, type ServeHost, type ServeOptions, startServer } from "./serve.js";
+import { HOOK_TIMEOUT_MS, type HookName, type Hooks, lastLine, runHook, took } from "./hooks.js";
+import { PROJECT_CONFIG } from "./config.js";
 import { didYouMean } from "./suggest.js";
 import { alertSequence, NOTIFY_MODES, type NotifyMode } from "./notify.js";
 import { VERSION_TEXT } from "./version.js";
@@ -355,6 +357,7 @@ export class App implements Component {
 		const before = this.lastState.get(s);
 		this.lastState.set(s, s.state);
 		if (before === "running" && s.state !== "running") this.persist(s); // its usage totals, for after a restart
+		if (before === "running" && (s.state === "idle" || s.state === "error" || s.state === "waiting")) this.agentFinishedHook(s);
 		if (before !== "running" || s.state === "running" || s.state === "paused") return;
 		const visible = s === this.focusedSession && this.terminalFocused;
 		if (visible) return;
@@ -835,6 +838,9 @@ export class App implements Component {
 			case "serve":
 				void this.execServe(arg);
 				return;
+			case "trust":
+				this.setMessage(this.trustProject(), "ModeMsg");
+				return;
 			case "tree":
 				this.openTree();
 				return;
@@ -1010,9 +1016,16 @@ export class App implements Component {
 			this.setMessage(`'${s.name}' is still running; wait for it or :pause it first`, "ErrorMsg");
 			return;
 		}
-		const r = mergeWorktree(this.workspace.root, wt, { squash: !/--no-squash\b/.test(arg) });
-		this.setMessage(r.ok ? `${r.message} · :kill! cleans up the worktree` : r.message, r.ok ? "ModeMsg" : "ErrorMsg");
-		s.refreshStat(0);
+		const root = this.workspace.root;
+		const merge = () => {
+			const r = mergeWorktree(root, wt, { squash: !/--no-squash\b/.test(arg) });
+			this.setMessage(r.ok ? `${r.message} · :kill! cleans up the worktree` : r.message, r.ok ? "ModeMsg" : "ErrorMsg");
+			s.refreshStat(0);
+			this.tui.requestRender();
+		};
+		// no before_merge hook: merge right away, as always
+		if (!this.hooks.before_merge) return merge();
+		void this.beforeLanding(s, "merge").then((go) => go && merge());
 	}
 
 	/** `:pr` pushes the agent's branch and opens a pull request. */
@@ -1027,10 +1040,86 @@ export class App implements Component {
 			this.setMessage(`'${s.name}' is still running; wait for it or :pause it first`, "ErrorMsg");
 			return;
 		}
-		this.setMessage(`pushing ${wt.branch}…`, "Comment");
+		const root = this.workspace.root;
+		const push = () => {
+			this.setMessage(`pushing ${wt.branch}…`, "Comment");
+			this.tui.requestRender();
+			const r = openPullRequest(root, wt);
+			this.setMessage(r.message, r.ok ? "ModeMsg" : "ErrorMsg");
+			this.tui.requestRender();
+		};
+		if (!this.hooks.before_merge) return push();
+		void this.beforeLanding(s, "pr").then((go) => go && push());
+	}
+
+	// ---------------------------------------------------------------- hooks
+
+	/** [hooks] from config.toml and a trusted .vigent.toml */
+	hooks: Hooks = {};
+	/** :trust (set by the CLI; it knows where the project's config is) */
+	trustProject: () => string = () => `no ${PROJECT_CONFIG} in this project`;
+	/** runs a hook (replaced in tests) */
+	hookRunner: typeof runHook = runHook;
+
+	private hookEnv(s: Session, hook: HookName, extra: Record<string, string> = {}): Record<string, string> {
+		return {
+			VIGENT_HOOK: hook,
+			VIGENT_AGENT: s.name,
+			VIGENT_ENGINE: s.engine,
+			VIGENT_BRANCH: s.worktree?.branch ?? "",
+			VIGENT_WORKTREE: s.worktree?.path ?? "",
+			VIGENT_REPO: this.workspace.root ?? "",
+			...extra,
+		};
+	}
+
+	/** worktree_created: set the new worktree up (npm ci, ...) before the agent's first prompt goes out. */
+	private setUpWorktree(s: Session) {
+		const cmd = this.hooks.worktree_created;
+		const cwd = s.worktree?.path;
+		if (!cmd || !cwd) return;
+		s.hold("setting up");
+		s.pushInfo(`setting up the worktree: ${cmd}`);
+		void this.hookRunner(cmd, { cwd, env: this.hookEnv(s, "worktree_created"), timeoutMs: HOOK_TIMEOUT_MS.worktree_created }).then((r) => {
+			if (r.ok) s.pushInfo(`worktree ready (${took(r.ms)})`);
+			else {
+				s.pushInfo(`worktree_created ${r.timedOut ? "timed out" : `failed (exit ${r.code})`} after ${took(r.ms)}; the agent starts anyway${r.output ? `\n${r.output}` : ""}`);
+				this.setMessage(`'${s.name}': worktree_created failed: ${lastLine(r.output) || `exit ${r.code}`}`, "WarningMsg");
+			}
+			s.release();
+			this.tui.requestRender();
+		});
+	}
+
+	/** before_merge: :merge and :pr go ahead only when it passes. */
+	private async beforeLanding(s: Session, what: "merge" | "pr"): Promise<boolean> {
+		const cmd = this.hooks.before_merge;
+		const cwd = s.worktree?.path;
+		if (!cmd || !cwd) return true;
+		this.setMessage(`before_merge: ${cmd} in ${s.worktree?.branch}…`, "Comment");
 		this.tui.requestRender();
-		const r = openPullRequest(this.workspace.root, wt);
-		this.setMessage(r.message, r.ok ? "ModeMsg" : "ErrorMsg");
+		const r = await this.hookRunner(cmd, { cwd, env: this.hookEnv(s, "before_merge"), timeoutMs: HOOK_TIMEOUT_MS.before_merge });
+		if (r.ok) return true;
+		s.pushInfo(`before_merge ${r.timedOut ? "timed out" : `failed (exit ${r.code})`} after ${took(r.ms)}, so no ${what === "pr" ? "pull request" : "merge"}${r.output ? `\n${r.output}` : ""}`);
+		this.setMessage(`before_merge failed, nothing ${what === "pr" ? "pushed" : "merged"}: ${lastLine(r.output) || (r.timedOut ? "timed out" : `exit ${r.code}`)}`, "ErrorMsg");
+		this.tui.requestRender();
+		return false;
+	}
+
+	/** agent_finished: tell your scripts an agent stopped (in the background; only a failure is shown). */
+	private agentFinishedHook(s: Session) {
+		const cmd = this.hooks.agent_finished;
+		if (!cmd) return;
+		const state = s.state === "error" ? "failed" : s.state === "waiting" ? "needs-you" : "finished";
+		void this.hookRunner(cmd, {
+			cwd: s.worktree?.path ?? this.workspace.root ?? process.cwd(),
+			env: this.hookEnv(s, "agent_finished", { VIGENT_STATE: state }),
+			timeoutMs: HOOK_TIMEOUT_MS.agent_finished,
+		}).then((r) => {
+			if (r.ok) return;
+			this.setMessage(`agent_finished hook failed: ${lastLine(r.output) || (r.timedOut ? "timed out" : `exit ${r.code}`)}`, "WarningMsg");
+			this.tui.requestRender();
+		});
 	}
 
 	/** `:w [file]`: the transcript as Markdown (`:w!` overwrites). */
@@ -1637,6 +1726,7 @@ export class App implements Component {
 			this.addSession(s);
 			const wt = s.worktree;
 			if (wt?.riftri) this.refreshStorage();
+			if (wt?.path && this.hooks.worktree_created) this.setUpWorktree(s);
 			const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
 			if (wt?.path) {
 				const how = wt.riftri ? " · lightweight copy" : wt.riftriSkipped ? " · full copy (:checkhealth says why)" : "";
@@ -2820,7 +2910,7 @@ export class App implements Component {
 		const model = s ? `  ${s.engine !== "pi" && s.model !== ENGINE_NAMES[s.engine] ? `${ENGINE_NAMES[s.engine]} · ` : ""}${s.model}${s.effort ? ` · ${s.effort}` : ""}` : "";
 		const where = s?.worktree?.path ? `${this.shortPath(s.worktree.path)}${s.worktree.riftri ? ` ${this.icons.light}` : ""}` : s ? "this checkout" : "";
 		const ext = s && "extensionStatus" in s ? [...(s as PiSession).extensionStatus.values()].join(" · ") : "";
-		const status = (s?.state === "paused" ? "  paused" : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "") + (ext ? `  ${ext}` : "");
+		const status = (s?.state === "paused" ? `  ${s.holdReason ?? "paused"}` : s?.queue.length ? `  ${this.icons.queued}${s.queue.length} queued` : "") + (ext ? `  ${ext}` : "");
 		// the path gives way first (from its start: the end names the worktree), always two spaces before it
 		const pathRoom = w - visibleWidth(left) - visibleWidth(model) - visibleWidth(status) - 3;
 		const shownWhere = !where ? "" : visibleWidth(where) <= pathRoom ? where : pathRoom > 4 ? `…${where.slice(where.length - pathRoom + 1)}` : "";
@@ -3366,6 +3456,7 @@ const EX_HELP: [string, string][] = [
 	[":cost", "tokens and money each agent has used, and the total"],
 	[":pi", "a pi agent's extensions, commands, skills and prompt templates"],
 	[":serve  /  :serve stop", "follow and prompt your agents from your phone (local: this machine only)"],
+	[":trust", "let this project's .vigent.toml run its hooks and engine arguments"],
 	[":tree", "the conversation's branches; go back and branch"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],

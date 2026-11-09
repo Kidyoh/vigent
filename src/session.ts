@@ -150,9 +150,28 @@ export abstract class Session {
 		this.emit();
 	}
 
+	/** why the agent is held before it can run (its worktree being set up); shown instead of "paused" */
+	holdReason?: string;
+
+	/** Hold the agent: prompts wait in its queue until release(). */
+	hold(reason: string) {
+		this.holdReason = reason;
+		this.state = "paused";
+		this.emit();
+	}
+
+	/** Let a held agent go: the prompts that waited are sent, in order. */
+	release() {
+		if (!this.holdReason) return;
+		this.holdReason = undefined;
+		this.state = "idle";
+		this.emit();
+		if (this.queue.length > 0) this.drainQueue();
+	}
+
 	/** Continue: the next queued prompt, or ask the agent to pick up where it stopped. */
 	resume() {
-		if (this.state !== "paused") return;
+		if (this.state !== "paused" || this.holdReason) return;
 		this.state = "idle";
 		this.emit();
 		if (this.queue.length > 0) this.drainQueue();

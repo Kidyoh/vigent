@@ -10,7 +10,8 @@ import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
 import { defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
-import { CONFIG_TEMPLATE, configPath, loadConfig } from "./config.js";
+import { CONFIG_TEMPLATE, configPath, loadConfig, PROJECT_CONFIG } from "./config.js";
+import { isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
@@ -235,6 +236,19 @@ async function main(): Promise<number | undefined> {
 		);
 		return warnings.length === 0 ? 0 : 1;
 	}
+	if (argv[0] === "trust") {
+		const root = repoRoot(process.cwd());
+		const file = root ? path.join(root, PROJECT_CONFIG) : undefined;
+		if (!file || !fs.existsSync(file)) {
+			console.error(`vigent: no ${PROJECT_CONFIG} here${root ? ` (looked in ${root})` : " (not in a git repository)"}`);
+			return 1;
+		}
+		const content = fs.readFileSync(file, "utf8");
+		const { gated } = loadConfig(file, { trusted: false, label: PROJECT_CONFIG });
+		trustFile(file, content);
+		console.log(`trusted ${file}${gated.length ? `: ${gated.join(", ")} will run` : ""}`);
+		return 0;
+	}
 	if (argv[0] === "config" && argv[1] === "init") {
 		const file = configPath();
 		if (fs.existsSync(file)) {
@@ -260,6 +274,15 @@ async function main(): Promise<number | undefined> {
 	}
 
 	const { config, warnings } = loadConfig();
+	// the project's own .vigent.toml, over yours; what runs programs waits for :trust
+	const root = repoRoot(process.cwd());
+	const projectFile = root ? path.join(root, PROJECT_CONFIG) : undefined;
+	if (projectFile && fs.existsSync(projectFile)) {
+		const content = fs.readFileSync(projectFile, "utf8");
+		const project = loadConfig(projectFile, { base: config, trusted: isTrusted(projectFile, content), label: PROJECT_CONFIG });
+		warnings.push(...project.warnings);
+		if (project.gated.length) warnings.push(`${PROJECT_CONFIG} wants to run commands (${project.gated.join(", ")}): :trust allows them`);
+	}
 	const stale = staleBuild();
 	if (stale) warnings.push(stale);
 	const { keymap, warnings: keyWarnings } = buildKeymap(config.leader, config.keys);
@@ -291,7 +314,6 @@ async function main(): Promise<number | undefined> {
 
 	const terminal = new ProcessTerminal();
 	const tui = new TUI(terminal, false);
-	const root = repoRoot(process.cwd());
 	const app = new App(tui, terminal, new Painter(theme, config.highlights), config.ui, keymap, {
 		root,
 		config: config.worktree,
@@ -357,6 +379,17 @@ async function main(): Promise<number | undefined> {
 
 	// model and effort for new agents, per engine, from [engines.<id>]
 	app.templates = config.templates;
+	app.hooks = config.hooks;
+	// :trust: let this project's .vigent.toml run its commands, from now on
+	app.trustProject = () => {
+		if (!projectFile || !fs.existsSync(projectFile)) return `no ${PROJECT_CONFIG} in this project`;
+		const content = fs.readFileSync(projectFile, "utf8");
+		trustFile(projectFile, content);
+		const { gated } = loadConfig(projectFile, { trusted: false, label: PROJECT_CONFIG });
+		loadConfig(projectFile, { base: config, trusted: true, label: PROJECT_CONFIG });
+		app.hooks = config.hooks;
+		return `trusted ${PROJECT_CONFIG}${gated.length ? `: ${gated.join(", ")} now run` : ""}`;
+	};
 	for (const [id, opts] of Object.entries(config.engines)) {
 		if (opts?.model) app.newAgentModel[id as EngineId] = opts.model;
 		if (opts?.effort) app.newAgentEffort[id as EngineId] = opts.effort;
