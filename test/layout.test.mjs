@@ -33,7 +33,7 @@ function makeApp(ui = {}, layout) {
 	const app = new App(tui, { rows: 20, columns: 110, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI, ...ui }, new Keymap(), { config: { enabled: true } });
 	if (layout) app.layout = layout;
 	for (const name of ["cart total", "docs pass"]) {
-		const s = new S(name, "claude-sonnet-4-5", { branch: `fix/${name.replace(" ", "-")}`, path: path.join(tmp, "wt", name) });
+		const s = new S(name, "claude-sonnet-4-5", { branch: `fix/${name.replace(" ", "-")}`, path: `/wt/${name}` }); // short and fixed: a temp path (macOS: /private/var/folders/…) would push parts off the line
 		s.engine = "claude";
 		s.effort = "high";
 		app.addSession(s, false);

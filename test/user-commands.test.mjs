@@ -133,13 +133,13 @@ test("the real vigent: a [commands] shell command from config.toml", { timeout: 
 	const repo = path.join(tmp, "shop");
 	fs.mkdirSync(repo);
 	execFileSync("git", ["init", "-q"], { cwd: repo });
-	write("xdg/vigent/config.toml", `[commands]\nHello = "!echo hello from $VIGENT_REPO"\n`);
+	write("xdg/vigent/config.toml", `[commands]\nHello = "!echo hello from $(basename $VIGENT_REPO)"\n`);
 	const env = { ...process.env, XDG_CONFIG_HOME: path.join(tmp, "xdg"), XDG_STATE_HOME: path.join(tmp, "state-e2e"), TERM: "xterm-256color" };
 	const t = new Tty([], { cwd: repo, env, cols: 130, rows: 30 });
 	try {
 		await t.waitFor(/:help for keys|VIGENT|██/);
 		await t.type(":Hello\r");
-		await t.waitFor(new RegExp(`:Hello: done in [0-9.]+s · hello from ${repo.replace(/[/.]/g, "\\$&")}`));
+		await t.waitFor(/:Hello: done in [0-9.]+s · hello from shop/, 20000); // ran in the repo, with VIGENT_REPO set
 	} finally {
 		t.kill();
 	}

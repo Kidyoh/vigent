@@ -2398,17 +2398,22 @@ export class App implements Component {
 			return;
 		}
 		const backends = riftriBackends(root, all.map((w) => w.path));
+		const width = Math.min(112, this.terminal.columns - 4);
 		const lines: FloatLine[] = all.map((w) => {
 			const owner = this.sessions.find((s) => s.worktree?.path === w.path);
 			const backend = backends.get(w.path);
-			return [
+			const cols: FloatLine = [
 				[owner ? "String" : "Comment", owner ? "● " : "  "],
 				["Title", `${(w.branch ?? `(detached ${w.head})`).padEnd(30)} `],
 				["NormalFloat", `${truncateToWidth(owner?.name ?? "", 20, "…").padEnd(20)} `],
 				// the storage column only when riftri made some of them
 				[backend ? "String" : "Comment", backends.size ? `${(backend ? `riftri ${backend}` : "git").padEnd(16)} ` : ""],
-				["Comment", this.shortPath(w.path)],
 			];
+			// a long path gives way from its start: its end names the worktree
+			const room = width - 4 - visibleWidth(cols.map(([, t]) => t).join(""));
+			const p = this.shortPath(w.path);
+			cols.push(["Comment", visibleWidth(p) <= room || room < 8 ? p : `…${p.slice(p.length - room + 1)}`]);
+			return cols;
 		});
 		const st = this.storage;
 		if (st?.views && st.logicalBytes !== undefined && st.allocatedBytes !== undefined) {

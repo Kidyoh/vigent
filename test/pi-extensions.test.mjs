@@ -100,6 +100,8 @@ test("confirm() is a y/n question in vigent's command line", async () => {
 		await until(() => /\(y\/n\)/.test(plain(app.render(120))));
 		app.handleInput("n");
 		await until(() => s.items.some((i) => i.text === "not deploying"));
+		// the command's notify arrives before pi's reply to the prompt; vigent goes idle once that's in
+		await until(() => s.state !== "running", 10000, "the agent to settle");
 		assert.equal(s.state, "idle", "a command that runs no turn leaves the agent idle");
 	} finally {
 		s.dispose();
