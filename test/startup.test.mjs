@@ -26,6 +26,16 @@ test("vigent bundles no agent: pi is your own install, like Claude Code or Codex
 	const s = new PiSession("x", "default", { cwd: root, bin: "pi-not-here-anywhere" });
 	await assert.rejects(s.ready, /pi isn't installed: npm install -g @mariozechner\/pi-coding-agent/);
 	assert.ok(s.items.some((i) => /pi isn't installed/.test(i.text)));
+
+	// every prompt gets an answer: the error and what to do, right under it (never silence)
+	for (const prompt of ["hello there", "hello"]) {
+		s.send(prompt);
+		for (let i = 0; i < 100 && s.state === "running"; i++) await new Promise((r) => setTimeout(r, 10));
+		assert.equal(s.state, "error");
+		const after = s.items.slice(s.items.findLastIndex((i) => i.kind === "user" && i.text === prompt) + 1).map((i) => i.text);
+		assert.match(after[0], /^error: pi isn't installed: npm install -g @mariozechner\/pi-coding-agent/);
+		assert.match(after[1], /this agent runs on pi, which isn't installed.*:new <task>.*:kill/);
+	}
 });
 
 test("pi-tui is vendored (only what vigent draws) and nothing loads an agent at startup", () => {

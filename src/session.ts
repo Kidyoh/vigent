@@ -348,6 +348,10 @@ export function usageTokens(u: any): number {
 }
 
 /** What to do when pi can't get through: this agent stays on pi, so start one elsewhere. */
+/** What to do when pi isn't there at all (an agent started on pi before vigent stopped bundling it, say). */
+export const PI_MISSING_HINT =
+	"this agent runs on pi, which isn't installed. Install pi and send again, or :new <task> starts an agent on your default engine (:engine picks it, e.g. Claude Code or Codex) and :kill removes this one.";
+
 export const PI_KEY_HINT =
 	"this agent runs on pi, and pi has no working API key. Agents keep the engine they started on: :new <task> starts one on the default engine (:engine picks it, e.g. Claude Code or Codex with your existing login), and :kill removes this one.";
 

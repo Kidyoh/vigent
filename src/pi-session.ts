@@ -20,6 +20,7 @@ import {
 	extractText,
 	itemsFromMessages,
 	PI_KEY_HINT,
+	PI_MISSING_HINT,
 	piError,
 	Session,
 	shortExtPath,
@@ -149,8 +150,14 @@ export class PiSession extends Session {
 		this.pending.clear();
 		if (this.disposed) return;
 		const text = `error: ${why}`;
-		if (!this.items.some((i) => i.kind === "info" && i.text === text)) this.pushInfo(text);
-		if (this.state === "running" || this.state === "waiting") this.setState("error");
+		const hint = why.startsWith("pi isn't installed") ? PI_MISSING_HINT : undefined;
+		// a prompt was waiting: answer it, every time (at startup, once is enough)
+		const prompted = this.state === "running" || this.state === "waiting";
+		if (prompted || !this.items.some((i) => i.kind === "info" && i.text === text)) {
+			this.pushInfo(text);
+			if (hint) this.pushInfo(hint);
+		}
+		if (prompted) this.setState("error");
 	}
 
 	private applyState(state: any) {
