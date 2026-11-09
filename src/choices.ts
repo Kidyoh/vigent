@@ -10,8 +10,50 @@ import { loadPiAi } from "./pi-sdk.js";
 
 export interface Choice {
 	value: string;
+	/** what the picker shows (default: the value) */
+	label?: string;
 	note?: string;
+	/** a heading the picker shows above a run of choices with the same group */
+	group?: string;
 }
+
+/** Claude Code's models, newest first: what `--model` takes, and their names. */
+export const CLAUDE_MODELS: { id: string; label: string; alias: string }[] = [
+	{ id: "claude-fable-5-1", label: "Claude Fable 5.1", alias: "fable" },
+	{ id: "claude-opus-5-5", label: "Claude Opus 5.5", alias: "opus" },
+	{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", alias: "sonnet" },
+	{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5", alias: "haiku" },
+];
+
+const WORDS: Record<string, string> = { gpt: "GPT", oss: "OSS", ai: "AI", xai: "xAI", llama: "Llama", gemini: "Gemini", deepseek: "DeepSeek", qwen: "Qwen", kimi: "Kimi", glm: "GLM", mini: "Mini", nano: "Nano", codex: "Codex" };
+
+/**
+ * A model's name for people, from its id: claude-fable-5-1 → Claude Fable 5.1,
+ * claude-sonnet-4-5-20250929 → Claude Sonnet 4.5, gpt-5.5-codex → GPT-5.5 Codex,
+ * anthropic/claude-opus-4-1 → Claude Opus 4.1. Aliases: opus → Claude Opus (latest).
+ */
+export function modelLabel(id: string): string {
+	const known = CLAUDE_MODELS.find((m) => m.id === id);
+	if (known) return known.label;
+	const alias = CLAUDE_MODELS.find((m) => m.alias === id);
+	if (alias) return `${alias.label.replace(/ [\d.]+$/, "")} (latest)`;
+	const bare = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+	// claude-<family>-<major>-<minor>[-date]
+	const claude = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/.exec(bare);
+	if (claude) return `Claude ${cap(claude[1])} ${claude[2]}${claude[3] ? `.${claude[3]}` : ""}${claude[4] ? " (1M)" : ""}`;
+	const legacy = /^claude-(\d+)(?:-(\d))?-([a-z]+)(?:-\d{8})?$/.exec(bare);
+	if (legacy) return `Claude ${cap(legacy[3])} ${legacy[1]}${legacy[2] ? `.${legacy[2]}` : ""}`;
+	// gpt-5.5-codex, gpt-6-astra, o3-mini
+	const gpt = /^gpt-([\d.]+)(?:-(.+))?$/.exec(bare);
+	if (gpt) return `GPT-${gpt[1]}${gpt[2] ? ` ${gpt[2].split("-").map(word).join(" ")}` : ""}`;
+	if (/^o\d/.test(bare)) return bare;
+	if (bare.startsWith("gpt-")) return `GPT-${bare.slice(4).split("-").map(word).join(" ")}`;
+	return bare.split("-").map(word).join(" ");
+}
+
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+/** one word of a name: known spellings, sizes in capitals (70b → 70B), versions as they are */
+const word = (w: string) => WORDS[w] ?? (/^\d+(\.\d+)?[bkm]$/.test(w) ? w.toUpperCase() : /^\d/.test(w) ? w : cap(w));
 
 /** Reasoning effort / thinking levels each engine accepts. */
 export const EFFORTS: Record<EngineId, string[]> = {
@@ -42,19 +84,23 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 	switch (engine) {
 		case "claude":
 			return [
-				{ value: "default", note: "Claude Code's own choice" },
-				{ value: "fable", note: "latest Fable" },
-				{ value: "opus", note: "latest Opus" },
-				{ value: "sonnet", note: "latest Sonnet" },
-				{ value: "haiku", note: "latest Haiku" },
+				{ value: "default", label: "Default", note: "Claude Code's own choice" },
+				...CLAUDE_MODELS.map((m) => ({ value: m.id, label: m.label, note: m.id })),
 			];
 		case "codex":
 			return [
-				{ value: "default", note: "Codex's own choice" },
-				...(await codexModels(env)).map((m) => ({ value: m.slug, note: m.description ? `${m.name} · ${m.description}` : m.name })),
+				{ value: "default", label: "Default", note: "Codex's own choice" },
+				...(await codexModels(env)).map((m) => ({
+					value: m.slug,
+					label: /[A-Z]/.test(m.name) ? m.name : modelLabel(m.slug),
+					note: m.description ? `${m.slug} · ${m.description}` : m.slug,
+				})),
 			];
 		case "opencode":
-			return [{ value: "default", note: "OpenCode's own choice" }, ...(await opencodeModels(env)).map((value) => ({ value }))];
+			return [
+				{ value: "default", label: "Default", note: "OpenCode's own choice" },
+				...(await opencodeModels(env)).map((value) => ({ value, label: modelLabel(value), note: value })),
+			];
 		case "pi": {
 			const ai: any = await loadPiAi().catch(() => undefined);
 			if (!ai) return [{ value: "default", note: "pi isn't installed" }];
@@ -67,7 +113,10 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 				} catch {
 					continue;
 				}
-				for (const m of models) out.push({ value: provider === "anthropic" ? m.id : `${provider}/${m.id}`, note: m.name && m.name !== m.id ? m.name : undefined });
+				for (const m of models) {
+					const value = provider === "anthropic" ? m.id : `${provider}/${m.id}`;
+					out.push({ value, label: m.name && m.name !== m.id ? m.name : modelLabel(m.id), note: value });
+				}
 			}
 			return out;
 		}

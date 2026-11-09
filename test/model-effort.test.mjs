@@ -27,7 +27,9 @@ test("each CLI gets the effort its own way", () => {
 });
 
 test("model lists per engine; pi models as provider/model", async () => {
-	assert.deepEqual((await modelChoices("claude")).map((c) => c.value), ["default", "fable", "opus", "sonnet", "haiku"]);
+	const claude = await modelChoices("claude");
+	assert.deepEqual(claude.map((c) => c.value), ["default", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
+	assert.deepEqual(claude.map((c) => c.label), ["Default", "Claude Fable 5.1", "Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"], "names with their versions");
 	assert.deepEqual((await modelChoices("codex", { PATH: "" })).map((c) => c.value), ["default"], "no Codex installed: its default, and any name can be typed");
 	const pi = await modelChoices("pi", { OPENAI_API_KEY: "x" });
 	assert.ok(pi.length > 0 && pi.every((c) => c.value.startsWith("openai/")), "the providers you have a key for");
@@ -56,8 +58,9 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	const picker = overlays.at(-1);
 	let screen = plain(picker.render(70));
 	assert.match(screen, /Model · 'racer' \(Claude Code\)/);
-	assert.match(screen, /● default +Claude Code's own choice/);
-	assert.match(screen, /opus +latest Opus/);
+	assert.match(screen, /● Default +Claude Code's own choice/);
+	assert.match(screen, /Claude Opus 5\.5 +claude-opus-5-5/);
+	assert.match(screen, /Claude Fable 5\.1 +claude-fable-5-1/);
 	for (const k of "opu") picker.handleInput(k);
 	assert.match(plain(picker.render(70)), /j\/k move/, "letters don't search until /");
 	picker.handleInput("j");
@@ -69,8 +72,8 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	assert.match(plain(picker.render(70)), /type to filter · Esc done/);
 	picker.handleInput("\r");
 	await tick();
-	assert.equal(s.chosenModel, "opus");
-	assert.match(app.message, /model for 'racer' \(Claude Code\): opus \(from the next prompt\)/);
+	assert.equal(s.chosenModel, "claude-opus-5-5");
+	assert.match(app.message, /model for 'racer' \(Claude Code\): claude-opus-5-5 \(from the next prompt\)/);
 
 	[" ", "R"].forEach((k) => app.handleInput(k)); // <leader>R
 	await tick();
@@ -82,13 +85,13 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	efforts.handleInput("\r");
 	await tick();
 	assert.equal(s.effort, "high");
-	assert.deepEqual(persisted.at(-1), { model: "opus", effort: "high" });
-	assert.match(plain(app.render(120)), /opus · high/, "the winbar shows both");
+	assert.deepEqual(persisted.at(-1), { model: "claude-opus-5-5", effort: "high" });
+	assert.match(plain(app.render(120)), /claude-opus-5-5 · high/, "the winbar shows both");
 
 	s.send("go");
 	await new Promise((r) => setTimeout(r, 400));
 	const argv = JSON.parse(fs.readFileSync(log, "utf8").trim().split("\n").at(-1));
-	assert.deepEqual(argv.slice(-6), ["--model", "opus", "--effort", "high", "--", "go"]);
+	assert.deepEqual(argv.slice(-6), ["--model", "claude-opus-5-5", "--effort", "high", "--", "go"]);
 
 	// direct forms, a level the engine doesn't take, back to default
 	ex("effort off");
@@ -167,7 +170,8 @@ test("Codex's models and efforts come from `codex debug models`", async () => {
 	const env = { PATH: dir };
 	const list = await modelChoices("codex", env);
 	assert.deepEqual(list.map((c) => c.value), ["default", "gpt-6-astra", "gpt-5.5"]);
-	assert.equal(list[1].note, "GPT-6-Astra · Frontier intelligence.");
+	assert.equal(list[1].label, "GPT-6-Astra", "Codex's own name for it");
+	assert.equal(list[1].note, "gpt-6-astra · Frontier intelligence.");
 	assert.deepEqual((await effortChoicesFor("codex", "gpt-6-astra", env)).map((c) => c.value), ["default", "low", "high", "ultra"], "the model's own levels");
 	assert.deepEqual((await effortChoicesFor("codex", undefined, env)).map((c) => c.value), ["default", "low", "medium", "high", "ultra"], "Codex's default model: all its levels");
 	assert.deepEqual((await effortChoicesFor("codex", undefined, { PATH: "" })).map((c) => c.value), effortChoices("codex").map((c) => c.value), "no Codex: the usual list");
@@ -234,5 +238,82 @@ test(":engine picks the engine new agents run on, shows what's ready, and leaves
 	ex("engine gpt");
 	assert.match(app.message, /engines: auto, pi, claude, codex, opencode/);
 	assert.equal(app.preferredEngine, "codex");
+	s.dispose();
+});
+
+test("model names: versions spelled out from the ids", async () => {
+	const { modelLabel } = await import("../dist/choices.js");
+	const cases = {
+		"claude-fable-5-1": "Claude Fable 5.1",
+		"claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+		"claude-3-5-haiku-20241022": "Claude Haiku 3.5",
+		"claude-opus-5-5[1m]": "Claude Opus 5.5 (1M)",
+		opus: "Claude Opus (latest)",
+		"gpt-5.5-codex": "GPT-5.5 Codex",
+		"gpt-5.1-codex-mini": "GPT-5.1 Codex Mini",
+		"gpt-oss-120b": "GPT-OSS 120B",
+		"o3-mini": "o3-mini",
+		"anthropic/claude-opus-4-1": "Claude Opus 4.1",
+		"google/gemini-2.5-pro": "Gemini 2.5 Pro",
+	};
+	for (const [id, name] of Object.entries(cases)) assert.equal(modelLabel(id), name, id);
+});
+
+test(":model lists every ready engine's models under its name; a GPT model from a Claude agent sets new agents' engine", async () => {
+	const overlays = [];
+	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide() {} }) };
+	const app = new App(tui, { rows: 40, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
+	app.setEngines([
+		{ id: "pi", name: "pi", installed: true, connected: false, detail: "" },
+		{ id: "claude", name: "Claude Code", installed: true, connected: true, detail: "" },
+		{ id: "codex", name: "Codex", installed: true, connected: true, detail: "" },
+		{ id: "opencode", name: "OpenCode", installed: false, connected: false, detail: "" },
+	]);
+	const codex = [
+		{ value: "default", label: "Default", note: "Codex's own choice" },
+		{ value: "gpt-5.5-codex", label: "GPT-5.5 Codex", note: "gpt-5.5-codex" },
+		{ value: "gpt-5.5", label: "GPT-5.5", note: "gpt-5.5" },
+	];
+	app.modelChoices = async (engine) => (engine === "codex" ? codex : modelChoices(engine));
+	const s = new CliSession("racer", "claude", undefined, { cwd: tmp, bin: "/nonexistent" });
+	app.addSession(s, true);
+	const ex = (cmd) => [":", ...cmd, "\r"].forEach((k) => app.handleInput(k));
+
+	ex("model");
+	await tick();
+	const picker = overlays.at(-1);
+	const screen = plain(picker.render(90));
+	assert.match(screen, /Claude Code · this agent[ │]*\n│ ● Default/);
+	assert.match(screen, /Claude Fable 5\.1/);
+	assert.match(screen, /Codex · starts new agents there[ │]*\n│ {3}GPT-5\.5 Codex +gpt-5\.5-codex/);
+	assert.ok(!/│ (pi|OpenCode)\b/.test(screen), "only engines that are ready get a heading");
+	assert.equal((screen.match(/Default/g) ?? []).length, 1, "one Default: this agent's engine");
+	assert.match(screen, / 1\/7 /, "headings aren't counted or selected");
+
+	for (const k of "/gpt-5.5 codex") picker.handleInput(k);
+	picker.handleInput("\r");
+	await tick();
+	assert.equal(s.chosenModel, undefined, "the Claude agent keeps its model");
+	assert.equal(app.preferredEngine, "codex");
+	assert.equal(app.newAgentModel.codex, "gpt-5.5-codex");
+	assert.match(app.message, /'racer' stays on Claude Code \(its conversation lives there\) · new agents: Codex · GPT-5\.5 Codex · :new <task> starts one/);
+
+	// typed, the same way; and the agent's own engine without a prefix
+	ex("model codex:gpt-5.5");
+	assert.equal(app.newAgentModel.codex, "gpt-5.5");
+	ex("model claude:claude-haiku-5-5");
+	await tick();
+	assert.equal(s.chosenModel, "claude-haiku-5-5");
+
+	// it opens on the agent's model; j steps over the Codex heading to its first model
+	ex("model");
+	await tick();
+	const p2 = overlays.at(-1);
+	assert.match(plain(p2.render(90)), / 5\/7 .*\n?/);
+	assert.match(plain(p2.render(90)), /● Claude Haiku 5\.5/);
+	p2.handleInput("j");
+	assert.match(plain(p2.render(90)), / 6\/7 /);
+	p2.handleInput("\r");
+	assert.equal(app.newAgentModel.codex, "gpt-5.5-codex");
 	s.dispose();
 });

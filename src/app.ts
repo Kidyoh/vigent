@@ -55,7 +55,7 @@ import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
 import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
-import { EFFORTS, effortChoicesFor, modelChoices } from "./choices.js";
+import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon } from "./icons.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { PiSession, Session, SessionState } from "./session.js";
@@ -1139,6 +1139,10 @@ export class App implements Component {
 
 	/** `:model <name>` */
 	chooseModel(model: string, t = this.modelTarget()) {
+		// a model of another engine (codex:gpt-5.5, from the picker or typed)
+		const other = /^(pi|claude|codex|opencode):(.+)$/.exec(model);
+		if (other && other[1] !== t.engine) return this.chooseOtherEngine(other[1] as EngineId, other[2], t);
+		if (other) model = other[2];
 		const value = model === "default" ? undefined : model;
 		if (!t.session) {
 			if (value) this.newAgentModel[t.engine] = value;
@@ -1157,6 +1161,36 @@ export class App implements Component {
 				this.setMessage(String((err as Error)?.message ?? err), "ErrorMsg");
 				this.tui.requestRender();
 			});
+	}
+
+	/**
+	 * A model from another engine's list: new agents run on that engine with it.
+	 * An open agent stays where it is, since its conversation lives in its engine.
+	 */
+	private chooseOtherEngine(engine: EngineId, model: string, t: ReturnType<App["modelTarget"]>) {
+		this.preferredEngine = engine;
+		if (model === "default") delete this.newAgentModel[engine];
+		else this.newAgentModel[engine] = model;
+		const name = model === "default" ? `${ENGINE_NAMES[engine]}'s default model` : modelLabel(model);
+		const stays = t.session ? `'${t.session.name}' stays on ${ENGINE_NAMES[t.session.engine]} (its conversation lives there) · ` : "";
+		this.setMessage(`${stays}new agents: ${ENGINE_NAMES[engine]} · ${name} · :new <task> starts one`, "ModeMsg");
+		this.repaint();
+	}
+
+	/**
+	 * What :model lists: the target engine's models first, then those of every
+	 * other engine that's ready, each under its name, as T3 Code does.
+	 */
+	private async allModelChoices(t: ReturnType<App["modelTarget"]>): Promise<PickerChoice[]> {
+		const others = (["claude", "codex", "opencode", "pi"] as EngineId[]).filter((e) => e !== t.engine && this.engines?.find((x) => x.id === e)?.connected);
+		const lists = await Promise.all([t.engine, ...others].map((e) => this.modelChoices(e).catch(() => [] as PickerChoice[])));
+		return lists.flatMap((list, k) => {
+			const engine = k === 0 ? t.engine : others[k - 1];
+			const group = k === 0 ? (t.session ? `${ENGINE_NAMES[engine]} · this agent` : ENGINE_NAMES[engine]) : t.session ? `${ENGINE_NAMES[engine]} · starts new agents there` : ENGINE_NAMES[engine];
+			return list
+				.filter((c) => k === 0 || c.value !== "default")
+				.map((c) => ({ ...c, value: k === 0 ? c.value : `${engine}:${c.value}`, group: others.length ? group : undefined }));
+		});
 	}
 
 	/** `:effort <level>` */
@@ -1226,7 +1260,7 @@ export class App implements Component {
 				? ((t.session as { chosenModel?: string }).chosenModel ?? "default")
 				: t.session.model
 			: (this.newAgentModel[t.engine] ?? "default");
-		this.openChoices(`Model · ${t.label}`, this.modelChoices(t.engine), current, true, (v) => this.chooseModel(v, t));
+		this.openChoices(`Model · ${t.label}`, this.allModelChoices(t), current, true, (v) => this.chooseModel(v, t), { rows: 12 });
 	}
 
 	/** `:effort`: the reasoning effort / thinking levels the engine accepts. */

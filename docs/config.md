@@ -201,13 +201,15 @@ The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the 
 
 ### Choosing a model and effort while vigent runs
 
-`:model` (`<Space>M`) opens a picker with the models the focused agent's engine offers:
-- **pi:** the catalog for each provider you have a key for.
-- **Claude Code:** `fable`, `opus`, `sonnet`, `haiku`.
+`:model` (`<Space>M`) opens a picker with each model's name and version, like `Claude Fable 5.1` or `GPT-5.5 Codex`, and its id next to it. The models come in groups, one per engine:
+- **Claude Code:** Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.
+- **Codex:** its own catalog, from `codex debug models` (the GPT models your account has).
 - **OpenCode:** everything `opencode models` lists.
-- **Codex:** type the model name.
+- **pi:** the catalog for each provider you have a key for.
 
-Type to filter. Enter on text that matches nothing uses the typed name as-is.
+The focused agent's engine comes first, then every other engine that's ready (`:checkhealth`). Picking a model from another engine can't move an open agent, because its conversation lives in its engine. Instead, new agents run on that engine with that model, and `:new <task>` starts one. With no agent open, the same goes for the default engine. `:model codex:gpt-5.5` does this without the picker.
+
+Press `/` to filter by name, id or engine. Enter on text that matches nothing uses the typed name as-is.
 
 `:effort` (`<Space>R`) picks the reasoning effort the same way.
 

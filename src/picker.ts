@@ -229,8 +229,15 @@ export class ThemePicker implements Component {
 /** An item in a ChoicePicker. */
 export interface PickerChoice {
 	value: string;
+	/** what the list shows (default: the value) */
+	label?: string;
 	note?: string;
+	/** a heading shown above each run of choices with the same group (an engine's models) */
+	group?: string;
 }
+
+/** a row of the list: a group's heading, or a choice (with its index among the choices) */
+type Row = { heading: string } | { choice: PickerChoice; i: number };
 
 export interface ChoicePickerOptions {
 	/** open with the search already started: typing filters right away */
@@ -277,7 +284,7 @@ export class ChoicePicker implements Component {
 				this.items = list;
 				this.loading = false;
 				this.index = Math.max(0, list.findIndex((c) => c.value === current));
-				this.scroll = Math.max(0, this.index - this.rows + 1);
+				this.keepVisible();
 				this.requestRender();
 			})
 			.catch(() => {
@@ -287,7 +294,30 @@ export class ChoicePicker implements Component {
 	}
 
 	private filtered(): PickerChoice[] {
-		return this.query ? fuzzyFilter(this.items, this.query, (c) => `${c.value} ${c.note ?? ""}`) : this.items;
+		return this.query ? fuzzyFilter(this.items, this.query, (c) => `${c.label ?? ""} ${c.value} ${c.note ?? ""} ${c.group ?? ""}`) : this.items;
+	}
+
+	/** the choices with their groups' headings between them */
+	private rowsOf(items: PickerChoice[]): Row[] {
+		const out: Row[] = [];
+		let group: string | undefined;
+		items.forEach((choice, i) => {
+			if (choice.group && choice.group !== group) out.push({ heading: choice.group });
+			group = choice.group;
+			out.push({ choice, i });
+		});
+		return out;
+	}
+
+	/** scroll so the selected choice shows (with its heading, when it's the first under one) */
+	private keepVisible() {
+		const rows = this.rowsOf(this.filtered());
+		const at = rows.findIndex((r) => "choice" in r && r.i === this.index);
+		if (at < 0) return void (this.scroll = 0);
+		const top = at > 0 && "heading" in rows[at - 1] ? at - 1 : at;
+		if (top < this.scroll) this.scroll = top;
+		if (at >= this.scroll + this.rows) this.scroll = at - this.rows + 1;
+		this.scroll = Math.max(0, Math.min(this.scroll, Math.max(0, rows.length - this.rows)));
 	}
 
 	handleInput(data: string): void {
@@ -346,8 +376,7 @@ export class ChoicePicker implements Component {
 					}
 			}
 		}
-		if (this.index < this.scroll) this.scroll = this.index;
-		if (this.index >= this.scroll + this.rows) this.scroll = this.index - this.rows + 1;
+		this.keepVisible();
 		this.requestRender();
 	}
 
@@ -372,9 +401,18 @@ export class ChoicePicker implements Component {
 			lines.push(row(P.on("Comment", bg) + ` ${I.prompt} ${text}` + RESET, visibleWidth(text) + 3));
 		}
 		lines.push(border(I.lt + I.h.repeat(inner) + I.rt));
-		const shown = items.slice(this.scroll, this.scroll + this.rows);
+		const all = this.rowsOf(items);
+		const shown = all.slice(this.scroll, this.scroll + this.rows);
+		// names line up in a column after the longest (up to a third of the width)
+		const nameW = Math.min(Math.floor(inner / 3), Math.max(0, ...items.map((x) => visibleWidth(x.label ?? x.value))));
 		for (let i = 0; i < this.rows; i++) {
-			const c = shown[i];
+			const r = shown[i];
+			if (r && "heading" in r) {
+				const text = truncateToWidth(` ${r.heading}`, inner, "…");
+				lines.push(row(P.on("Title", bg) + text + RESET, visibleWidth(text)));
+				continue;
+			}
+			const c = r?.choice;
 			if (!c) {
 				let text = "";
 				if (i === 0 && this.loading) text = "  loading…";
@@ -383,13 +421,12 @@ export class ChoicePicker implements Component {
 				lines.push(row(P.on("Comment", bg) + truncateToWidth(text, inner, "…") + RESET, Math.min(inner, visibleWidth(text))));
 				continue;
 			}
-			const selected = this.scroll + i === this.index;
+			const selected = r.i === this.index;
 			const rowBg = selected ? (P.attr("PmenuSel").bg ?? P.attr("Visual").bg) : bg;
 			const group = selected ? "PmenuSel" : "NormalFloat";
 			const marker = c.value === this.current ? `${I.current} ` : "  ";
-			// notes line up in a column after the longest name (up to a third of the width)
-			const nameW = Math.min(Math.floor(inner / 3), Math.max(...items.map((x) => visibleWidth(x.value))));
-			const padded = c.note ? c.value + " ".repeat(Math.max(0, nameW - visibleWidth(c.value))) : c.value;
+			const label = c.label ?? c.value;
+			const padded = c.note ? label + " ".repeat(Math.max(0, nameW - visibleWidth(label))) : label;
 			const name = truncateToWidth(`${marker}${padded}`, Math.max(10, inner - 4), "…");
 			const note = c.note ? truncateToWidth(`  ${c.note}`, Math.max(0, inner - 2 - visibleWidth(name)), "…") : "";
 			lines.push(row(P.on(group, rowBg) + ` ${name}` + P.on(selected ? "PmenuSel" : "Comment", rowBg) + note + RESET, 1 + visibleWidth(name) + visibleWidth(note), rowBg));
