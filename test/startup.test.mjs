@@ -12,8 +12,8 @@ const root = path.join(import.meta.dirname, "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 test("vigent bundles no agent: pi is your own install, like Claude Code or Codex", async () => {
-	assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["@mariozechner/pi-tui", "smol-toml"], "only what every engine needs");
-	assert.deepEqual(Object.keys(pkg.optionalDependencies ?? {}), ["riftri"]);
+	assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["get-east-asian-width", "riftri", "smol-toml"], "text width, worktrees, config: nothing else");
+	assert.equal(pkg.optionalDependencies, undefined);
 	assert.ok(!pkg.dependencies["@mariozechner/pi-coding-agent"] && !pkg.optionalDependencies?.["@mariozechner/pi-coding-agent"], "the pi agent isn't shipped");
 
 	const missing = detectPi({ ANTHROPIC_API_KEY: "x", PATH: "" });
@@ -28,12 +28,14 @@ test("vigent bundles no agent: pi is your own install, like Claude Code or Codex
 	assert.ok(s.items.some((i) => /pi isn't installed/.test(i.text)));
 });
 
-test("startup loads no more of pi-tui than vigent draws, and none of the pi engine", () => {
-	// every pi-tui import goes through src/tui.ts, which skips its editor, markdown and image modules
+test("pi-tui is vendored (only what vigent draws) and nothing loads an agent at startup", () => {
+	// every pi-tui import goes through src/tui.ts, to the vendored copy (no koffi, no editor or markdown)
 	for (const f of fs.readdirSync(path.join(root, "src"))) {
-		if (f === "tui.ts" || !f.endsWith(".ts")) continue;
-		assert.doesNotMatch(fs.readFileSync(path.join(root, "src", f), "utf8"), /from "@mariozechner\/pi-tui"/, f);
+		if (!f.endsWith(".ts")) continue;
+		assert.doesNotMatch(fs.readFileSync(path.join(root, "src", f), "utf8"), /from "@mariozechner\//, f);
 	}
+	assert.ok(fs.existsSync(path.join(root, "dist", "vendor", "pi-tui", "tui.js")), "the build copies it");
+	assert.match(fs.readFileSync(path.join(root, "src", "vendor", "pi-tui", "LICENSE"), "utf8"), /MIT License/);
 	// what `vigent --version` loads: no marked (pi-tui's markdown), no pi SDK, no provider SDKs
 	const r = spawnSync(
 		process.execPath,
@@ -47,8 +49,8 @@ test("startup loads no more of pi-tui than vigent draws, and none of the pi engi
 	assert.match(r.stdout, /^vigent \d/);
 	const seen = JSON.parse(r.stderr.trim().split("\n").pop());
 	if (seen.length === 0) return; // this Node has no module hooks to look with
-	assert.ok(seen.some((u) => u.includes("pi-tui/dist/tui.js")), "pi-tui is loaded");
-	for (const heavy of ["/marked/", "pi-coding-agent", "pi-ai", "/openai/", "@anthropic-ai", "pi-tui/dist/components/editor.js"]) {
+	assert.ok(seen.some((u) => u.includes("vendor/pi-tui/tui.js")), "pi-tui is loaded");
+	for (const heavy of ["/marked/", "pi-coding-agent", "pi-ai", "/openai/", "@anthropic-ai", "@mariozechner/", "koffi"]) {
 		assert.ok(!seen.some((u) => u.includes(heavy)), `${heavy} isn't loaded at startup`);
 	}
 });

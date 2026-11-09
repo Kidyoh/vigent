@@ -12,7 +12,7 @@ A vim-native terminal app for running several coding agents at once, each in its
 npm install -g @vigent/cli
 ```
 
-The package is `@vigent/cli` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`. Run `vigent` in a project, or `vigent <folder>` (`vigent .`, `vigent ~/code/app`) from anywhere.
+The package is `@vigent/cli` (npm doesn't accept the plain name `vigent`, which it finds too close to `vitest`); the command is `vigent`. It bundles no agent, so it's small: a few MB, most of it riftri's native binary for worktrees. Run `vigent` in a project, or `vigent <folder>` (`vigent .`, `vigent ~/code/app`) from anywhere.
 
 Requires Node.js 20 or newer and git. On Node 22.1 or newer, vigent keeps Node's compile cache, which makes later starts faster. Then, inside any git repository:
 
@@ -146,7 +146,7 @@ Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `r
 
 ### Lightweight worktrees with riftri
 
-A worktree is normally a full copy of your checkout, so ten agents on a big repo cost ten checkouts of disk. vigent installs [riftri](https://riftri.dev) with it (an optional dependency; `riftri` on your PATH works too). When riftri can, it makes each agent's worktree a real git linked worktree whose unchanged files share copy-on-write storage. Each new agent then costs almost no disk, and only the files it changes take space of their own. riftri uses APFS clones on macOS, Btrfs or reflink-enabled XFS (or OverlayFS) on Linux, and ReFS block clones on Windows.
+A worktree is normally a full copy of your checkout, so ten agents on a big repo cost ten checkouts of disk. vigent installs [riftri](https://riftri.dev) with it and makes every worktree through it (`riftri` on your PATH works too). When riftri can, it makes each agent's worktree a real git linked worktree whose unchanged files share copy-on-write storage. Each new agent then costs almost no disk, and only the files it changes take space of their own. riftri uses APFS clones on macOS, Btrfs or reflink-enabled XFS (or OverlayFS) on Linux, and ReFS block clones on Windows.
 
 - `:new` says `· riftri reflink` (or `apfs-clone`, `overlay-fs`, …) when riftri made the worktree. When it falls back to a plain git copy, it says so, and `:checkhealth` shows riftri's reason and its fix.
 - `:checkhealth` and `:worktrees` show what the worktrees cost: for example, *4 worktrees: 58.0 MB of files in 11.7 MB on disk*.

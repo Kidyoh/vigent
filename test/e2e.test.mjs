@@ -242,13 +242,11 @@ test("the packed npm package installs and runs as `vigent`", { skip: skip || (!o
 	assert.match(execFileSync(vigent, ["theme", "list"], { env, encoding: "utf8" }), /^lazyvim\b/m);
 	assert.match(execFileSync(vigent, ["--help"], { env, encoding: "utf8" }), /engines \(what runs new agents/);
 
-	// the light install, for Claude Code / Codex / OpenCode only: no pi engine, a few MB
-	// (npm ignores --omit=optional with -g, so it goes in a folder of its own, as the README says)
-	const light = path.join(tmp, "light");
-	execFileSync("npm", ["install", "--prefix", light, "--omit=optional", "--no-audit", "--no-fund", path.join(out, tgz)], { stdio: "ignore" });
-	const lib = path.join(light, "node_modules");
-	assert.ok(!fs.existsSync(path.join(lib, "@mariozechner", "pi-coding-agent")), "no pi engine");
+	// small: no agent bundled (they're your own installs), pi-tui's koffi left out; riftri's binary is most of it
+	const lib = path.join(prefix, "lib", "node_modules");
+	for (const gone of ["@mariozechner", "koffi", "marked", "openai"]) assert.ok(!fs.existsSync(path.join(lib, "@vigent", "cli", "node_modules", gone)) && !fs.existsSync(path.join(lib, gone)), `${gone} isn't installed`);
 	const size = (dir) => fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? size(path.join(dir, e.name)) : e.isFile() ? fs.statSync(path.join(dir, e.name)).size : 0), 0);
-	assert.ok(size(lib) < 15 * 1024 * 1024, `light install is ${(size(lib) / 1024 / 1024).toFixed(1)} MB`);
-	assert.equal(execFileSync(path.join(lib, ".bin", "vigent"), ["--version"], { env, encoding: "utf8" }).trim(), `vigent ${pkg.version}`);
+	assert.ok(size(lib) < 10 * 1024 * 1024, `the install is ${(size(lib) / 1024 / 1024).toFixed(1)} MB`);
+	const riftri = execFileSync(process.execPath, ["-e", "console.log(require(process.argv[1]).resolveBinary())", path.join(lib, "@vigent", "cli", "node_modules", "riftri")], { encoding: "utf8" }).trim();
+	assert.ok(fs.existsSync(riftri), "riftri comes with it");
 });

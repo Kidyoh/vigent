@@ -36,7 +36,7 @@
   ],
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/vendor', 'dist/vendor', { recursive: true, filter: (f) => !f.endsWith('.d.ts') })\"",
     "prepare": "npm run build",
     "start": "node dist/cli.js",
     "demo": "node dist/cli.js --demo",
@@ -48,7 +48,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@mariozechner/pi-tui": "^0.73.1",
+    "get-east-asian-width": "^1.7.0",
+    "riftri": "^0.6.7",
     "smol-toml": "^1.9.1"
   },
   "devDependencies": {
@@ -56,9 +57,6 @@
     "@types/node": "^26.6.6",
     "@xterm/headless": "^5.5.0",
     "typescript": "^7.0.2"
-  },
-  "optionalDependencies": {
-    "riftri": "^0.6.7"
   },
   "publishConfig": {
     "access": "public"
