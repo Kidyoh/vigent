@@ -90,8 +90,9 @@ test("typing @ in insert mode opens a file picker; Enter writes @path, Esc keeps
 	app.handleInput("i");
 	type("fix ");
 	type("@");
-	await tick();
 	assert.equal(overlays.length, 1);
+	// the list comes from a git process, which takes as long as it takes
+	for (let i = 0; i < 250 && plain(overlays[0].render(70)).includes("loading…"); i++) await tick();
 	let screen = plain(overlays[0].render(70));
 	assert.match(screen, /Attach a file/);
 	assert.match(screen, /src\/cart\.js/);
