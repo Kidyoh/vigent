@@ -201,15 +201,15 @@ The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the 
 
 ### Choosing a model and effort while vigent runs
 
-`:model` (`<Space>M`) opens a picker with each model's name and version, like `Claude Fable 5.1` or `GPT-5.5 Codex`, and its id next to it. The models come in groups, one per engine:
-- **Claude Code:** Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.
-- **Codex:** its own catalog, from `codex debug models` (the GPT models your account has).
-- **OpenCode:** everything `opencode models` lists.
-- **pi:** the catalog for each provider you have a key for.
+`:model` (`<Space>M`) opens one plain list: each model's name and version, like `Claude Fable 5.1` or `GPT-5.5 Codex`, with its id next to it. It lists the models of every engine that's ready (`:checkhealth`), the focused agent's own first:
+- Claude Code's: Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.
+- Codex's own catalog, from `codex debug models` (the GPT models your account has).
+- everything `opencode models` lists.
+- pi's catalog for each provider you have a key for.
 
-The focused agent's engine comes first, then every other engine that's ready (`:checkhealth`). Picking a model from another engine can't move an open agent, because its conversation lives in its engine. Instead, new agents run on that engine with that model, and `:new <task>` starts one. With no agent open, the same goes for the default engine. `:model codex:gpt-5.5` does this without the picker.
+An open agent keeps its engine, because its conversation lives there. So a model from another engine is used by new agents instead, and `:new <task>` starts one. `:model codex:gpt-5.5` does this without the picker.
 
-Press `/` to filter by name, id or engine. Enter on text that matches nothing uses the typed name as-is.
+Press `/` to filter by name or id. Enter on text that matches nothing uses the typed name as-is.
 
 `:effort` (`<Space>R`) picks the reasoning effort the same way.
 

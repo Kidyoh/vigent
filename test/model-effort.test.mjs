@@ -57,8 +57,9 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	await tick();
 	const picker = overlays.at(-1);
 	let screen = plain(picker.render(70));
-	assert.match(screen, /Model · 'racer' \(Claude Code\)/);
-	assert.match(screen, /● Default +Claude Code's own choice/);
+	assert.match(screen, /Model · 'racer' /);
+	assert.match(screen, /● Default +│/);
+	assert.ok(!/Claude Code/.test(screen), "a plain list: no engine names");
 	assert.match(screen, /Claude Opus 5\.5 +claude-opus-5-5/);
 	assert.match(screen, /Claude Fable 5\.1 +claude-fable-5-1/);
 	for (const k of "opu") picker.handleInput(k);
@@ -73,7 +74,7 @@ test(":model and :effort pick for the focused agent; the next prompt uses them, 
 	picker.handleInput("\r");
 	await tick();
 	assert.equal(s.chosenModel, "claude-opus-5-5");
-	assert.match(app.message, /model for 'racer' \(Claude Code\): claude-opus-5-5 \(from the next prompt\)/);
+	assert.match(app.message, /model for 'racer': Claude Opus 5\.5 \(from the next prompt\)/);
 
 	[" ", "R"].forEach((k) => app.handleInput(k)); // <leader>R
 	await tick();
@@ -259,7 +260,7 @@ test("model names: versions spelled out from the ids", async () => {
 	for (const [id, name] of Object.entries(cases)) assert.equal(modelLabel(id), name, id);
 });
 
-test(":model lists every ready engine's models under its name; a GPT model from a Claude agent sets new agents' engine", async () => {
+test(":model is one plain list of every ready engine's models; a GPT model from a Claude agent sets new agents' engine", async () => {
 	const overlays = [];
 	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide() {} }) };
 	const app = new App(tui, { rows: 40, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
@@ -283,12 +284,12 @@ test(":model lists every ready engine's models under its name; a GPT model from 
 	await tick();
 	const picker = overlays.at(-1);
 	const screen = plain(picker.render(90));
-	assert.match(screen, /Claude Code · this agent[ │]*\n│ ● Default/);
-	assert.match(screen, /Claude Fable 5\.1/);
-	assert.match(screen, /Codex · starts new agents there[ │]*\n│ {3}GPT-5\.5 Codex +gpt-5\.5-codex/);
-	assert.ok(!/│ (pi|OpenCode)\b/.test(screen), "only engines that are ready get a heading");
-	assert.equal((screen.match(/Default/g) ?? []).length, 1, "one Default: this agent's engine");
-	assert.match(screen, / 1\/7 /, "headings aren't counted or selected");
+	assert.match(screen, /Model · 'racer' /);
+	assert.match(screen, /● Default +│\n│ {3}Claude Fable 5\.1 +claude-fable-5-1/);
+	assert.match(screen, /Claude Haiku 5\.5 +claude-haiku-5-5 +│\n│ {3}GPT-5\.5 Codex +gpt-5\.5-codex +│/, "GPT models right after, no heading");
+	assert.ok(!/Claude Code|Codex ·|OpenCode|│ pi\b/.test(screen), "no engine names anywhere");
+	assert.equal((screen.match(/Default/g) ?? []).length, 1, "one Default");
+	assert.match(screen, / 1\/7 /);
 
 	for (const k of "/gpt-5.5 codex") picker.handleInput(k);
 	picker.handleInput("\r");
@@ -296,7 +297,7 @@ test(":model lists every ready engine's models under its name; a GPT model from 
 	assert.equal(s.chosenModel, undefined, "the Claude agent keeps its model");
 	assert.equal(app.preferredEngine, "codex");
 	assert.equal(app.newAgentModel.codex, "gpt-5.5-codex");
-	assert.match(app.message, /'racer' stays on Claude Code \(its conversation lives there\) · new agents: Codex · GPT-5\.5 Codex · :new <task> starts one/);
+	assert.match(app.message, /'racer' keeps its model \(its conversation can't move\) · new agents use GPT-5\.5 Codex · :new <task> starts one/);
 
 	// typed, the same way; and the agent's own engine without a prefix
 	ex("model codex:gpt-5.5");
@@ -305,7 +306,7 @@ test(":model lists every ready engine's models under its name; a GPT model from 
 	await tick();
 	assert.equal(s.chosenModel, "claude-haiku-5-5");
 
-	// it opens on the agent's model; j steps over the Codex heading to its first model
+	// it opens on the agent's model; j goes on to the first GPT model
 	ex("model");
 	await tick();
 	const p2 = overlays.at(-1);

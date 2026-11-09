@@ -1144,17 +1144,18 @@ export class App implements Component {
 		if (other && other[1] !== t.engine) return this.chooseOtherEngine(other[1] as EngineId, other[2], t);
 		if (other) model = other[2];
 		const value = model === "default" ? undefined : model;
+		const name = value ? modelLabel(value) : "default";
 		if (!t.session) {
 			if (value) this.newAgentModel[t.engine] = value;
 			else delete this.newAgentModel[t.engine];
-			this.setMessage(`model for ${t.label}: ${model}`, "ModeMsg");
+			this.setMessage(`model for new agents: ${name}`, "ModeMsg");
 			return;
 		}
 		const s = t.session;
 		Promise.resolve(s.setModel(value))
 			.then(() => {
 				this.persist(s);
-				this.setMessage(`model for ${t.label}: ${model} (from the next prompt)`, "ModeMsg");
+				this.setMessage(`model for '${s.name}': ${name} (from the next prompt)`, "ModeMsg");
 				this.tui.requestRender();
 			})
 			.catch((err) => {
@@ -1171,9 +1172,9 @@ export class App implements Component {
 		this.preferredEngine = engine;
 		if (model === "default") delete this.newAgentModel[engine];
 		else this.newAgentModel[engine] = model;
-		const name = model === "default" ? `${ENGINE_NAMES[engine]}'s default model` : modelLabel(model);
-		const stays = t.session ? `'${t.session.name}' stays on ${ENGINE_NAMES[t.session.engine]} (its conversation lives there) · ` : "";
-		this.setMessage(`${stays}new agents: ${ENGINE_NAMES[engine]} · ${name} · :new <task> starts one`, "ModeMsg");
+		const name = model === "default" ? "the default model" : modelLabel(model);
+		const stays = t.session ? `'${t.session.name}' keeps its model (its conversation can't move) · ` : "";
+		this.setMessage(`${stays}new agents use ${name} · :new <task> starts one`, "ModeMsg");
 		this.repaint();
 	}
 
@@ -1184,12 +1185,12 @@ export class App implements Component {
 	private async allModelChoices(t: ReturnType<App["modelTarget"]>): Promise<PickerChoice[]> {
 		const others = (["claude", "codex", "opencode", "pi"] as EngineId[]).filter((e) => e !== t.engine && this.engines?.find((x) => x.id === e)?.connected);
 		const lists = await Promise.all([t.engine, ...others].map((e) => this.modelChoices(e).catch(() => [] as PickerChoice[])));
+		// one plain list: names and ids, no engine headings
 		return lists.flatMap((list, k) => {
 			const engine = k === 0 ? t.engine : others[k - 1];
-			const group = k === 0 ? (t.session ? `${ENGINE_NAMES[engine]} · this agent` : ENGINE_NAMES[engine]) : t.session ? `${ENGINE_NAMES[engine]} · starts new agents there` : ENGINE_NAMES[engine];
 			return list
 				.filter((c) => k === 0 || c.value !== "default")
-				.map((c) => ({ ...c, value: k === 0 ? c.value : `${engine}:${c.value}`, group: others.length ? group : undefined }));
+				.map((c) => ({ value: k === 0 ? c.value : `${engine}:${c.value}`, label: c.label, note: c.value === "default" ? undefined : c.value }));
 		});
 	}
 
@@ -1260,7 +1261,7 @@ export class App implements Component {
 				? ((t.session as { chosenModel?: string }).chosenModel ?? "default")
 				: t.session.model
 			: (this.newAgentModel[t.engine] ?? "default");
-		this.openChoices(`Model · ${t.label}`, this.allModelChoices(t), current, true, (v) => this.chooseModel(v, t), { rows: 12 });
+		this.openChoices(t.session ? `Model · '${t.session.name}'` : "Model · new agents", this.allModelChoices(t), current, true, (v) => this.chooseModel(v, t), { rows: 12 });
 	}
 
 	/** `:effort`: the reasoning effort / thinking levels the engine accepts. */
