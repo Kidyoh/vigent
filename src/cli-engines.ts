@@ -322,10 +322,148 @@ export const opencodeAdapter: CliAdapter = {
 	},
 };
 
+// ---------------------------------------------------------------------------
+// Gemini CLI: gemini -o stream-json -p <prompt>
+// (events: init, message, tool_use, tool_result, error, result; see gemini-cli's
+// packages/core/src/output/types.ts)
+// ---------------------------------------------------------------------------
+
+export const geminiAdapter: CliAdapter = {
+	id: "gemini",
+	bin: ENGINE_BINS.gemini,
+	// file edits go ahead; other tools follow your Gemini CLI settings (headless can't ask)
+	defaultArgs: ["--approval-mode", "auto_edit"],
+	args(prompt, o) {
+		return [
+			"--output-format",
+			"stream-json",
+			...(o.extraArgs ?? this.defaultArgs),
+			...(o.model ? ["--model", o.model] : []),
+			...(o.resumeId ? ["--resume", o.resumeId] : []),
+			"--prompt",
+			prompt,
+		];
+	},
+	parser() {
+		return (e) => {
+			if (!e || typeof e !== "object") return [];
+			const out: CliEvent[] = [];
+			switch (e.type) {
+				case "init":
+					if (e.session_id) out.push({ type: "session", id: e.session_id });
+					if (e.model) out.push({ type: "model", model: e.model });
+					break;
+				case "message":
+					if (e.role === "assistant" && typeof e.content === "string") out.push(e.delta ? { type: "text_delta", text: e.content } : { type: "text", text: e.content });
+					break;
+				case "tool_use":
+					out.push({ type: "tool", id: e.tool_id, name: String(e.tool_name ?? "tool"), summary: summarize(e.parameters) });
+					break;
+				case "tool_result":
+					out.push({ type: "tool_result", id: e.tool_id, output: String(e.output ?? e.error?.message ?? e.status ?? "") });
+					break;
+				case "error":
+					if (e.severity === "error" && e.message) out.push({ type: "error", message: String(e.message) });
+					break;
+				case "result": {
+					const st = e.stats ?? {};
+					const tokens = st.total_tokens ?? (st.input_tokens ?? 0) + (st.output_tokens ?? 0);
+					if (tokens) out.push({ type: "usage", tokens });
+					const ok = e.status === "success";
+					out.push({ type: "done", ok, ...(ok ? {} : { error: String(e.error?.message ?? "failed") }) });
+					break;
+				}
+			}
+			return out;
+		};
+	},
+};
+
+// ---------------------------------------------------------------------------
+// Cursor CLI: cursor-agent -p --output-format stream-json
+// (events: system/init, user, assistant, tool_call started/completed, result)
+// ---------------------------------------------------------------------------
+
+/** Cursor names a tool call by its key: { readToolCall: {...} } is "read"; others are { function: { name } }. */
+function cursorTool(call: any): { name: string; args: any; result: any } {
+	if (call?.function) {
+		let args = call.function.arguments;
+		try {
+			if (typeof args === "string") args = JSON.parse(args);
+		} catch {
+			// keep the string
+		}
+		return { name: String(call.function.name ?? "tool"), args, result: call.result };
+	}
+	const key = Object.keys(call ?? {}).find((k) => k.endsWith("ToolCall")) ?? Object.keys(call ?? {})[0] ?? "tool";
+	const body = call?.[key] ?? {};
+	return { name: key.replace(/ToolCall$/, ""), args: body.args, result: body.result };
+}
+
+export const cursorAdapter: CliAdapter = {
+	id: "cursor",
+	bin: ENGINE_BINS.cursor,
+	// the agent works in its own worktree: let it edit and run commands there (headless can't ask)
+	defaultArgs: ["--force"],
+	args(prompt, o) {
+		return [
+			"--print",
+			"--output-format",
+			"stream-json",
+			...(o.extraArgs ?? this.defaultArgs),
+			...(o.model ? ["--model", o.model] : []),
+			...(o.resumeId ? ["--resume", o.resumeId] : []),
+			prompt,
+		];
+	},
+	parser() {
+		return (e) => {
+			if (!e || typeof e !== "object") return [];
+			const out: CliEvent[] = [];
+			switch (e.type) {
+				case "system":
+					if (e.subtype === "init") {
+						if (e.session_id) out.push({ type: "session", id: e.session_id });
+						if (e.model) out.push({ type: "model", model: e.model });
+					}
+					break;
+				case "assistant": {
+					const text = contentOf(e.message)
+						.filter((b: any) => b?.type === "text" && b.text)
+						.map((b: any) => b.text)
+						.join("");
+					// with --stream-partial-output, pieces carry timestamp_ms; the flushes after them repeat the text
+					if (text) out.push(e.timestamp_ms && !e.model_call_id ? { type: "text_delta", text } : { type: "text", text });
+					break;
+				}
+				case "tool_call": {
+					const t = cursorTool(e.tool_call);
+					if (e.subtype === "started") out.push({ type: "tool", id: e.call_id, name: t.name, summary: summarize(t.args) });
+					else if (e.subtype === "completed") {
+						const r = t.result;
+						const output = r?.success?.content ?? r?.success?.stdout ?? r?.error?.message ?? (r ? JSON.stringify(r.success ?? r) : "");
+						out.push({ type: "tool_result", id: e.call_id, output: String(output) });
+					}
+					break;
+				}
+				case "result": {
+					if (e.session_id) out.push({ type: "session", id: e.session_id });
+					const ok = !e.is_error && e.subtype === "success";
+					out.push({ type: "done", ok, ...(ok ? {} : { error: String(e.result ?? e.subtype ?? "failed") }) });
+					break;
+				}
+			}
+			return out;
+		};
+	},
+};
+
 export const CLI_ADAPTERS: Record<CliEngineId, CliAdapter> = {
 	claude: claudeAdapter,
 	codex: codexAdapter,
 	opencode: opencodeAdapter,
+	gemini: geminiAdapter,
+	cursor: cursorAdapter,
 };
 
 /**
@@ -612,6 +750,14 @@ export class CliSession extends Session {
 				buf = "";
 				const last = this.items.at(-1);
 				if (last?.kind === "agent" && last.streaming) last.text = last.text.trimEnd();
+			} else if (buf.trim().startsWith("{")) {
+				// the last event may not end with a newline
+				try {
+					for (const ev of parse(JSON.parse(buf.trim()))) handle(ev);
+				} catch {
+					// a cut-off line: nothing to read
+				}
+				buf = "";
 			}
 			this.endStreaming();
 			this.refreshStat(0);

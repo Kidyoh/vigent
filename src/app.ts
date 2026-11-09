@@ -3632,7 +3632,7 @@ const EX_HELP: [string, string][] = [
 	[":checkhealth", "which engines are installed and signed in"],
 	[":model [name]", "pick the agent's model (no agent: for new agents)"],
 	[":effort [level]", "pick its reasoning effort: low … max (pi: thinking level)"],
-	[":engine [name]", "pick the engine new agents run on: auto, pi, claude, codex, opencode"],
+	[":engine [name]", "pick the engine new agents run on: auto, or any engine :checkhealth lists"],
 	[":settings", "theme, look, engine, worktrees and keys in one place (w saves)"],
 	[":w [file]", "save the transcript as Markdown"],
 	[":worktrees", "list agent worktrees"],

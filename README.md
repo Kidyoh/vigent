@@ -88,7 +88,7 @@ Bump `version` in package.json, merge, then push a matching tag (`git tag v0.2.0
 
 Copies go to the system clipboard through the terminal (OSC 52), so they work over SSH too. `:help` lists every active key, including yours.
 
-## Engines: pi, Claude Code, Codex, OpenCode
+## Engines: Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI, pi, and yours
 
 Each engine is an agent you install yourself: vigent runs it as installed, in the agent's worktree, so each one uses its own login and settings, and runs its own agent loop (tools, retries, context). vigent is the screen around them. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected. If `ANTHROPIC_API_KEY` is set and Claude Code is also signed in with a Claude account, vigent runs Claude Code without that variable, so it uses your account (a key that isn't scoped to a workspace, or is out of credit, would otherwise fail every request). `:checkhealth` says so: *signed in (Claude account; ANTHROPIC_API_KEY left out)*.
 
@@ -105,7 +105,11 @@ The sidebar's ENGINES block shows each one: `●` signed in, `◐` installed but
 | `claude` | `claude -p --output-format stream-json` | `--permission-mode acceptEdits` |
 | `codex` | `codex exec --json` (`exec resume` to continue) | `-c sandbox_mode="workspace-write"` |
 | `opencode` | `opencode run --format json --dir <worktree>` | none |
+| `gemini` | `gemini --output-format stream-json --prompt …` (`--resume <session>` to continue) | `--approval-mode auto_edit` |
+| `cursor` | `cursor-agent --print --output-format stream-json …` (`--resume <chat>` to continue) | `--force` (the agent works in its own worktree) |
 | `pi` | `pi --mode rpc` (one per agent, kept running) | none |
+
+Anything else that takes a prompt (Amp, Copilot CLI, Aider, Goose, Qwen Code…) is a few lines of config; [docs/config.md](https://github.com/farming-labs/vigent/blob/main/docs/config.md#your-own-engines) has them ready to copy.
 
 **Model and effort:** `:model` (`<Space>M`) opens one plain list of every model by name and version (`Claude Fable 5.1`, `Claude Opus 5.5`, `GPT-5.5 Codex`…) with its id beside it, from every engine that's signed in (Codex's catalog comes from `codex debug models`, OpenCode's from `opencode models`, pi's from `pi --list-models`). An open agent keeps its engine, so a model from another engine is used for new agents. In the picker, `j`/`k` move, `g`/`G` jump to the top or bottom, Enter picks and `q` or Esc closes. Press `/` to search, or to type any model name. `:effort` (`<Space>R`) sets the reasoning effort (pi: thinking level). Both apply from the next prompt, show in the winbar and survive a restart. With no agent open, they set the defaults for new agents.
 
@@ -114,10 +118,10 @@ Change the arguments or the model per engine in `[engines.<id>]` ([docs/config.m
 **Your own engines:** any other agent CLI that takes a prompt can be an engine too. Give it a table with a `command` (`{prompt}` is where the prompt goes) and it shows up in the sidebar, `:engine`, `:model` and `--engine` like the rest. By default what it prints is the reply; a CLI that prints Claude Code's, Codex's or OpenCode's JSON gets tool calls and costs as well ([details](https://github.com/farming-labs/vigent/blob/main/docs/config.md#your-own-engines)):
 
 ```toml
-[engines.gemini]
-name = "Gemini CLI"
-command = ["gemini", "--yolo", "-p", "{prompt}"]
-model_args = ["-m", "{model}"]
+[engines.aider]
+name = "Aider"
+command = ["aider", "--yes-always", "--message", "{prompt}"]
+model_args = ["--model", "{model}"]
 ```
 
 **Permissions:** with `-p`, Claude Code can't stop to ask before running a command it isn't allowed, so it refuses it (for example `gh` or `cargo` under `acceptEdits`). vigent shows what was refused. You can allow commands up front with `[engines.claude] allow = ["Bash(gh:*)"]`. Or opt in with `ask = true`: vigent then asks **allow once / always allow / no** and runs the agent again with the permission ([details](https://github.com/farming-labs/vigent/blob/main/docs/config.md#when-claude-code-is-refused-a-tool)).

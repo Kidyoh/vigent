@@ -48,9 +48,9 @@ test("[engines.<id>] with a command defines an engine; engine = can name it befo
 	});
 	assert.deepEqual(warnings, [
 		`config [engines.broken]: 'command' should be the program and its arguments, e.g. ["gemini", "-p", "{prompt}"]`,
-		`config [engines.odd]: 'output' should be "text", "claude", "codex" or "opencode"`,
+		`config [engines.odd]: 'output' should be "text", "claude", "codex", "opencode", "gemini", "cursor"`,
 		"config [engines.odd]: unknown option 'color' (name, command, output, model_args, models, resume_args)",
-		"config: unknown engine [engines.nope] (pi, claude, codex, opencode, or give it a command = [...] to add your own)",
+		"config: unknown engine [engines.nope] (pi, claude, codex, opencode, gemini, cursor, or give it a command = [...] to add your own)",
 	]);
 
 	// in a project's .vigent.toml, a command waits for :trust like hooks do

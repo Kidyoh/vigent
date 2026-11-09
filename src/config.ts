@@ -68,7 +68,7 @@ export interface EngineOptions {
 export interface Config {
 	theme?: string;
 	model?: string;
-	/** engine for new agents: pi, claude, codex, opencode, or auto (default) */
+	/** engine for new agents: a built-in (claude, codex, opencode, gemini, cursor, pi), one from [engines], or auto (default) */
 	engine?: EngineId | "auto";
 	engines: Partial<Record<EngineId, EngineOptions>>;
 	leader?: string;
@@ -155,7 +155,7 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 				break;
 			case "engine":
 				if (typeof value === "string" && (value === "auto" || isEngineId(value))) config.engine = value;
-				else warnings.push(`${where}: 'engine' should be "auto", "pi", "claude", "codex", "opencode" or an engine from [engines]`);
+				else warnings.push(`${where}: 'engine' should be "auto", ${ENGINE_IDS.map((e) => `"${e}"`).join(", ")} or an engine from [engines]`);
 				break;
 			case "engines":
 				if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -164,7 +164,8 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 				}
 				for (const [id, opts] of Object.entries(value)) {
 					// a table with a command defines an engine of your own
-					if (opts && typeof opts === "object" && !Array.isArray(opts) && "command" in opts && !(ENGINE_IDS as string[]).includes(id)) {
+					// (with a built-in's name, it replaces that one: your own wrapper for it, say)
+					if (opts && typeof opts === "object" && !Array.isArray(opts) && "command" in opts) {
 						if (!mayRun) {
 							gated.push(`engines.${id}.command`);
 							continue;
@@ -174,7 +175,7 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 						continue;
 					}
 					if (!isEngineId(id)) {
-						warnings.push(`${where}: unknown engine [engines.${id}] (pi, claude, codex, opencode, or give it a command = [...] to add your own)`);
+						warnings.push(`${where}: unknown engine [engines.${id}] (${ENGINE_IDS.join(", ")}, or give it a command = [...] to add your own)`);
 						continue;
 					}
 					if (CUSTOM_ENGINES.has(id)) continue; // defined above (a later file may set its model)
@@ -275,7 +276,7 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 	return { config, warnings, gated };
 }
 
-const OUTPUTS = ["text", "claude", "codex", "opencode"] as const;
+const OUTPUTS = ["text", "claude", "codex", "opencode", "gemini", "cursor"] as const;
 
 /** [engines.<id>] with a command: an agent CLI of your own. */
 function parseCustomEngine(id: string, raw: Record<string, unknown>, where: string, warnings: string[]): CustomEngine | undefined {
@@ -296,7 +297,7 @@ function parseCustomEngine(id: string, raw: Record<string, unknown>, where: stri
 		else if (k === "model_args" && strings(v)) e.modelArgs = v as string[];
 		else if (k === "models" && strings(v)) e.models = v as string[];
 		else if (k === "resume_args" && strings(v)) e.resumeArgs = v as string[];
-		else if (k === "output") warnings.push(`${where}: 'output' should be "text", "claude", "codex" or "opencode"`);
+		else if (k === "output") warnings.push(`${where}: 'output' should be ${OUTPUTS.map((o) => `"${o}"`).join(", ")}`);
 		else warnings.push(`${where}: ${k === "name" ? "'name' should be a string" : k === "model_args" || k === "models" || k === "resume_args" ? `'${k}' should be a list of strings` : `unknown option '${k}' (name, command, output, model_args, models, resume_args)`}`);
 	}
 	return e;

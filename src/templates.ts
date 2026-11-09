@@ -12,7 +12,7 @@
  * in config.toml with the same name replaces the built-in one.
  */
 import { EFFORTS } from "./choices.js";
-import { type EngineId, isEngineId } from "./engines.js";
+import { ENGINE_IDS, type EngineId, isEngineId } from "./engines.js";
 
 export interface Template {
 	name: string;
@@ -111,7 +111,7 @@ export function parseTemplates(value: unknown, warnings: string[]): Record<strin
 					break;
 				case "engine":
 					if (typeof v === "string" && isEngineId(v)) t.engine = v;
-					else warnings.push(`${where}: 'engine' should be "pi", "claude", "codex", "opencode" or an engine from [engines]`);
+					else warnings.push(`${where}: 'engine' should be ${ENGINE_IDS.map((e) => `"${e}"`).join(", ")} or an engine from [engines]`);
 					break;
 				case "worktree":
 					if (typeof v === "boolean") t.worktree = v;

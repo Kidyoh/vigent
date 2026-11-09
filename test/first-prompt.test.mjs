@@ -111,6 +111,8 @@ test("engines show at once as 'checking…' while their sign-in checks run", () 
 				["claude", true, false, true, "checking sign-in…"],
 				["codex", false, false, false, "not installed"],
 				["opencode", false, false, false, "not installed"],
+				["gemini", false, false, false, "not installed"],
+				["cursor", false, false, false, "not installed"],
 			],
 		);
 		const { app } = makeApp();

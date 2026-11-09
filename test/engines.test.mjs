@@ -126,7 +126,9 @@ else if (a === "login status") { console.error("Not logged in"); process.exit(1)
 
 	const engines = await detectEngines(env, 5000);
 	const by = Object.fromEntries(engines.map((e) => [e.id, e]));
-	assert.deepEqual(engines.map((e) => e.id), ["pi", "claude", "codex", "opencode"]);
+	assert.deepEqual(engines.map((e) => e.id), ["pi", "claude", "codex", "opencode", "gemini", "cursor"]);
+	assert.deepEqual([by.gemini.installed, by.gemini.install], [false, "npm install -g @google/gemini-cli"]);
+	assert.deepEqual([by.cursor.installed, by.cursor.connect], [false, "cursor-agent login"]);
 	assert.deepEqual([by.pi.installed, by.pi.connected, by.pi.detail, by.pi.install], [false, false, "not installed", "npm install -g @mariozechner/pi-coding-agent"], "pi is your own install, like the others");
 	assert.deepEqual(
 		[by.claude.installed, by.claude.connected, by.claude.version, by.claude.detail],
@@ -285,8 +287,8 @@ test("the app: engines in the sidebar and intro, :checkhealth, :new --engine", a
 
 	ex("new fix the race --engine opencode");
 	assert.match(app.message, /OpenCode isn't installed: npm install -g opencode-ai/);
-	ex("new fix the race --engine gemini");
-	assert.match(app.message, /unknown engine 'gemini'/);
+	ex("new fix the race --engine nope");
+	assert.match(app.message, /unknown engine 'nope'/);
 	ex("new fix the race --engine codex --model gpt-5");
 	assert.deepEqual(made.at(-1), { name: "fix the race", worktree: true, model: "gpt-5", engine: "codex" });
 	assert.match(app.message, /'fix the race' · Codex in this checkout/);
@@ -308,13 +310,13 @@ args = ["--permission-mode", "plan"]
 model = "opus"
 [engines.codex]
 model = 5
-[engines.gemini]
+[engines.nope]
 `,
 	);
 	const { config, warnings } = loadConfig(file);
 	assert.equal(config.engine, "codex");
 	assert.deepEqual(config.engines.claude, { args: ["--permission-mode", "plan"], model: "opus" });
-	assert.deepEqual(warnings, ["config [engines.codex]: 'model' should be a string", "config: unknown engine [engines.gemini] (pi, claude, codex, opencode, or give it a command = [...] to add your own)"]);
+	assert.deepEqual(warnings, ["config [engines.codex]: 'model' should be a string", "config: unknown engine [engines.nope] (pi, claude, codex, opencode, gemini, cursor, or give it a command = [...] to add your own)"]);
 	fs.writeFileSync(file, `engine = "gpt"\n`);
 	assert.match(loadConfig(file).warnings[0], /'engine' should be "auto", "pi"/);
 });

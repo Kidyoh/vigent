@@ -191,7 +191,7 @@ From the shell: `vigent worktree list` (with each worktree's backend), `vigent w
 
 ## `[engines]`
 
-Claude Code, Codex and OpenCode run as installed, each with its own login; vigent never reads their credentials. `:checkhealth` (or `:engines`) shows which are installed and signed in, and the command to connect the rest. One table per CLI:
+Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI and pi run as installed, each with its own login; vigent never reads their credentials. `:checkhealth` (or `:engines`) shows which are installed and signed in, and the command to connect the rest. One table per CLI:
 
 ```toml
 [engines.claude]
@@ -206,6 +206,13 @@ args = ["-c", 'sandbox_mode="workspace-write"']  # the default
 
 [engines.opencode]
 model = "anthropic/claude-sonnet-4-5"         # provider/model
+
+[engines.gemini]
+args = ["--approval-mode", "auto_edit"]       # the default (headless Gemini CLI can't ask)
+model = "pro"                                 # or flash, flash-lite, a full model name
+
+[engines.cursor]
+args = ["--force"]                            # the default: edits and commands in its worktree
 ```
 
 | Option | Meaning |
@@ -233,17 +240,17 @@ The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the 
 
 ### Your own engines
 
-Any agent CLI that takes a prompt on its command line can be an engine. Give a table a `command` and it becomes one, listed in the sidebar, `:engine`, `:checkhealth`, `:model`, templates and `--engine` like the built-in ones:
+Any agent CLI that takes a prompt on its command line can be an engine. Give a table a `command` and it becomes one, listed in the sidebar, `:engine`, `:checkhealth`, `:model`, templates and `--engine` like the built-in ones (a table with a built-in's name and a `command` replaces that one):
 
 ```toml
-engine = "gemini"                  # new agents use it
+engine = "aider"                   # new agents use it
 
-[engines.gemini]
-name = "Gemini CLI"                # how vigent shows it (default: the table's name)
-command = ["gemini", "--yolo", "-p", "{prompt}"]
+[engines.aider]
+name = "Aider"                     # how vigent shows it (default: the table's name)
+command = ["aider", "--yes-always", "--message", "{prompt}"]
 output = "text"                    # the default
-model_args = ["-m", "{model}"]     # added when an agent has a model
-models = ["gemini-2.5-pro", "gemini-2.5-flash"]   # offered by :model
+model_args = ["--model", "{model}"]   # added when an agent has a model
+models = ["sonnet", "gpt-5"]          # offered by :model
 
 [engines.my-agent]                 # a wrapper that prints Claude Code's stream-json
 command = ["my-agent", "--json"]
@@ -254,10 +261,33 @@ resume_args = ["--resume", "{id}"]
 | Option | Meaning |
 |---|---|
 | `command` | The program and its arguments, as a list. `{prompt}` is replaced by the prompt; without it, the prompt goes last. The program must be on your `PATH`. |
-| `output` | How vigent reads what it prints. `"text"`: everything it prints is the reply. `"claude"`, `"codex"` or `"opencode"`: it prints the same JSON events as that CLI (`claude -p --output-format stream-json` and friends, or a wrapper around them), so vigent also shows its tool calls, tokens and cost. |
+| `output` | How vigent reads what it prints. `"text"`: everything it prints is the reply. `"claude"`, `"codex"`, `"opencode"`, `"gemini"` or `"cursor"`: it prints the same JSON events as that CLI (`claude -p --output-format stream-json` and friends, or a wrapper around them), so vigent also shows its tool calls, tokens and cost. |
 | `model_args` | Arguments added when the agent has a model, with `{model}` replaced by it. |
 | `models` | Models `:model` offers for this engine, besides its own default. |
 | `resume_args` | With a JSON `output`: arguments that continue the CLI's conversation, with `{id}` replaced by the id it reported (`["--resume", "{id}"]` for Claude Code's format). Follow-ups and a restarted vigent then pick the conversation up. |
+
+Ready to copy (check each CLI's own help for the flags your version takes):
+
+```toml
+[engines.amp]                      # Amp: its --stream-json follows Claude Code's format
+name = "Amp"
+command = ["amp", "--execute", "{prompt}", "--stream-json"]
+output = "claude"
+
+[engines.copilot]                  # GitHub Copilot CLI, programmatic mode
+name = "Copilot CLI"
+command = ["copilot", "-p", "{prompt}", "--allow-all"]
+model_args = ["--model", "{model}"]
+
+[engines.goose]
+name = "Goose"
+command = ["goose", "run", "-t", "{prompt}"]
+
+[engines.qwen]                     # Qwen Code
+name = "Qwen Code"
+command = ["qwen", "--yolo", "-p", "{prompt}"]
+model_args = ["-m", "{model}"]
+```
 
 Each prompt runs the command once, in the agent's worktree, with your environment. Without `resume_args` each prompt starts a fresh conversation, unless the CLI keeps its own history. vigent can't tell whether a custom CLI is signed in, so it counts as ready when its program is on your `PATH`.
 

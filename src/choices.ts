@@ -62,6 +62,9 @@ export const EFFORTS: Record<EngineId, string[]> = {
 	// what Codex's models take between them; each model's own levels come from `codex debug models`
 	codex: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
 	opencode: ["minimal", "low", "medium", "high", "max"],
+	// these CLIs take no effort setting of their own
+	gemini: [],
+	cursor: [],
 };
 
 export function effortChoices(engine: EngineId): Choice[] {
@@ -81,6 +84,9 @@ const PI_KEYS: Record<string, string[]> = {
 };
 
 export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = process.env): Promise<Choice[]> {
+	// one from your config (it may reuse a built-in's name): its own choice, and the models it lists
+	const custom = CUSTOM_ENGINES.get(engine);
+	if (custom) return [{ value: "default", label: "Default", note: `${ENGINE_NAMES[engine] ?? engine}'s own choice` }, ...(custom.models ?? []).map((value) => ({ value, label: value }))];
 	switch (engine) {
 		case "claude":
 			return [
@@ -101,6 +107,15 @@ export async function modelChoices(engine: EngineId, env: NodeJS.ProcessEnv = pr
 				{ value: "default", label: "Default", note: "OpenCode's own choice" },
 				...(await opencodeModels(env)).map((value) => ({ value, label: modelLabel(value), note: value })),
 			];
+		case "gemini":
+			return [
+				{ value: "default", label: "Default", note: "Gemini CLI's own choice (auto)" },
+				{ value: "pro", label: "Gemini Pro", note: "pro: Gemini CLI's alias for its Pro model" },
+				{ value: "flash", label: "Gemini Flash", note: "flash" },
+				{ value: "flash-lite", label: "Gemini Flash Lite", note: "flash-lite" },
+			];
+		case "cursor":
+			return [{ value: "default", label: "Default", note: "Cursor CLI's own choice (type any model name with /)" }];
 		case "pi": {
 			// what your pi can use now: its providers with a key or login, and models.json's
 			const models = await piModels(env);

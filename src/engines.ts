@@ -13,10 +13,10 @@ import * as path from "node:path";
 import { PI_BIN, PI_INSTALL } from "./pi-cli.js";
 
 /** the engines vigent knows by itself */
-export type BuiltinEngineId = "pi" | "claude" | "codex" | "opencode";
+export type BuiltinEngineId = "pi" | "claude" | "codex" | "opencode" | "gemini" | "cursor";
 /** a built-in engine, or one defined in config ([engines.<id>] with a command) */
 export type EngineId = BuiltinEngineId | (string & {});
-export const ENGINE_IDS: BuiltinEngineId[] = ["pi", "claude", "codex", "opencode"];
+export const ENGINE_IDS: BuiltinEngineId[] = ["pi", "claude", "codex", "opencode", "gemini", "cursor"];
 
 /**
  * An agent CLI defined in config:
@@ -35,7 +35,7 @@ export interface CustomEngine {
 	/** the program and its arguments; {prompt} is the prompt (added at the end without it), {model} the model */
 	command: string[];
 	/** how to read what it prints: plain text, or the JSON events of a CLI vigent knows */
-	output: "text" | "claude" | "codex" | "opencode";
+	output: "text" | "claude" | "codex" | "opencode" | "gemini" | "cursor";
 	/** added when a model is picked, e.g. ["-m", "{model}"] */
 	modelArgs?: string[];
 	/** offered by :model */
@@ -103,18 +103,24 @@ export const ENGINE_NAMES: Record<EngineId, string> = {
 	claude: "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+	gemini: "Gemini CLI",
+	cursor: "Cursor CLI",
 };
 
 export const ENGINE_BINS: Record<Exclude<EngineId, "pi">, string> = {
 	claude: "claude",
 	codex: "codex",
 	opencode: "opencode",
+	gemini: "gemini",
+	cursor: "cursor-agent",
 };
 
 const INSTALL: Record<Exclude<EngineId, "pi">, string> = {
 	claude: "npm install -g @anthropic-ai/claude-code",
 	codex: "npm install -g @openai/codex",
 	opencode: "npm install -g opencode-ai",
+	gemini: "npm install -g @google/gemini-cli",
+	cursor: "curl https://cursor.com/install -fsS | bash",
 };
 
 const PI_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY"];
@@ -145,7 +151,7 @@ export function piConnected(env: NodeJS.ProcessEnv = process.env): boolean {
 	return detectPi(env).connected;
 }
 
-const CLI_IDS = ["claude", "codex", "opencode"] as const;
+const CLI_IDS = ["claude", "codex", "opencode", "gemini", "cursor"] as const;
 
 /**
  * The engine new agents use when none is given ("auto"): the first signed-in
@@ -301,6 +307,34 @@ async function detectOpenCode(env: NodeJS.ProcessEnv, timeoutMs: number): Promis
 	return { ...base, installed: true, connected: false, version, detail: "no providers connected" };
 }
 
+async function detectGemini(env: NodeJS.ProcessEnv, timeoutMs: number): Promise<EngineInfo> {
+	const base = { id: "gemini" as const, name: ENGINE_NAMES.gemini, install: INSTALL.gemini, connect: "run gemini once and sign in (or export GEMINI_API_KEY)" };
+	const v = await run("gemini", ["--version"], timeoutMs, env);
+	if (v.code === null) return { ...base, installed: false, connected: false, detail: "not installed" };
+	const version = firstVersion(v.stdout);
+	const key = ["GEMINI_API_KEY", "GOOGLE_API_KEY"].find((k) => env[k]) ?? (env.GOOGLE_GENAI_USE_VERTEXAI ? "Vertex AI" : undefined);
+	const home = env.HOME ?? os.homedir();
+	// a Google sign-in leaves its credentials in ~/.gemini; vigent only checks the file is there
+	const signedIn = fs.existsSync(path.join(home, ".gemini", "oauth_creds.json")) || fs.existsSync(path.join(home, ".gemini", "google_accounts.json"));
+	if (key || signedIn) return { ...base, installed: true, connected: true, version, detail: key ? `using ${key}` : "signed in (Google account)", connect: undefined };
+	return { ...base, installed: true, connected: false, version, detail: "not signed in" };
+}
+
+async function detectCursor(env: NodeJS.ProcessEnv, timeoutMs: number): Promise<EngineInfo> {
+	const base = { id: "cursor" as const, name: ENGINE_NAMES.cursor, install: INSTALL.cursor, connect: "cursor-agent login" };
+	const v = await run("cursor-agent", ["--version"], timeoutMs, env);
+	if (v.code === null) return { ...base, installed: false, connected: false, detail: "not installed" };
+	const version = firstVersion(v.stdout);
+	if (env.CURSOR_API_KEY) return { ...base, installed: true, connected: true, version, detail: "using CURSOR_API_KEY", connect: undefined };
+	const s = await run("cursor-agent", ["status"], timeoutMs, env);
+	const text = strip(`${s.stdout}\n${s.stderr}`);
+	if (s.ok && /logged in|signed in|authenticated/i.test(text) && !/not (logged|signed) in|unauthenticated/i.test(text)) {
+		const who = /(?:as|account:?)\s+(\S+@\S+)/i.exec(text)?.[1];
+		return { ...base, installed: true, connected: true, version, detail: who ? `signed in as ${who}` : "signed in", connect: undefined };
+	}
+	return { ...base, installed: true, connected: false, version, detail: "not signed in" };
+}
+
 /**
  * What's known instantly, without running anything: which CLIs are on PATH,
  * and pi's keys. Shown at startup while detectEngines() asks the CLIs.
@@ -308,7 +342,7 @@ async function detectOpenCode(env: NodeJS.ProcessEnv, timeoutMs: number): Promis
 export function quickEngines(env: NodeJS.ProcessEnv = process.env): EngineInfo[] {
 	return [
 		detectPi(env),
-		...(["claude", "codex", "opencode"] as const).map((id): EngineInfo => {
+		...CLI_IDS.filter((id) => !CUSTOM_ENGINES.has(id)).map((id): EngineInfo => {
 			const installed = onPath(ENGINE_BINS[id], env);
 			return {
 				id,
@@ -328,9 +362,18 @@ export function quickEngines(env: NodeJS.ProcessEnv = process.env): EngineInfo[]
 export async function detectEngines(env: NodeJS.ProcessEnv = process.env, timeoutMs = 8000): Promise<EngineInfo[]> {
 	return Promise.all([
 		Promise.resolve(detectPi(env)),
-		detectClaude(env, timeoutMs),
-		detectCodex(env, timeoutMs),
-		detectOpenCode(env, timeoutMs),
+		...(
+			[
+				["claude", detectClaude],
+				["codex", detectCodex],
+				["opencode", detectOpenCode],
+				["gemini", detectGemini],
+				["cursor", detectCursor],
+			] as const
+		)
+			// a [engines.<id>] with a command replaces the built-in one
+			.filter(([id]) => !CUSTOM_ENGINES.has(id))
+			.map(([, detect]) => detect(env, timeoutMs)),
 		...[...CUSTOM_ENGINES.values()].map((e) => Promise.resolve(customInfo(e, env))),
 	]);
 }
