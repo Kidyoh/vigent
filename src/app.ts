@@ -2521,8 +2521,11 @@ export class App implements Component {
 	// ------------------------------------------------------------------ scroll & search
 
 	/** transcript rows: the screen minus winbar, statusline and command line */
+	/** an empty row between the transcript's last line and the statusline */
+	private static readonly BOTTOM_PAD = 1;
+
 	private contentHeight(): number {
-		return Math.max(1, this.terminal.rows - 3);
+		return Math.max(1, this.terminal.rows - 3 - App.BOTTOM_PAD);
 	}
 
 	private scrollBy(delta: number) {
