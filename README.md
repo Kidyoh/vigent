@@ -26,7 +26,7 @@ Press `i`, type what you want done, and press Enter. An agent starts on it in it
 
 ## What it does
 
-- **Many agents, one screen.** A sidebar of agents, switch with `1`–`9` or `]s` / `[s`. Each one gets a bell or desktop notification when it finishes or needs you.
+- **Many agents, one screen.** A sidebar of agents, switch with `<Space>1`–`9` or `]s` / `[s`. Each one gets a bell or desktop notification when it finishes or needs you.
 - **A worktree per agent.** Agents never touch your checkout or each other's files. With riftri, worktrees share copy-on-write storage, so ten agents cost about one checkout of disk.
 - **Review and land.** `:diff` (or side by side), `:review` to drop hunks you don't want, then `:merge` or `:pr`.
 - **Your agents, as installed.** Each runs its own loop with its own login; vigent never reads credentials. `:checkhealth` shows what's installed and signed in.

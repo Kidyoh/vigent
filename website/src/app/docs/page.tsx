@@ -222,7 +222,7 @@ export default function DocsPage() {
           <KeyRow k="i  a  o">type a prompt for the focused agent</KeyRow>
           <KeyRow k="j k gg G">scroll the transcript</KeyRow>
           <KeyRow k="{  }">jump between messages</KeyRow>
-          <KeyRow k="]s [s 1–9">switch agents</KeyRow>
+          <KeyRow k="]s [s <Space>1–9">switch agents</KeyRow>
           <KeyRow k="<Space>e">
             focus the sessions sidebar, like neo-tree: <K>j</K>/<K>k</K> pick, <K>a</K> new, <K>dd</K> kill, <K>Esc</K> back
           </KeyRow>

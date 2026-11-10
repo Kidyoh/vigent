@@ -47,10 +47,11 @@ test("an agent you're not looking at finishes: bell, a message, and a mark in th
 	b.setState("idle");
 	assert.deepEqual(alerts, ["\x07"]);
 	assert.ok(app.unread.has(b));
-	assert.match(app.message, /'add retries' finished · 2 or \]s to open it/);
+	assert.match(app.message, /'add retries' finished · <Space>2 or \]s to open it/);
 	assert.match(plain(app.render(120)), /add retries ◆/);
 
-	app.handleInput("2"); // open it
+	app.handleInput(" "); // open it
+	app.handleInput("2");
 	assert.equal(app.focusedSession, b);
 	assert.ok(!app.unread.has(b));
 	assert.doesNotMatch(plain(app.render(120)), /◆/);

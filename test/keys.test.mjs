@@ -207,7 +207,6 @@ test("docs/config.md documents every action and built-in key", async () => {
 	for (const name of Object.keys(ACTIONS)) assert.ok(doc.includes(`\`${name}`), `docs/config.md is missing action ${name}`);
 	for (const [mode, keys] of Object.entries(DEFAULT_KEYS)) {
 		for (const lhs of Object.keys(keys)) {
-			if (/^\d$/.test(lhs)) continue; // documented as 1 … 9
 			assert.ok(doc.includes(`\`${lhs}\``), `docs/config.md is missing ${mode} key ${lhs}`);
 		}
 	}

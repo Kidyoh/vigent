@@ -90,7 +90,7 @@ Each option can also be changed while vigent runs, with vim's `:set` syntax: `:s
 | `sidebar` | `true` | show the session sidebar (hidden anyway on narrow terminals) |
 | `sidebar_width` | `30` | sidebar width in columns, 16–80 |
 | `sidebar_position` | `"left"` | `"right"` puts the sidebar on the right; the window keys follow it (`<C-l>` goes to it, `<C-h>` back). Alias `sbp` |
-| `number` | `true` | session numbers in the sidebar (they match the `1`–`9` keys) |
+| `number` | `true` | session numbers in the sidebar (they match the `<leader>1`–`9` keys) |
 | `tilde` | `true` | `~` on empty sidebar rows |
 | `icons` | `"unicode"` | `"ascii"` swaps every glyph for plain ASCII |
 | `timeoutlen` | `1000` | ms to wait for the next key of a mapping (vim's `'timeoutlen'`, alias `tm`) |
@@ -491,6 +491,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `scroll.page_down`, `scroll.page_up` | scroll a page |
 | `scroll.top`, `scroll.bottom` | jump to the top / bottom of the transcript |
 | `session.next`, `session.prev` | next / previous session |
+| `session.tab` | next session, or session N with a count (`3gt`) |
 | `session.alternate` | the session you were on before |
 | `session.goto N` | session N, e.g. `"session.goto 3"` |
 | `session.new` | spawn a new agent |
@@ -513,6 +514,17 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `app.redraw` | redraw the screen |
 | `window.left` | the window to the left (like `<C-w>h`): the sessions sidebar, or the transcript when the sidebar is on the right |
 | `window.right` | the window to the right (like `<C-w>l`): back to the transcript, or the sidebar when it's on the right; with nowhere to go, redraw the screen |
+| `window.down` / `window.up` | the window below / above |
+| `window.vsplit` / `window.split` | split the window side by side / one above the other |
+| `window.close` / `window.quit` / `window.only` | close this window / close it or quit if it's the last / close the others |
+| `window.next` / `window.prev` / `window.last` | next window (the sidebar counts as one) / previous / the one you were in last |
+| `window.top` / `window.bottom` | the first / last window |
+| `window.equal` | make all windows the same size |
+| `window.wider` / `window.narrower` / `window.taller` / `window.shorter` | resize by one column or row |
+| `window.max_width` / `window.max_height` | as wide / as tall as it can be |
+| `window.exchange` / `window.rotate` | swap what two windows show / swap the two halves of a split |
+| `cursor.page_down` / `cursor.page_up` | move the VISUAL cursor by a page |
+| `cursor.screen_top` / `cursor.screen_middle` / `cursor.screen_bottom` | move the VISUAL cursor within the window |
 | `app.quit` | quit vigent; refuses while agents are running, like vim's `:q` |
 | `app.quit_force` | quit even with agents running (`:q!`) |
 | `app.quit_hint` | explain how to quit |
@@ -534,7 +546,7 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `gg` / `G` | `scroll.top` / `scroll.bottom` |
 | `]s` / `[s` | `session.next` / `session.prev` |
 | `<C-^>` | `session.alternate` |
-| `1` … `9` | `session.goto 1` … `session.goto 9` |
+| `<leader>1` `<leader>2` `<leader>3` `<leader>4` `<leader>5` `<leader>6` `<leader>7` `<leader>8` `<leader>9` | `session.goto 1` … `session.goto 9` |
 | `za` / `zR` / `zM` | `fold.toggle` / `fold.open_all` / `fold.close_all` |
 | `n` / `N` | `search.next` / `search.prev` |
 | `{` / `}` | `message.prev` / `message.next` |
@@ -544,9 +556,28 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<C-c>` | `session.abort` |
 | `<C-l>` | `window.right` (from the sidebar back to the transcript; in the transcript, redraw. With `sidebar_position = "right"`, the two swap) |
 | `<C-h>` `<BS>` | `window.left` (most terminals send `<C-h>` as Backspace) |
-| `<C-w>h` | `window.left` |
-| `<C-w>l` | `window.right` |
-| `<C-w>w` | `sidebar.focus` (toggle) |
+| `<C-w>h` `<C-w><C-h>` | `window.left` |
+| `<C-w>l` `<C-w><C-l>` | `window.right` |
+| `<C-w>j` `<C-w><C-j>` `<C-j>` | `window.down` |
+| `<C-w>k` `<C-w><C-k>` `<C-k>` | `window.up` |
+| `<C-w>w` `<C-w><C-w>` | `window.next` (with one window, toggles the sidebar) |
+| `<C-w>W` | `window.prev` |
+| `<C-w>p` `<C-w><C-p>` | `window.last` |
+| `<C-w>t` / `<C-w>b` | `window.top` / `window.bottom` |
+| `<C-w>v` `<C-w><C-v>` | `window.vsplit` |
+| `<C-w>s` `<C-w>S` `<C-w><C-s>` `<leader>-` | `window.split` |
+| `<C-w>c` | `window.close` |
+| `<C-w>q` `<C-w><C-q>` | `window.quit` |
+| `<C-w>o` `<C-w><C-o>` | `window.only` |
+| `<C-w>=` | `window.equal` |
+| `<C-w>>` / `<C-w><lt>` | `window.wider` / `window.narrower` |
+| `<C-w>+` / `<C-w>-` | `window.taller` / `window.shorter` |
+| `<C-w>_` | `window.max_height` |
+| `<C-w>x` `<C-w><C-x>` | `window.exchange` |
+| `<C-w>r` `<C-w><C-r>` | `window.rotate` |
+| `<C-e>` `<C-n>` / `<C-y>` `<C-p>` | `scroll.down` / `scroll.up` |
+| `gt` / `gT` | `session.tab` / `session.prev` |
+| `zr` / `zm` | `fold.open_all` / `fold.close_all` |
 | `ZZ` / `ZQ` | `app.quit` / `app.quit_force` |
 | `q` | `app.quit_hint` |
 | `<leader>n` | `:new ` (type the task) |
@@ -565,12 +596,16 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<leader>R` | `:effort<CR>` (pick its reasoning effort) |
 | `<leader>E` | `:engine<CR>` (pick the engine new agents run on) |
 
+Also: `<C-w>|` is `window.max_width`, and `<leader>|` is `window.vsplit` (`<leader>-` is `window.split`).
+
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
 
 | Keys | Action |
 |---|---|
 | `j` `<Down>` / `k` `<Up>` | `cursor.down` / `cursor.up` |
 | `<C-d>` / `<C-u>` | `cursor.half_down` / `cursor.half_up` |
+| `<C-f>` `<PageDown>` / `<C-b>` `<PageUp>` | `cursor.page_down` / `cursor.page_up` |
+| `H` / `M` / `L` | `cursor.screen_top` / `cursor.screen_middle` / `cursor.screen_bottom` |
 | `gg` / `G` | `cursor.top` / `cursor.bottom` |
 | `y` | `visual.yank` |
 | `ib` | `visual.inner_block` |

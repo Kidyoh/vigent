@@ -151,7 +151,7 @@ export default function HomePage() {
         <L>If you know Neovim, you already know most of it.</L>
         <L />
         <KeyRow k="i">new agent: type a task, Enter</KeyRow>
-        <KeyRow k="]s  [s  1–9">switch agents</KeyRow>
+        <KeyRow k="]s  [s  <Space>1–9">switch agents</KeyRow>
         <KeyRow k="<Space>E">pick the engine</KeyRow>
         <KeyRow k="<Space>M">pick the model</KeyRow>
         <KeyRow k="<Space>e">sessions sidebar: j/k pick an agent</KeyRow>

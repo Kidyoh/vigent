@@ -59,7 +59,7 @@ test("built-in keys still work with no config", () => {
 	const { app, type } = makeApp();
 	type("]", "s");
 	assert.equal(app.focusIdx, 1);
-	type("3");
+	type(" ", "3");
 	assert.equal(app.focusIdx, 2);
 	type("\x1e");
 	assert.equal(app.focusIdx, 1, "Ctrl-^ goes back");
@@ -118,7 +118,7 @@ test(":help and :map open floating windows", () => {
 		.join("\n")
 		.replace(/\x1b\[[0-9;]*m/g, "");
 	assert.match(text, /NORMAL\s*│\s*│ \* <Space>t\s+pick a colorscheme/, "your mappings come first, marked");
-	assert.match(text, /1-9\s+jump to session N/);
+	assert.match(text, /<Space>1-9\s+jump to session N/);
 	ex("map");
 	assert.equal(overlays.length, 2);
 	type("q");

@@ -70,7 +70,7 @@ keys (NORMAL mode):
   i            prompt the focused agent        :new <task>     agent in its own worktree
   j/k gg G     scroll transcript               :kill[!]        stop it (! removes worktree)
   ctrl+d/u     half-page scroll                :colorscheme    pick a theme (live preview)
-  ]s [s 1-9    switch sessions                 :hi Group ...   change a highlight group
+  ]s [s gt     switch sessions                 :hi Group ...   change a highlight group
   za zM zR     fold/unfold tool output         :set nonumber   toggle ui options
   /pattern ?   search transcript               :diff           what the agent changed
   V y  yy yib  select and copy, last reply     :merge  :pr     land the agent's work
