@@ -1,7 +1,7 @@
 {
   "name": "@vigent/cli",
   "version": "0.7.0",
-  "description": "A vim-style terminal app for running coding agents side by side, each in its own git worktree. Built on pi.",
+  "description": "A vim-native terminal for running coding agents side by side, each in its own lightweight git worktree via riftri.",
   "keywords": [
     "vim",
     "neovim",
