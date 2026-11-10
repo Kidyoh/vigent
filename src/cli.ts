@@ -16,7 +16,7 @@ import { isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
-import { formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
+import { backendName, formatBytes, prepareViews, riftriBackends, riftriGc, riftriHealth, riftriStateDir } from "./riftri.js";
 import { PiSession } from "./pi-session.js";
 import { DemoSession, type Session } from "./session.js";
 import { followedColorscheme, followTheme, isFollow, refreshFollow } from "./follow.js";
@@ -164,7 +164,7 @@ function worktreeCommand(argv: string[]): number {
 		const backends = riftriBackends(root, all.map((w) => w.path));
 		for (const w of all) {
 			const b = backends.get(w.path);
-			console.log(`${(w.branch ?? `(detached ${w.head})`).padEnd(36)} ${(b ? `riftri ${b}` : "git").padEnd(16)} ${w.path}`);
+			console.log(`${(w.branch ?? `(detached ${w.head})`).padEnd(36)} ${(b ? backendName(b) : "full copy").padEnd(16)} ${w.path}`);
 		}
 		return 0;
 	}
@@ -189,12 +189,12 @@ function worktreeCommand(argv: string[]): number {
 	}
 	if (sub === "gc") {
 		if (!riftriStateDir(root)) {
-			console.log("no riftri storage in this repository");
+			console.log("no shared worktree storage in this repository");
 			return 0;
 		}
 		const r = riftriGc(root);
 		if (!r.ok) {
-			console.error(`vigent: riftri gc failed: ${r.message}`);
+			console.error(`vigent: freeing worktree storage failed: ${r.message}`);
 			return 1;
 		}
 		console.log(`freed ${formatBytes(r.report?.removed_allocated_bytes ?? 0)}`);

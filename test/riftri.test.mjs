@@ -192,7 +192,7 @@ test("before reopening agents: views whose mount went away are repaired, then in
 	assert.equal(prepareViews(repo, [a.path]).get(a.path).ready, true, "no riftri: nothing to check");
 });
 
-test(":checkhealth and :worktrees show riftri and what the worktrees cost", async () => {
+test(":checkhealth and :worktrees show lightweight worktrees and what they cost, without naming the tool", async () => {
 	const repo = makeRepo(path.join(tmp, "health"));
 	useFake("ok");
 	const wt = createWorktree(repo, "feat cart");
@@ -227,14 +227,15 @@ test(":checkhealth and :worktrees show riftri and what the worktrees cost", asyn
 
 	ex("checkhealth");
 	const health = plain(overlays.at(-1));
-	assert.match(health, /● riftri {2}0\.6\.6 {2}lightweight git worktrees · riftri\.dev/);
+	assert.match(health, /● lightweight worktrees {2}copy-on-write: agents share unchanged files/);
 	assert.match(health, /OK copy-on-write worktrees \(Btrfs\/XFS reflinks\)/);
 	assert.match(health, /1 worktree: 30\.0 MB of files in 10\.0 MB on disk \(saves 20\.0 MB\)/);
 
 	ex("worktrees");
 	const list = plain(overlays.at(-1));
-	assert.match(list, /feat\/cart .*riftri reflink/);
-	assert.match(list, /riftri: 30\.0 MB of files in 10\.0 MB on disk \(Btrfs\/XFS reflinks\)/);
+	assert.match(list, /feat\/cart .*Btrfs\/XFS reflinks/);
+	assert.match(list, /worktrees: 30\.0 MB of files in 10\.0 MB on disk \(Btrfs\/XFS reflinks\)/);
+	assert.doesNotMatch(`${health}\n${list}`, /riftri/i, "the tool behind it isn't named");
 	removeWorktree(repo, wt, true);
 });
 

@@ -1759,9 +1759,10 @@ export class App implements Component {
 			{
 				section: "Agents",
 				label: "Worktree storage",
-				value: () => ({ auto: "auto (riftri when it can)", riftri: "riftri", git: "git" })[wt.backend ?? "auto"],
+				// shown by what they do; config.toml keeps backend = "auto" | "riftri" | "git"
+				value: () => ({ auto: "auto (lightweight when it can)", riftri: "lightweight only", git: "plain git" })[wt.backend ?? "auto"],
 				change: (d) => (wt.backend = cycle(["auto", "riftri", "git"] as const, wt.backend ?? "auto", d) as typeof wt.backend),
-				hint: "riftri: copy-on-write worktrees that share unchanged files (riftri.dev)",
+				hint: "lightweight: copy-on-write worktrees that share unchanged files, so each agent costs almost no disk",
 			},
 			{
 				section: "Agents",
@@ -2184,9 +2185,8 @@ export class App implements Component {
 		const group = h.ready ? "String" : h.installed ? "WarningMsg" : "Comment";
 		lines.push([
 			[group, `${glyph} `],
-			["Title", "riftri"],
-			["Comment", h.version ? `  ${h.version}` : ""],
-			["Comment", "  lightweight git worktrees · riftri.dev"],
+			["Title", "lightweight worktrees"],
+			["Comment", "  copy-on-write: agents share unchanged files"],
 		]);
 		lines.push([["NormalFloat", "    "], [h.ready ? "NormalFloat" : group, `${h.ready ? "OK " : h.installed ? "WARNING " : ""}${h.detail}`]]);
 		for (const b of h.blockers) {
@@ -2629,7 +2629,7 @@ export class App implements Component {
 				["Title", `${(w.branch ?? `(detached ${w.head})`).padEnd(30)} `],
 				["NormalFloat", `${truncateToWidth(owner?.name ?? "", 20, "…").padEnd(20)} `],
 				// the storage column only when riftri made some of them
-				[backend ? "String" : "Comment", backends.size ? `${(backend ? `riftri ${backend}` : "git").padEnd(16)} ` : ""],
+				[backend ? "String" : "Comment", backends.size ? `${(backend ? backendName(backend) : "full copy").padEnd(16)} ` : ""],
 			];
 			// a long path gives way from its start: its end names the worktree
 			const room = width - 4 - visibleWidth(cols.map(([, t]) => t).join(""));
@@ -2641,7 +2641,7 @@ export class App implements Component {
 		if (st?.views && st.logicalBytes !== undefined && st.allocatedBytes !== undefined) {
 			lines.push([]);
 			lines.push([
-				["Comment", `riftri: ${formatBytes(st.logicalBytes)} of files in ${formatBytes(st.allocatedBytes)} on disk (${backendName(st.backend)})`],
+				["Comment", `worktrees: ${formatBytes(st.logicalBytes)} of files in ${formatBytes(st.allocatedBytes)} on disk (${backendName(st.backend)})`],
 			]);
 		}
 		lines.push([]);

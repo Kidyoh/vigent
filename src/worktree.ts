@@ -242,13 +242,13 @@ export function removeWorktree(
 ): RemoveResult {
 	const dirtyMessage = `${wt.path} has uncommitted changes; use force to remove it anyway`;
 	const owner = riftriOwnership(root, wt.path);
-	if (owner.error) return { removed: false, branchDeleted: false, message: `riftri: ${owner.error}` };
+	if (owner.error) return { removed: false, branchDeleted: false, message: owner.error };
 	if (owner.managed) {
 		// riftri's removal is journaled; a forced one snapshots the view first
 		const r = riftriRemove(root, wt.path, force);
 		if (!r.ok) {
 			const dirty = /has changes|uncommitted|dirty/i.test(r.message);
-			return { removed: false, branchDeleted: false, message: dirty ? dirtyMessage : `riftri worktree remove failed: ${describeFailure(r)}` };
+			return { removed: false, branchDeleted: false, message: dirty ? dirtyMessage : `removing the worktree failed: ${describeFailure(r)}` };
 		}
 		riftriGc(root); // free the shared base once no agent uses it
 	} else {

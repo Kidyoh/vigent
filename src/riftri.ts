@@ -347,6 +347,8 @@ export function backendName(backend: string | undefined | null): string {
 			return "ReFS block clones";
 		case "overlay-fs":
 			return "OverlayFS";
+		case "riftri":
+			return "copy-on-write";
 		default:
 			return backend ?? "unknown";
 	}
