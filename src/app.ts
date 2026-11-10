@@ -61,6 +61,7 @@ import { transcriptMarkdown } from "./export.js";
 import { renderMarkdown } from "./markdown.js";
 import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
+import { printable } from "./printable.js";
 import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon, toolKind } from "./icons.js";
 import { MESSAGE_STYLES, resolveStyle, SEPARATOR_GLYPHS, SEPARATOR_STYLES, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
@@ -4454,7 +4455,7 @@ export class App implements Component {
 						const ascii = this.ui.icons === "ascii";
 						const [tl, tr, bl, br, hz, vt] = ascii ? ["+", "+", "+", "+", "-", "|"] : ["╭", "╮", "╰", "╯", "─", "│"];
 						const maxText = Math.max(8, Math.floor(paneW * 0.75) - 4);
-						const wrapped = item.text.split("\n").flatMap((l) => wrapTextWithAnsi(l, maxText));
+						const wrapped = printable(item.text).split("\n").flatMap((l) => wrapTextWithAnsi(l, maxText));
 						const label = ` ${I.user ? `${I.user} ` : ""}${style.userLabel} `;
 						const textW = Math.min(maxText, Math.max(visibleWidth(label) + 1, ...wrapped.map((l) => visibleWidth(l))));
 						const pad = " ".repeat(Math.max(0, paneW - textW - 4));
@@ -4472,10 +4473,10 @@ export class App implements Component {
 						const bar = this.ui.icons === "ascii" ? "| " : "▎ ";
 						const head = `${bar}${I.user ? `${I.user} ` : ""}${style.userLabel}`;
 						push(P.p("VigentUser", head), head, { item: n, start: true });
-						wrapTextWithAnsi(item.text, paneW - 2).forEach((l) => push(`  ${P.s("Normal")}${paint(l)}`, `  ${stripAnsi(l)}`, { item: n }));
+						wrapTextWithAnsi(printable(item.text), paneW - 2).forEach((l) => push(`  ${P.s("Normal")}${paint(l)}`, `  ${stripAnsi(l)}`, { item: n }));
 						break;
 					}
-					wrapTextWithAnsi(item.text, paneW - 2).forEach((l, i) => {
+					wrapTextWithAnsi(printable(item.text), paneW - 2).forEach((l, i) => {
 						// the ❯ marks where a prompt starts; its other lines hang under it
 						const lead = i === 0 ? I.prompt : " ".repeat(visibleWidth(I.prompt));
 						push(P.p("VigentUser", lead) + P.s("Normal") + paint(l), lead + stripAnsi(l), {
@@ -4487,7 +4488,7 @@ export class App implements Component {
 				}
 				case "agent": {
 					push("", "");
-					const text = item.text + (item.streaming ? ` ${I.cursor}` : "");
+					const text = printable(item.text) + (item.streaming ? ` ${I.cursor}` : "");
 					// labeled: a header naming the engine, the reply indented under it; bubbles: the name, then the reply
 					const who = !s ? "agent" : this.demo ? s.model : (ENGINE_NAMES[s.engine] ?? s.engine);
 					const indent = style.messages === "labeled" ? "  " : "";
@@ -4508,18 +4509,19 @@ export class App implements Component {
 				}
 				case "tool": {
 					const t = item.tool!;
+					const [name, summary] = [printable(t.name), printable(t.summary)];
 					const fold = t.folded ? I.folded : I.open;
 					const icon = this.toolGlyph(t.name);
 					// under a labeled reply, tool calls line up with its text
 					const ind = style.messages === "labeled" ? " " : "";
 					push(
-						ind + P.p("NonText", ` ${fold} `) + P.p("Special", icon) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
-						`${ind} ${fold} ${icon}${t.name} ${t.summary}`,
+						ind + P.p("NonText", ` ${fold} `) + P.p("Special", icon) + P.p("VigentTool", name) + P.p("Comment", ` ${summary}`),
+						`${ind} ${fold} ${icon}${name} ${summary}`,
 						{ item: n },
 					);
 					if (!t.folded && t.output) {
 						const block = nextBlock++;
-						const outLines = t.output.split("\n");
+						const outLines = printable(t.output).split("\n");
 						for (const ol of outLines.slice(0, 12)) {
 							for (const wl of wrapTextWithAnsi(ol, paneW - 4)) {
 								push(`    ${P.p("VigentToolOutput", wl)}`, `    ${stripAnsi(wl)}`, { item: n, block });
@@ -4533,7 +4535,7 @@ export class App implements Component {
 				}
 				case "info": {
 					push("", "");
-					wrapTextWithAnsi(item.text, paneW).forEach((l, i) => push(P.p("Comment", l), stripAnsi(l), { item: n, start: i === 0 }));
+					wrapTextWithAnsi(printable(item.text), paneW).forEach((l, i) => push(P.p("Comment", l), stripAnsi(l), { item: n, start: i === 0 }));
 					break;
 				}
 			}

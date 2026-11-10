@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { test } from "node:test";
 import { App } from "../dist/app.js";
 import { DEFAULT_UI } from "../dist/config.js";
@@ -7,6 +8,7 @@ import { Session } from "../dist/session.js";
 import { BUILTIN_THEMES, Painter } from "../dist/theme.js";
 import { Windows } from "../dist/windows.js";
 
+const { Terminal } = createRequire(import.meta.url)("@xterm/headless");
 const strip = (s) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").replace(/\x1b\]8;;[^\x07]*\x07/g, "");
 const area = { x: 0, y: 0, w: 100, h: 40 };
 
@@ -408,4 +410,32 @@ test("one window draws exactly as it always did", () => {
 	assert.equal(rows.length, 40);
 	assert.equal(rows.filter((l) => l.includes("alpha line")).length, 3);
 	assert.equal(rows.filter((l) => l.includes("beta line")).length, 0);
+});
+
+test("a split keeps an agent's tabs, carriage returns and cursor codes inside its own window", async () => {
+	const messy = (s) => {
+		s.items.push({ kind: "user", text: "fix this:\n\tif (x) {\n\t\treturn y;\t// why\n\t}" });
+		s.items.push({ kind: "agent", text: "```go\nfunc f() {\n\treturn\n}\n```" });
+		s.items.push({
+			kind: "tool",
+			text: "",
+			tool: { name: "bash", summary: "git status\tand npm test", output: "\tmodified:   src/app.ts\r\nprogress 10%\rprogress 100%\n\x1b[2K\x1b[1Gcleared\n\x1b[31mred\x1b[0m done\x07", folded: false },
+		});
+		s.version++;
+	};
+	for (const [cmd, columns, rows] of [["split", 120, 40], ["vsplit", 120, 40], ["split", 81, 30], ["vsplit", 81, 30]]) {
+		const { app, ex } = makeApp(["alpha"], { rows, columns });
+		messy(app.focusedSession);
+		ex(cmd);
+		const out = app.render(columns);
+		for (const l of out) assert.doesNotMatch(l, /[\t\r\x07]|\x1b\[[0-9;]*[A-HJKSTf]/, `${cmd}: nothing on screen moves the cursor or clears the row`);
+		// what a terminal shows is what each window meant to show, row for row
+		const term = new Terminal({ cols: columns, rows, allowProposedApi: true });
+		await new Promise((r) => term.write(out.map((l, i) => `\x1b[${i + 1};1H${l}`).join(""), r));
+		const shown = [...Array(rows)].map((_, i) => term.buffer.active.getLine(i).translateToString(true).trimEnd());
+		assert.deepEqual(shown, out.map((l) => strip(l).trimEnd()), `${cmd} at ${columns}x${rows}`);
+		assert.match(shown.join("\n"), /modified:(?: {3}|\s*\n.*?)src\/app\.ts/, "the tab is spaces, wrapped like any text");
+		assert.match(shown.join("\n"), /progress 100%/);
+		assert.doesNotMatch(shown.join("\n"), /progress 10%/, "a progress bar shows where it ended up");
+	}
 });
