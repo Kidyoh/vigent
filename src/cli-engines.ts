@@ -48,6 +48,8 @@ export interface CliRunOptions {
 	effort?: string;
 	/** the CLI's conversation id, to continue it */
 	resumeId?: string;
+	/** continue resumeId as a new conversation, leaving that one as it is */
+	fork?: boolean;
 	cwd: string;
 	/** extra arguments from config ([engines.<id>] args) */
 	extraArgs?: string[];
@@ -63,6 +65,8 @@ export interface CliAdapter {
 	/** default extra arguments, replaced by [engines.<id>] args */
 	defaultArgs: string[];
 	args(prompt: string, o: CliRunOptions): string[];
+	/** it can fork a conversation (args reads CliRunOptions.fork) */
+	canFork?: boolean;
 	/** a fresh parser for one run (parsers keep a little state) */
 	parser(): (event: any) => CliEvent[];
 	/** it prints plain text, not JSON events: every line goes into the reply */
@@ -90,10 +94,12 @@ export const claudeAdapter: CliAdapter = {
 			...(o.model ? ["--model", o.model] : []),
 			...(o.effort ? ["--effort", o.effort] : []),
 			...(o.resumeId ? ["--resume", o.resumeId] : []),
+			...(o.resumeId && o.fork ? ["--fork-session"] : []),
 			"--",
 			prompt,
 		];
 	},
+	canFork: true,
 	parser() {
 		let thinkingBlock: number | undefined;
 		return (e) => {
@@ -173,7 +179,7 @@ export const codexAdapter: CliAdapter = {
 	args(prompt, o) {
 		return [
 			"exec",
-			...(o.resumeId ? ["resume"] : []),
+			...(o.resumeId ? [o.fork ? "fork" : "resume"] : []),
 			"--json",
 			"--skip-git-repo-check",
 			...(o.extraArgs ?? this.defaultArgs),
@@ -184,6 +190,7 @@ export const codexAdapter: CliAdapter = {
 			prompt,
 		];
 	},
+	canFork: true,
 	parser() {
 		let lastError: string | undefined;
 		const started = new Set<string>();
@@ -524,6 +531,8 @@ export interface CliSessionOptions {
 	bin?: string;
 	/** the CLI's environment; a function is asked at each run (what detection learns can change it) */
 	env?: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
+	/** the first run forks resumeId into a new conversation */
+	fork?: boolean;
 	/** called when the CLI reports its conversation id, so it can be saved */
 	onResumeId?: (id: string) => void;
 	/** permission rules every run may use ([engines.claude] allow); asked at each run */
@@ -545,9 +554,15 @@ export class CliSession extends Session {
 	private child?: ChildProcess;
 	private aborted = false;
 	/** the model the user asked for; undefined = the CLI's own default */
-	private requestedModel?: string;
+	requestedModel?: string;
+	/** the next run forks resumeId; cleared when the new conversation reports its id */
+	private forking: boolean;
 	/** asks you whether to allow tools the CLI refused (set by the app when [engines.claude] ask is on) */
 	approver?: (blocked: Denial[], rules: string[]) => Promise<AllowChoice>;
+
+	get canFork(): boolean {
+		return Boolean(this.adapter.canFork);
+	}
 
 	constructor(name: string, engine: CliEngineId, model: string | undefined, private opts: CliSessionOptions) {
 		super(name, model ?? ENGINE_NAMES[engine], opts.worktree);
@@ -557,7 +572,8 @@ export class CliSession extends Session {
 		this.requestedModel = model;
 		this.effort = opts.effort;
 		this.resumeId = opts.resumeId;
-		if (opts.resumeId) {
+		this.forking = Boolean(opts.fork && opts.resumeId);
+		if (opts.resumeId && !this.forking) {
 			this.pushInfo(`continuing the ${ENGINE_NAMES[engine]} conversation ${opts.resumeId.slice(0, 8)}… (earlier messages live in ${ENGINE_NAMES[engine]}'s history)`);
 			this.refreshStat(0);
 		}
@@ -614,6 +630,7 @@ export class CliSession extends Session {
 			model: this.requestedModel,
 			effort: this.effort,
 			resumeId: this.resumeId,
+			fork: this.forking,
 			extraArgs: typeof this.opts.extraArgs === "function" ? this.opts.extraArgs() : this.opts.extraArgs,
 			allowedTools: [...new Set([...(this.opts.allow?.() ?? []), ...once])],
 		});
@@ -641,6 +658,7 @@ export class CliSession extends Session {
 			switch (ev.type) {
 				case "session":
 					if (ev.id !== this.resumeId) {
+						this.forking = false;
 						this.resumeId = ev.id;
 						this.opts.onResumeId?.(ev.id);
 					}

@@ -7,7 +7,7 @@
  *
  *   [winbar]
  *   left = ["agent", "model", "status"]
- *   right = ["path"]
+ *   right = []
  */
 
 export const STATUSLINE_PARTS = ["mode", "agent", "branch", "engine", "model", "effort", "usage", "agents", "path", "clock"] as const;
@@ -27,7 +27,7 @@ export interface Layout {
 
 export const DEFAULT_LAYOUT: Layout = {
 	statusline: { left: ["mode", "agent", "branch"], right: ["model", "usage", "agents"] },
-	winbar: { left: ["agent", "model", "status"], right: ["path"] },
+	winbar: { left: ["agent", "model", "status"], right: [] },
 };
 
 export function defaultLayout(): Layout {

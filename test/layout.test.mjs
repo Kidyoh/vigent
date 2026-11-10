@@ -71,8 +71,14 @@ test("[statusline], [winbar] and sidebar_position in config.toml; mistakes are w
 test("the default statusline and winbar", () => {
 	const { lines } = makeApp();
 	const l = lines();
-	assert.match(l[0], /▸ cart total {2}Claude Code · claude-sonnet-4-5 · high .*wt\/cart total $/);
+	assert.match(l[0], /▸ cart total {2}Claude Code · claude-sonnet-4-5 · high\s*$/);
 	assert.match(l.at(-2), /^ NORMAL {2}cart total ⎇ fix\/cart-total +claude-sonnet-4-5 {2}0 tok {2}0\/2 $/);
+});
+
+test("the default winbar doesn't show where the worktree is", () => {
+	const { lines } = makeApp();
+	const winbar = lines()[0].split("│")[1];
+	assert.doesNotMatch(winbar, /wt\/|this checkout|✦/);
 });
 
 test("the parts you pick, in your order", () => {

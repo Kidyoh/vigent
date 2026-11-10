@@ -110,7 +110,7 @@ right = ["model", "usage", "agents"]
 
 [winbar]
 left = ["agent", "model", "status"]
-right = ["path"]
+right = []
 ```
 
 | Part | Shows | In |

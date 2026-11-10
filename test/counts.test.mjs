@@ -19,6 +19,12 @@ class Agent extends Session {
 function makeApp({ keymap = new Keymap(), lines = 300 } = {}) {
 	const tui = { requestRender() {}, showOverlay: () => ({ hide() {} }) };
 	const app = new App(tui, { rows: 40, columns: 140, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI, timeoutlen: 30 }, keymap);
+	app.forkSession = (s) => {
+		const f = new Agent(`${s.name} (fork)`, 0);
+		f.items = [...s.items];
+		f.version++;
+		return f;
+	};
 	for (const n of ["alpha", "beta", "gamma", "delta"]) app.addSession(new Agent(n, lines), false);
 	app.focusIdx = 0;
 	return { app, type: (...keys) => keys.forEach((k) => app.handleInput(k)) };

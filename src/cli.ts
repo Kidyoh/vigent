@@ -10,7 +10,7 @@ import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
-import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
+import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, ENGINE_NAMES, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig, PROJECT_CONFIG } from "./config.js";
 import { isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
@@ -364,11 +364,12 @@ async function main(): Promise<number | undefined> {
 		new PiSession(name, m, { ...o, extraArgs: config.engines.pi?.args });
 
 	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
-	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string) =>
+	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string, fork = false) =>
 		new CliSession(name, engine, requested, {
 			cwd,
 			worktree: wt,
 			resumeId,
+			fork,
 			effort,
 			// read at each prompt: :permissions changes them while agents are open
 			extraArgs: () => config.engines[engine]?.args,
@@ -475,6 +476,24 @@ async function main(): Promise<number | undefined> {
 			return s;
 		}
 		return piSession(meta.name, meta.model, { cwd: worktree.path!, worktree, sessionDir: sessionDir(worktree.path!), effort: meta.effort });
+	};
+	/**
+	 * A split's new agent: a copy of the conversation that goes its own way.
+	 * It runs in the same folder, because the conversation's paths point there,
+	 * and holds no worktree of its own, so :kill! and :merge can't reach the original's.
+	 */
+	app.forkSession = (s) => {
+		const taken = new Set(app.sessions.map((x) => x.name));
+		const base = `${s.name} (fork)`;
+		let name = base;
+		for (let n = 2; taken.has(name); n++) name = `${base.slice(0, -1)} ${n})`;
+		let fork: Session;
+		if (demo) fork = new DemoSession(name, s.model);
+		else if (s instanceof CliSession && s.canFork) fork = cliSession(name, s.engine as Exclude<EngineId, "pi">, s.requestedModel, s.cwd, undefined, s.resumeId, s.effort, true);
+		else throw new Error(`${ENGINE_NAMES[s.engine]} can't fork a conversation yet. :vsplit <agent> shows another agent beside this one.`);
+		fork.items = structuredClone(s.items);
+		fork.version++;
+		return fork;
 	};
 	app.attachSession = (wt) => {
 		if (demo || !wt.path) throw new Error("attaching needs a real agent (not --demo)");

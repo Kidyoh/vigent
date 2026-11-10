@@ -87,9 +87,9 @@ test("intro screen when no agent is running", () => {
 	assert.match(out, /▸ \[no agent\]/, "winbar");
 });
 
-test("winbar shows the focused agent, its model and where it works", () => {
+test("winbar shows the focused agent and its model", () => {
 	const { screen } = makeApp({ sessions: [sessionWithReply()] });
-	assert.match(screen().split("\n")[0], /▸ fix flaky test {2}claude-sonnet-4-5 .*this checkout/);
+	assert.match(screen().split("\n")[0], /▸ fix flaky test {2}claude-sonnet-4-5/);
 });
 
 test("markdown in replies: headings, bold, code, bullets, code blocks", () => {

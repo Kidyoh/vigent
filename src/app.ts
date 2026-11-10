@@ -303,6 +303,11 @@ export class App implements Component {
 	/** per agent and width, so windows side by side don't rebuild each other's lines */
 	private paneCache = new Map<string, { lines: PaneLine[]; key: string }>();
 
+	/** a split on the same agent forks it, so the two sides are separate conversations */
+	forkSession: (s: Session) => Session = () => {
+		throw new Error("forking isn't available here");
+	};
+
 	/** the windows over the transcript; `focusIdx` and `scrollOffset` are the current one's */
 	windows = new Windows<Session>();
 	/** while drawing a window: its place, which sizes are measured against */
@@ -3378,14 +3383,26 @@ export class App implements Component {
 			this.setMessage("no agent to split (:new <task> starts one)", "ErrorMsg");
 			return;
 		}
-		const target = arg ? this.agentNamed(arg) : this.focusedSession;
+		const parent = this.focusedSession;
+		const target = arg ? this.agentNamed(arg) : parent;
 		if (!target) return;
+		let fork: Session | undefined;
+		if (target === parent) {
+			try {
+				fork = this.forkSession(parent);
+			} catch (err) {
+				this.setMessage(String((err as Error).message), "ErrorMsg");
+				return;
+			}
+		}
 		this.saveWindow();
 		if (!this.windows.split(dir, this.paneArea())) {
+			fork?.dispose();
 			this.setMessage("E36: Not enough room", "ErrorMsg");
 			return;
 		}
-		this.focusSession(this.sessions.indexOf(target));
+		if (fork) this.addSession(fork);
+		else this.focusSession(this.sessions.indexOf(target));
 	}
 
 	private closeWindow() {

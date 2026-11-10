@@ -11,20 +11,31 @@ const strip = (s) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").replace(/\x1b\]8;;
 const area = { x: 0, y: 0, w: 100, h: 40 };
 
 class Agent extends Session {
+	sent = [];
 	constructor(name, lines = 3) {
 		super(name, "m");
 		for (let i = 1; i <= lines; i++) this.items.push({ kind: "info", text: `${name} line ${i}` });
 		this.version++;
 	}
-	send() {}
+	send(text) {
+		this.sent.push(text);
+	}
 	abort() {}
 }
+
+const stubFork = (s) => {
+	const f = new Agent(`${s.name} (fork)`, 0);
+	f.items = [...s.items];
+	f.version++;
+	return f;
+};
 
 function makeApp(names = ["alpha", "beta", "gamma"], { rows = 40, columns = 140, lines = 3 } = {}) {
 	const tui = { requestRender() {}, showOverlay: () => ({ hide() {} }) };
 	const app = new App(tui, { rows, columns, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI, timeoutlen: 30 }, new Keymap());
 	let quits = 0;
 	app.onQuit = () => quits++;
+	app.forkSession = stubFork;
 	for (const n of names) app.addSession(new Agent(n, lines), false);
 	app.focusIdx = 0;
 	const type = (...keys) => keys.forEach((k) => app.handleInput(k));
@@ -95,12 +106,53 @@ test("layout: resize moves the border and maximize takes all but the minimum", (
 	assert.equal(w.rects(area).get(first).w, 50);
 });
 
-test("<C-w>v shows two windows side by side; each keeps its own agent and <C-w>h / <C-w>l move between them", () => {
+test("<C-w>v forks the agent: a new conversation beside it, with the same history, and a prompt goes to one side only", () => {
 	const { app, type, screen, w } = makeApp();
+	const alpha = app.focusedSession;
 	type(w, "v");
 	assert.equal(app.windows.count, 2);
-	type("]", "s");
-	assert.equal(app.focusedSession.name, "beta", "]s changes the current window only");
+	assert.equal(app.sessions.length, 4, "a new agent");
+	const fork = app.focusedSession;
+	assert.equal(fork.name, "alpha (fork)");
+	assert.match(screen(), /alpha line 1.*alpha line 1/, "both sides show the history");
+	type("i", ..."do something else", "\r");
+	assert.deepEqual(fork.sent, ["do something else"]);
+	assert.deepEqual(alpha.sent, [], "the other side isn't touched");
+});
+
+test("<C-w>s forks too; :vsplit with this agent's own number forks, another agent's number just shows it", () => {
+	const { app, type, ex, w } = makeApp();
+	type(w, "s");
+	assert.equal(app.focusedSession.name, "alpha (fork)");
+	ex("only");
+	type("g", "t");
+	assert.equal(app.focusedSession.name, "alpha");
+	const before = app.sessions.length;
+	ex("vsplit 1");
+	assert.equal(app.sessions.length, before + 1);
+	ex("only");
+	const n = app.sessions.length;
+	ex("vsplit 2");
+	assert.equal(app.sessions.length, n, "no fork when you name another agent");
+	assert.equal(app.focusedSession.name, "beta");
+});
+
+test("an engine that can't fork says so and doesn't split", () => {
+	const { app, type, screen, w } = makeApp();
+	app.forkSession = () => {
+		throw new Error("pi can't fork a conversation yet");
+	};
+	type(w, "v");
+	assert.equal(app.windows.count, 1);
+	assert.equal(app.sessions.length, 3);
+	assert.match(screen(), /can't fork/);
+});
+
+test("two agents side by side; <C-w>h / <C-w>l move between them, and ]s changes the current window only", () => {
+	const { app, ex, type, screen, w } = makeApp();
+	ex("vsplit 2");
+	assert.equal(app.windows.count, 2);
+	assert.equal(app.focusedSession.name, "beta");
 	const shown = screen();
 	assert.match(shown, /alpha line 1.*beta line 1/, "both agents, on the same rows");
 	type(w, "h");
@@ -112,8 +164,8 @@ test("<C-w>v shows two windows side by side; each keeps its own agent and <C-w>h
 });
 
 test("<C-w>s stacks windows, and <C-j> / <C-k> move between them", () => {
-	const { app, type, screen, w } = makeApp();
-	type(w, "s", "]", "s");
+	const { app, ex, type, screen } = makeApp();
+	ex("split 2");
 	const rows = screen().split("\n");
 	const a = rows.findIndex((l) => l.includes("alpha line 1"));
 	const b = rows.findIndex((l) => l.includes("beta line 1"));
@@ -199,6 +251,11 @@ test("killing an agent closes the windows showing it", () => {
 	assert.equal(app.focusedSession.name, "alpha");
 	assert.deepEqual(app.sessions.map((s) => s.name), ["alpha", "gamma"]);
 	type(w, "v");
+	ex("kill");
+	assert.equal(app.windows.count, 1);
+	assert.equal(app.focusedSession.name, "alpha", "killing the fork goes back to the agent it came from");
+	type(w, "v", "]", "s");
+	assert.equal(app.focusedSession.name, "alpha", "both windows show it now");
 	ex("kill");
 	assert.equal(app.windows.count, 1);
 	assert.equal(app.focusedSession.name, "gamma", "both windows showed it");

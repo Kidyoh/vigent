@@ -569,7 +569,7 @@ notify = "auto"          # an agent finished while you looked elsewhere: "auto",
 # right = ["model", "usage", "agents"]
 # [winbar]
 # left = ["agent", "model", "status"]
-# right = ["path"]
+# right = []
 
 # --- Style: layout and icons (themes neon and zen set their own) -------------
 # [style]
