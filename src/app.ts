@@ -511,6 +511,9 @@ export class App implements Component {
 
 	private focusSession(idx: number) {
 		if (idx < 0 || idx >= this.sessions.length || idx === this.focusIdx) return;
+		// an agent is in one window at most: two windows on one agent show every prompt and reply twice
+		const shownIn = this.windows.all().find((w) => w !== this.windows.cur && w.session === this.sessions[idx]);
+		if (shownIn) return this.enterWindow(shownIn);
 		this.unread.delete(this.sessions[idx]);
 		this.altIdx = this.focusIdx;
 		this.focusIdx = idx;
@@ -3729,8 +3732,15 @@ export class App implements Component {
 		const parent = this.focusedSession;
 		const target = arg ? this.agentNamed(arg) : parent;
 		if (!target) return;
+		const shownIn = this.windows.all().find((w) => w !== this.windows.cur && w.session === target);
+		if (shownIn) return this.enterWindow(shownIn);
 		let fork: Session | undefined;
 		if (target === parent) {
+			if (parent.state === "running") {
+				// a fork made now would hold half a turn
+				this.setMessage(`'${parent.name}' is still answering: split once it's done, or :vsplit <agent> to show another one`, "WarningMsg");
+				return;
+			}
 			try {
 				fork = this.forkSession(parent);
 			} catch (err) {

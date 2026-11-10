@@ -364,12 +364,13 @@ async function main(): Promise<number | undefined> {
 		new PiSession(name, m, { ...o, extraArgs: config.engines.pi?.args });
 
 	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
-	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string, fork = false) =>
+	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string, fork?: { at?: string }) =>
 		new CliSession(name, engine, requested, {
 			cwd,
 			worktree: wt,
 			resumeId,
-			fork,
+			fork: Boolean(fork),
+			forkAt: fork?.at,
 			effort,
 			// read at each prompt: :permissions changes them while agents are open
 			extraArgs: () => config.engines[engine]?.args,
@@ -489,7 +490,12 @@ async function main(): Promise<number | undefined> {
 		for (let n = 2; taken.has(name); n++) name = `${base.slice(0, -1)} ${n})`;
 		let fork: Session;
 		if (demo) fork = new DemoSession(name, s.model);
-		else if (s instanceof CliSession && s.canFork) fork = cliSession(name, s.engine as Exclude<EngineId, "pi">, s.requestedModel, s.cwd, undefined, s.resumeId, s.effort, true);
+		// forked where the original is now: what it's told after the split stays out of the fork
+		else if (s instanceof CliSession && s.canFork) {
+			const at = s.forkPoint();
+			if (s.engine === "claude" && s.resumeId && !at) throw new Error(`couldn't find where '${s.name}''s Claude Code conversation is up to, so it can't be forked. :vsplit <agent> shows another agent beside this one.`);
+			fork = cliSession(name, s.engine as Exclude<EngineId, "pi">, s.requestedModel, s.cwd, undefined, s.resumeId, s.effort, { at });
+		}
 		else throw new Error(`${ENGINE_NAMES[s.engine]} can't fork a conversation yet. :vsplit <agent> shows another agent beside this one.`);
 		fork.items = structuredClone(s.items);
 		fork.version++;

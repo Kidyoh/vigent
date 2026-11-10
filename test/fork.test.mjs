@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { loadAgentMeta } from "../dist/agents.js";
-import { claudeAdapter, codexAdapter } from "../dist/cli-engines.js";
+import { CliSession, claudeAdapter, codexAdapter, lastClaudeMessage } from "../dist/cli-engines.js";
 import { Tty } from "./support/terminal.mjs";
 
 const skip = process.platform === "win32" || spawnSync("python3", ["-c", "import pty"]).status !== 0 ? "needs python3 and a Unix pty" : false;
@@ -24,6 +24,84 @@ test("how each engine is asked to fork", () => {
 	assert.deepEqual(codex.slice(0, 2), ["exec", "fork"]);
 	assert.deepEqual(codex.slice(-3), ["abc", "--", "hi"]);
 	assert.equal(codexAdapter.args("hi", { cwd: "/x", resumeId: "abc" })[1], "resume");
+	const at = claudeAdapter.args("hi", { cwd: "/x", resumeId: "abc", fork: true, forkAt: "m-7" });
+	assert.deepEqual(at.slice(at.indexOf("--resume"), -2), ["--resume", "abc", "--fork-session", "--resume-session-at", "m-7"], "Claude Code forks at the split's last message");
+	assert.deepEqual(codexAdapter.forkArgs({ cwd: "/x", resumeId: "abc" }).slice(0, 2), ["exec", "fork"]);
+	assert.equal(codexAdapter.forkArgs({ cwd: "/x", resumeId: "abc" }).at(-1), "abc", "Codex forks right away, with no prompt");
+});
+
+test("the last message of a conversation Claude Code saved, for agents reopened after a restart", () => {
+	const dir = path.join(tmp, "claude-config");
+	const cwd = "/work/shop.git/feat_x";
+	fs.mkdirSync(path.join(dir, "projects", "-work-shop-git-feat-x"), { recursive: true });
+	const lines = [
+		{ type: "user", uuid: "u1" },
+		{ type: "assistant", uuid: "a1" },
+		{ type: "assistant", uuid: "side", isSidechain: true },
+		{ type: "assistant", uuid: "a2" },
+		{ type: "last-prompt", leafUuid: "a2" },
+	];
+	fs.writeFileSync(path.join(dir, "projects", "-work-shop-git-feat-x", "s1.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\nnot json\n");
+	assert.equal(lastClaudeMessage(cwd, "s1", dir), "a2");
+	assert.equal(lastClaudeMessage(cwd, "missing", dir), undefined);
+});
+
+/** A stand-in codex: `exec fork <id>` with no prompt makes a thread; everything is logged. */
+function fakeCodex(name, { forkFails = false } = {}) {
+	const bin = path.join(tmp, name);
+	const log = path.join(tmp, `${name}.log`);
+	fs.writeFileSync(
+		bin,
+		`#!${process.execPath}
+const fs = require("fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
+const say = (o) => console.log(JSON.stringify(o));
+if (args[1] === "fork" && !args.includes("--")) {
+	if (${forkFails}) { console.error("error: thread not found"); process.exit(1); }
+	say({ type: "thread.started", thread_id: "forked-thread" });
+	process.exit(0);
+}
+const id = args[1] === "resume" ? args[args.indexOf("--") - 1] : "new-thread";
+say({ type: "thread.started", thread_id: id });
+say({ type: "item.completed", item: { type: "agent_message", text: "reply" } });
+say({ type: "turn.completed", usage: {} });
+`,
+		{ mode: 0o755 },
+	);
+	return { bin, calls: () => fs.readFileSync(log, "utf8").trim().split("\n").map(JSON.parse) };
+}
+
+const settled = (s) => new Promise((resolve) => {
+	const check = () => (s.state === "running" ? setTimeout(check, 10) : resolve());
+	check();
+});
+
+test("a Codex fork is made when you split, so what the original is told afterwards never reaches it", { skip: process.platform === "win32" && "a script as a binary", timeout: 20000 }, async () => {
+	const { bin, calls } = fakeCodex("codex-ok");
+	const ids = [];
+	const fork = new CliSession("f", "codex", undefined, { cwd: tmp, resumeId: "original-thread", fork: true, bin, onResumeId: (id) => ids.push(id) });
+	fork.send("only for the fork");
+	assert.equal(fork.state, "running", "the prompt waits for the fork");
+	await settled(fork);
+	const [made, ran] = calls();
+	assert.deepEqual(made.slice(0, 2), ["exec", "fork"]);
+	assert.equal(made.at(-1), "original-thread");
+	assert.ok(!made.includes("only for the fork"), "forked with no prompt");
+	assert.deepEqual(ran.slice(0, 2), ["exec", "resume"], "then it's a conversation of its own");
+	assert.deepEqual(ran.slice(-3), ["forked-thread", "--", "only for the fork"]);
+	assert.deepEqual(ids, ["forked-thread"]);
+	assert.equal(fork.resumeId, "forked-thread");
+});
+
+test("a fork that couldn't be made says so, and never forks later instead", { skip: process.platform === "win32" && "a script as a binary", timeout: 20000 }, async () => {
+	const { bin, calls } = fakeCodex("codex-broken", { forkFails: true });
+	const fork = new CliSession("f", "codex", undefined, { cwd: tmp, resumeId: "gone", fork: true, bin });
+	fork.send("hello");
+	await settled(fork);
+	assert.equal(fork.state, "error");
+	assert.match(fork.items.at(-1).text, /couldn't fork the Codex conversation: error: thread not found\. Close this window \(:q\) and split again/);
+	assert.equal(calls().length, 1, "nothing ran after the failed fork");
 });
 
 test("a split forks once: the fork runs in the same folder, keeps its own id, and never touches the original's record", { skip, timeout: 60000 }, async () => {
@@ -45,10 +123,12 @@ if (args[0] === "--version") { console.log("2.1.319 (Claude Code)"); process.exi
 if (args.join(" ") === "auth status --json") { console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" })); process.exit(0); }
 const n = fs.existsSync(${JSON.stringify(log)}) ? fs.readFileSync(${JSON.stringify(log)}, "utf8").trim().split("\\n").length : 0;
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
-const id = "session-" + n;
+// like Claude Code: --resume keeps the conversation's id, --fork-session makes a new one
+const r = args.indexOf("--resume");
+const id = r >= 0 && !args.includes("--fork-session") ? args[r + 1] : "session-" + n;
 const say = (o) => console.log(JSON.stringify(o));
 say({ type: "system", subtype: "init", session_id: id, model: "m" });
-say({ type: "assistant", session_id: id, message: { content: [{ type: "text", text: "reply " + n }] } });
+say({ type: "assistant", session_id: id, uuid: "msg-" + n, message: { content: [{ type: "text", text: "reply " + n }] } });
 say({ type: "result", subtype: "success", session_id: id, is_error: false, result: "reply " + n });
 `,
 		{ mode: 0o755 },
@@ -71,17 +151,26 @@ say({ type: "result", subtype: "success", session_id: id, is_error: false, resul
 		await t.type("\x17");
 		await t.type("v");
 		await t.waitFor(/\(fork\)/);
+		// the original first: what it's told after the split must stay out of the fork
+		await t.type("\x17");
+		await t.type("h");
+		await t.type("i");
+		await t.type("only the original\r");
+		await t.waitFor(/reply 1/);
+		await t.type("\x17");
+		await t.type("l");
 		await t.type("i");
 		await t.type("something else\r");
-		await t.waitFor(/reply 1/);
+		await t.waitFor(/reply 2/);
 		await t.type("i");
 		await t.type("and more\r");
-		await t.waitFor(/reply 2/);
+		await t.waitFor(/reply 3/);
 
-		const [first, forked, next] = calls();
-		assert.deepEqual(forked.args.slice(forked.args.indexOf("--resume"), -2), ["--resume", "session-0", "--fork-session"]);
+		const [first, original, forked, next] = calls();
+		assert.deepEqual(original.args.slice(original.args.indexOf("--resume"), -2), ["--resume", "session-0"], "the original carries on in its own conversation");
+		assert.deepEqual(forked.args.slice(forked.args.indexOf("--resume"), -2), ["--resume", "session-0", "--fork-session", "--resume-session-at", "msg-0"], "forked where the split was, not after the original's next turn");
 		assert.equal(forked.cwd, first.cwd, "same worktree: the conversation's paths still point at real files");
-		assert.deepEqual(next.args.slice(next.args.indexOf("--resume"), -2), ["--resume", "session-1"], "forked once, then its own conversation");
+		assert.deepEqual(next.args.slice(next.args.indexOf("--resume"), -2), ["--resume", "session-2"], "forked once, then its own conversation");
 		assert.equal(loadAgentMeta(first.cwd).resumeId, "session-0", "the original's saved conversation is still its own");
 	} finally {
 		t.kill();

@@ -10,6 +10,8 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { expandPrompt } from "./attach.js";
 import { CUSTOM_ENGINES, type CustomEngine, ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
 import { Session, type TranscriptItem } from "./session.js";
@@ -20,6 +22,8 @@ export type CliEngineId = Exclude<EngineId, "pi">;
 /** What a CLI's JSON events mean to the transcript. */
 export type CliEvent =
 	| { type: "session"; id: string }
+	/** a message the CLI saved, by its id (Claude Code), to fork the conversation at it later */
+	| { type: "message"; id: string }
 	| { type: "model"; model: string }
 	/** a piece of the reply being written */
 	| { type: "text_delta"; text: string }
@@ -50,6 +54,8 @@ export interface CliRunOptions {
 	resumeId?: string;
 	/** continue resumeId as a new conversation, leaving that one as it is */
 	fork?: boolean;
+	/** the message to fork at (Claude Code), so what the original said after the split stays out */
+	forkAt?: string;
 	cwd: string;
 	/** extra arguments from config ([engines.<id>] args) */
 	extraArgs?: string[];
@@ -67,6 +73,8 @@ export interface CliAdapter {
 	args(prompt: string, o: CliRunOptions): string[];
 	/** it can fork a conversation (args reads CliRunOptions.fork) */
 	canFork?: boolean;
+	/** fork resumeId right away, with no prompt: the new conversation's id comes back as a session event */
+	forkArgs?(o: CliRunOptions): string[];
 	/** a fresh parser for one run (parsers keep a little state) */
 	parser(): (event: any) => CliEvent[];
 	/** it prints plain text, not JSON events: every line goes into the reply */
@@ -94,7 +102,7 @@ export const claudeAdapter: CliAdapter = {
 			...(o.model ? ["--model", o.model] : []),
 			...(o.effort ? ["--effort", o.effort] : []),
 			...(o.resumeId ? ["--resume", o.resumeId] : []),
-			...(o.resumeId && o.fork ? ["--fork-session"] : []),
+			...(o.resumeId && o.fork ? ["--fork-session", ...(o.forkAt ? ["--resume-session-at", o.forkAt] : [])] : []),
 			"--",
 			prompt,
 		];
@@ -132,6 +140,7 @@ export const claudeAdapter: CliAdapter = {
 					break;
 				}
 				case "assistant":
+					if (typeof e.uuid === "string") out.push({ type: "message", id: e.uuid });
 					for (const b of contentOf(e.message)) {
 						if (b?.type === "text" && b.text) out.push({ type: "text", text: b.text });
 						else if (b?.type === "tool_use") out.push({ type: "tool", id: b.id, name: b.name, summary: summarize(b.input) });
@@ -191,6 +200,8 @@ export const codexAdapter: CliAdapter = {
 		];
 	},
 	canFork: true,
+	// no prompt: codex forks the thread and stops (it reads an empty stdin)
+	forkArgs: (o) => ["exec", "fork", "--json", "--skip-git-repo-check", ...(o.extraArgs ?? codexAdapter.defaultArgs), o.resumeId ?? ""],
 	parser() {
 		let lastError: string | undefined;
 		const started = new Set<string>();
@@ -531,8 +542,10 @@ export interface CliSessionOptions {
 	bin?: string;
 	/** the CLI's environment; a function is asked at each run (what detection learns can change it) */
 	env?: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv);
-	/** the first run forks resumeId into a new conversation */
+	/** fork resumeId into a new conversation: right away where the CLI can, else on the first run */
 	fork?: boolean;
+	/** the message to fork at (Claude Code): the original's last one when the split was made */
+	forkAt?: string;
 	/** called when the CLI reports its conversation id, so it can be saved */
 	onResumeId?: (id: string) => void;
 	/** permission rules every run may use ([engines.claude] allow); asked at each run */
@@ -557,11 +570,24 @@ export class CliSession extends Session {
 	requestedModel?: string;
 	/** the next run forks resumeId; cleared when the new conversation reports its id */
 	private forking: boolean;
+	/** a fork being made right away (Codex); prompts wait for it */
+	private forkReady?: Promise<void>;
+	private forkChild?: ChildProcess;
+	private forkError?: string;
+	/** the last message the CLI saved, so a split can fork this conversation at it */
+	lastMessageId?: string;
 	/** asks you whether to allow tools the CLI refused (set by the app when [engines.claude] ask is on) */
 	approver?: (blocked: Denial[], rules: string[]) => Promise<AllowChoice>;
 
 	get canFork(): boolean {
 		return Boolean(this.adapter.canFork);
+	}
+
+	/** Where a fork made now starts: the last message (Claude Code forks at it), from this run or Claude Code's saved conversation. */
+	forkPoint(): string | undefined {
+		if (this.lastMessageId || this.engine !== "claude" || !this.resumeId) return this.lastMessageId;
+		const env = typeof this.opts.env === "function" ? this.opts.env() : (this.opts.env ?? process.env);
+		return lastClaudeMessage(this.cwd, this.resumeId, env.CLAUDE_CONFIG_DIR);
 	}
 
 	constructor(name: string, engine: CliEngineId, model: string | undefined, private opts: CliSessionOptions) {
@@ -573,6 +599,7 @@ export class CliSession extends Session {
 		this.effort = opts.effort;
 		this.resumeId = opts.resumeId;
 		this.forking = Boolean(opts.fork && opts.resumeId);
+		if (this.forking && this.adapter.forkArgs) this.forkReady = this.forkNow();
 		if (opts.resumeId && !this.forking) {
 			this.pushInfo(`continuing the ${ENGINE_NAMES[engine]} conversation ${opts.resumeId.slice(0, 8)}… (earlier messages live in ${ENGINE_NAMES[engine]}'s history)`);
 			this.refreshStat(0);
@@ -618,8 +645,73 @@ export class CliSession extends Session {
 		this.emit();
 	}
 
+	/** Fork the conversation now, before anything else is said in it (see CliAdapter.forkArgs). */
+	private forkNow(): Promise<void> {
+		const args = this.adapter.forkArgs!({
+			cwd: this.cwd,
+			resumeId: this.resumeId,
+			extraArgs: typeof this.opts.extraArgs === "function" ? this.opts.extraArgs() : this.opts.extraArgs,
+		});
+		return new Promise((resolve) => {
+			const parse = this.adapter.parser();
+			let out = "";
+			let err = "";
+			let child: ChildProcess;
+			try {
+				child = spawn(this.opts.bin ?? this.adapter.bin, args, {
+					cwd: this.cwd,
+					env: typeof this.opts.env === "function" ? this.opts.env() : (this.opts.env ?? process.env),
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+			} catch (e: any) {
+				this.forkError = `couldn't fork the ${this.engineName} conversation: ${e?.message ?? e}`;
+				return resolve();
+			}
+			this.forkChild = child;
+			child.stdout?.on("data", (d) => (out += d));
+			child.stderr?.on("data", (d) => (err += d));
+			const finish = (why?: string) => {
+				this.forkChild = undefined;
+				for (const line of out.split("\n")) {
+					let e: any;
+					try {
+						e = JSON.parse(line);
+					} catch {
+						continue;
+					}
+					for (const ev of parse(e)) {
+						if (ev.type === "session" && ev.id !== this.resumeId) {
+							this.forking = false;
+							this.resumeId = ev.id;
+							this.opts.onResumeId?.(ev.id);
+						}
+					}
+				}
+				if (this.forking) this.forkError = `couldn't fork the ${this.engineName} conversation: ${why ?? (err.trim().split("\n").at(-1) || "it reported no new conversation")}`;
+				resolve();
+			};
+			child.on("error", (e) => finish(e.message));
+			child.on("close", () => finish());
+		});
+	}
+
 	/** One run of the CLI; `once` are permission rules for this run only. */
 	private run(text: string, once: string[] = []): void {
+		if (this.forkReady) {
+			// the fork is still being made: the prompt goes to it once it's there
+			const ready = this.forkReady;
+			this.setState("running");
+			void ready.then(() => {
+				this.forkReady = undefined;
+				if (this.state === "running") this.run(text, once);
+			});
+			return;
+		}
+		if (this.forkError) {
+			// never fall back to forking now: the original may have moved on since the split
+			this.fail(`${this.forkError}. Close this window (:q) and split again.`);
+			return;
+		}
 		this.setState("running");
 		this.aborted = false;
 		const attached = expandPrompt(text, this.adapter.id, this.cwd);
@@ -631,6 +723,7 @@ export class CliSession extends Session {
 			effort: this.effort,
 			resumeId: this.resumeId,
 			fork: this.forking,
+			forkAt: this.forking ? this.opts.forkAt : undefined,
 			extraArgs: typeof this.opts.extraArgs === "function" ? this.opts.extraArgs() : this.opts.extraArgs,
 			allowedTools: [...new Set([...(this.opts.allow?.() ?? []), ...once])],
 		});
@@ -662,6 +755,9 @@ export class CliSession extends Session {
 						this.resumeId = ev.id;
 						this.opts.onResumeId?.(ev.id);
 					}
+					break;
+				case "message":
+					this.lastMessageId = ev.id;
 					break;
 				case "model":
 					if (!this.requestedModel) this.model = ev.model;
@@ -878,6 +974,7 @@ export class CliSession extends Session {
 
 	dispose() {
 		super.dispose();
+		this.forkChild?.kill("SIGTERM");
 		if (this.child) {
 			this.aborted = true;
 			this.child.kill("SIGTERM");
@@ -888,6 +985,26 @@ export class CliSession extends Session {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/** The id of the last assistant message in a Claude Code conversation saved on disk (~/.claude/projects/<folder>/<id>.jsonl). */
+export function lastClaudeMessage(cwd: string, sessionId: string, configDir = path.join(os.homedir(), ".claude")): string | undefined {
+	const file = path.join(configDir, "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"), `${sessionId}.jsonl`);
+	let text: string;
+	try {
+		text = fs.readFileSync(file, "utf8");
+	} catch {
+		return undefined;
+	}
+	let last: string | undefined;
+	for (const line of text.split("\n")) {
+		if (!line.includes('"assistant"')) continue;
+		try {
+			const e = JSON.parse(line);
+			if (e.type === "assistant" && typeof e.uuid === "string" && !e.isSidechain) last = e.uuid;
+		} catch {}
+	}
+	return last;
+}
 
 function safeRealpath(p: string): string | undefined {
 	try {
