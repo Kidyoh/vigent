@@ -10,7 +10,7 @@ import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
-import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, ENGINE_NAMES, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
+import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig, PROJECT_CONFIG } from "./config.js";
 import { isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
@@ -465,7 +465,6 @@ async function main(): Promise<number | undefined> {
 		const engine = meta.engine && isEngineId(meta.engine) ? meta.engine : "pi";
 		if (engine !== "pi") {
 			const s = cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId, meta.effort);
-			if (moved) s.pushInfo(`pi isn't installed, so this agent now runs on ${ENGINE_NAMES[engine]}. It starts a new conversation in the same worktree; the pi one stays on disk.`);
 			// the CLI keeps the conversation; vigent keeps the running totals
 			s.tokens = meta.usage?.tokens ?? 0;
 			s.cost = meta.usage?.cost;

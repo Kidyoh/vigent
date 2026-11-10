@@ -80,11 +80,12 @@ setTimeout(() => { console.log(JSON.stringify({ loggedIn: false })); process.exi
 	return { repo, env, worktree: worktree.path, log, history };
 }
 
-test("without pi, an old agent reopens on the engine you have, says so, and answers", { skip, timeout: 60000 }, async () => {
+test("without pi, an old agent reopens on the engine you have and answers", { skip, timeout: 60000 }, async () => {
 	const m = machine("moved", ["claude"]);
 	const t = new Tty([], { cwd: m.repo, env: m.env });
 	try {
-		await t.waitFor("now runs on Claude Code");
+		await t.waitFor("reopened 1 agent");
+		assert.doesNotMatch(t.screen(), /isn't installed, so|now runs on/, "the move happens without a note");
 		const meta = loadAgentMeta(m.worktree);
 		assert.equal(meta.engine, "claude", "the move is saved, so a resume id can't land on the wrong engine");
 		assert.equal(meta.model, "", "pi's model isn't asked of another engine");
@@ -107,7 +108,7 @@ test("it moves to the engine that's signed in, not the first one that's installe
 	const m = machine("signed-in", ["signed-out claude", "codex"]);
 	const t = new Tty([], { cwd: m.repo, env: m.env });
 	try {
-		await t.waitFor("now runs on Codex");
+		await t.waitFor("reopened 1 agent");
 		assert.equal(loadAgentMeta(m.worktree).engine, "codex");
 	} finally {
 		t.kill();
