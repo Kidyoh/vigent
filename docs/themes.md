@@ -54,15 +54,21 @@ separators = "round"       # none (default), round, arrow, slant: lualine-style 
 prompt = "λ "
 worktree = "⑂ "
 idle = "◇"                 # agent states: idle, waiting, paused, error
+
+[style.nerd_icons]         # the same, used only with icons = "nerd" (over [style.icons])
+idle = "\uf10c"
+user = "\uf007"            # before your name in labeled and bubble messages
+agent = "\uf2db"           # before the engine's
 ```
 
 | Option | Choices |
 |---|---|
-| `sidebar` | `tree`: neo-tree's look, a branch line under each agent. `cards`: a box per agent with its branch, changes, model and tokens. `compact`: one row per agent, the `+/-` counts at the right |
+| `sidebar` | `tree`: neo-tree's look, a branch line under each agent. `cards`: a box per agent with its branch, changes, model and tokens. `compact`: one row per agent with the `+/-` counts at the right; the focused one opens to show its branch, model and tokens, and the ENGINES list keeps the ones you have installed, folding the rest into one line |
 | `messages` | `plain`: `❯` before your prompts. `labeled`: a header over each message (you, or the engine's name) with the text indented under it. `bubbles`: your prompts in a box at the right, like a chat; replies named by their engine |
 | `separators` | the statusline as lualine draws it: the mode in its color, then a lighter section, then the bar, with rounded (`round`), arrow (`arrow`) or slanted (`slant`) ends, an icon on each part, and the winbar's agent in a pill. These are Nerd Font glyphs: without `icons = "nerd"` the plain statusline shows instead |
 | `tool_icons` | an icon before each tool call: `unicode` (▶ shell, ✎ edit, ≡ read, ⌕ search, ◍ web, ✓ plan, ✱ other) works in any font; `nerd` needs a Nerd Font |
-| `icons` | `prompt`, `worktree`, `folded`, `open`, `cursor`, `bullet`, `queued`, `open_agent`, `here`, `unread`, `light`, `ok`, `warn`, `off`, `sep`, and the agent states `idle`, `waiting`, `paused`, `error` |
+| `icons` | `prompt`, `worktree`, `folded`, `open`, `cursor`, `bullet`, `queued`, `open_agent`, `here`, `unread`, `light`, `ok`, `warn`, `off`, `sep`, the agent states `idle`, `waiting`, `paused`, `error`, and `user` / `agent` (before the names on message headers; none by default) |
+| `nerd_icons` | the same names, used over `icons` only with `icons = "nerd"`. A theme can carry plain glyphs for any terminal and Nerd Font ones for when there's a font for them; Nerd Font glyphs never show without one |
 
 `:settings` (`<Space>s`) cycles the sidebar and message styles and saves them to `[style]`. `:colorscheme` previews a theme's layout along with its colors.
 
@@ -72,7 +78,9 @@ The built-in `nebula`, `neon` and `zen` show what a style does:
 
 ![neon: a card per agent, your prompt in a chat bubble, unicode tool icons](screenshots/theme-neon.png)
 
-![zen: one row per agent, a header over each message, quiet glyphs](screenshots/theme-zen.png)
+![zen with a Nerd Font: one row per agent (the focused one open), icons on states, branches, tools and message headers, a rounded statusline](screenshots/theme-zen.png)
+
+zen without a Nerd Font keeps the same layout with quiet glyphs (`·` `◌` `↳` `›`) and the plain statusline.
 
 To make your own, extend one and change what you like (see [Writing your own theme](#writing-your-own-theme)):
 

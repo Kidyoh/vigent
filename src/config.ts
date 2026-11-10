@@ -211,7 +211,12 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 				break;
 			case "style": {
 				const own = parseStyle(value, where, warnings);
-				config.style = { ...config.style, ...own, ...(config.style.icons || own.icons ? { icons: { ...config.style.icons, ...own.icons } } : {}) };
+				config.style = {
+					...config.style,
+					...own,
+					...(config.style.icons || own.icons ? { icons: { ...config.style.icons, ...own.icons } } : {}),
+					...(config.style.nerd_icons || own.nerd_icons ? { nerd_icons: { ...config.style.nerd_icons, ...own.nerd_icons } } : {}),
+				};
 				break;
 			}
 			case "commands":

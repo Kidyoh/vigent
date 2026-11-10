@@ -59,8 +59,8 @@ test("[style] in a theme file and in config.toml; mistakes are warnings", () => 
 	assert.deepEqual(warnings, [
 		`config [style]: 'sidebar' should be "tree", "cards", "compact"`,
 		"config [style.icons]: 'prompt' should be a string",
-		"config [style.icons]: unknown icon 'sparkle' (prompt, worktree, folded, open, cursor, bullet, queued, open_agent, here, unread, light, ok, warn, off, sep, idle, waiting, paused, error)",
-		"config [style]: unknown option 'colour' (sidebar, messages, tool_icons, separators, user_label, icons)",
+		"config [style.icons]: unknown icon 'sparkle' (prompt, worktree, folded, open, cursor, bullet, queued, open_agent, here, unread, light, ok, warn, off, sep, idle, waiting, paused, error, user, agent)",
+		"config [style]: unknown option 'colour' (sidebar, messages, tool_icons, separators, user_label, icons, nerd_icons)",
 	]);
 
 	// a theme file: its own colors and layout, built on another theme's
@@ -75,7 +75,7 @@ test("[style] in a theme file and in config.toml; mistakes are warnings", () => 
 	const { config } = loadConfig(write("config.toml", `[style]\nmessages = "plain"\n[style.icons]\nidle = "○"\n`));
 	const s = resolveStyle(mine.style, config.style);
 	assert.deepEqual([s.sidebar, s.messages, s.icons.prompt, s.icons.idle], ["cards", "plain", "λ ", "○"]);
-	assert.deepEqual(resolveStyle(), { sidebar: "tree", messages: "plain", userLabel: "You", separators: "none", icons: {} }, "nothing set: vigent's usual look");
+	assert.deepEqual(resolveStyle(), { sidebar: "tree", messages: "plain", userLabel: "You", separators: "none", icons: {}, nerdIcons: {} }, "nothing set: vigent's usual look");
 });
 
 test("sidebar styles: tree (default), cards, compact", () => {
@@ -94,9 +94,11 @@ test("sidebar styles: tree (default), cards, compact", () => {
 
 	({ sidebar } = makeApp("default", { sidebar: "compact" }));
 	const compact = sidebar();
-	assert.match(compact[1], /^\s+1 ○ cart total\s+\+41 −18 $/, "one row, the counts at the right");
-	assert.match(compact[2], /^\s+2 ○ docs pass\s+$/);
-	assert.match(compact[3], /^~/, "nothing else");
+	assert.match(compact[1], /^▎ {2}1 ○ cart total\s+\+41 −18 $/, "one row, a bar on the focused one, the counts at the right");
+	assert.match(compact[2], /^ {7}⎇ fix\/cart-total\s*$/, "the focused agent opens: where it works");
+	assert.match(compact[3], /^ {7}sonnet-4-5 · 0 tok\s*$/, "and what it runs on");
+	assert.match(compact[4], /^ {3}2 ○ docs pass\s+$/, "the others stay one row");
+	assert.match(compact[5], /^~/, "nothing else");
 });
 
 test("message styles: plain (default), labeled, bubbles; tool icons", () => {
@@ -137,7 +139,7 @@ test("built-in neon and zen carry their own layout; config.toml wins; icons can 
 	assert.match(sidebar()[1], /├╴○ cart total/, "your [style] over the theme's");
 
 	({ sidebar, screen } = makeApp("zen"));
-	assert.match(sidebar()[1], /^\s+1 · cart total\s+\+41 −18/, "zen: compact, its own glyphs");
+	assert.match(sidebar()[1], /^▎ {2}1 · cart total\s+\+41 −18/, "zen: compact, its own glyphs");
 	assert.ok(screen().some((l) => /▎ you/.test(l)), "zen: labeled, 'you'");
 });
 
@@ -206,5 +208,41 @@ test("nebula: the dressed-up Neovim look, falling back cleanly without a Nerd Fo
 	assert.doesNotMatch(plain, /[\ue000-\uf8ff]/u, "unicode icons: no Nerd Font glyph shows, not even the theme's own");
 	assert.match(plain, /▶ bash npm test/, "tool icons fall back to unicode ones");
 	assert.match(plain, /▎ Claude Code/, "labeled messages either way");
+});
+
+test("zen with a Nerd Font: [style.nerd_icons] over its plain glyphs, icons on the message headers, engines folded", () => {
+	assert.ok(BUILTIN_THEMES.zen.style.nerd_icons.user, "zen has Nerd Font icons for when there's a font for them");
+	let { sidebar, screen } = makeApp("zen", {}, { icons: "nerd" });
+	assert.match(sidebar()[1], /▎ {2}1 \uf10c cart total/, "the idle state as a Nerd Font circle");
+	assert.match(sidebar()[2], /\ue725 fix\/cart-total/, "the branch icon");
+	const all = screen().join("\n");
+	assert.match(all, /▎ \uf007 you/, "your header has a user icon");
+	assert.match(all, /▎ \uf2db Claude Code/, "the reply's header an agent icon");
+	assert.match(all, /\ue0b6 \ue62b NORMAL/, "the rounded statusline");
+
+	// without a Nerd Font: zen's own quiet glyphs, no icons on the headers
+	({ screen } = makeApp("zen"));
+	const plain = screen().join("\n");
+	assert.match(plain, /▎ you +\n/, "no icon before it");
+	assert.doesNotMatch(plain, /[\ue000-\uf8ff]/u);
+
+	// config.toml's [style.nerd_icons] layers over the theme's, like [style.icons]
+	({ sidebar } = makeApp("zen", { nerd_icons: { idle: "\uf111" } }, { icons: "nerd" }));
+	assert.match(sidebar()[1], /\uf111 cart total/);
+});
+
+test("compact sidebar: engines you have, and one line for the rest", () => {
+	const { app, sidebar } = makeApp("default", { sidebar: "compact" });
+	app.setEngines([
+		{ id: "claude", name: "Claude Code", installed: true, connected: true, detail: "" },
+		{ id: "codex", name: "Codex", installed: true, connected: false, detail: "", connect: "codex login" },
+		{ id: "pi", name: "pi", installed: false, connected: false, detail: "not installed" },
+		{ id: "gemini", name: "Gemini CLI", installed: false, connected: false, detail: "not installed" },
+	]);
+	const rows = sidebar().join("\n");
+	assert.match(rows, /● Claude Code/);
+	assert.match(rows, /◐ Codex\s+codex login/);
+	assert.doesNotMatch(rows, /Gemini CLI/, "not installed: folded");
+	assert.match(rows, /○ 2 more · :checkhealth/);
 });
 

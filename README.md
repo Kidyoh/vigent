@@ -31,7 +31,7 @@ Press `i`, type what you want done, and press Enter. An agent starts on it in it
 - **Review and land.** `:diff` (or side by side), `:review` to drop hunks you don't want, then `:merge` or `:pr`.
 - **Your agents, as installed.** Each runs its own loop with its own login; vigent never reads credentials. `:checkhealth` shows what's installed and signed in.
 - **Vim all the way.** Modes, `/` search, folds, visual mode, `:set`, `:nmap`, `:command`, a which-key panel, and your Neovim colorscheme.
-- **Themes that change the layout.** `nebula` looks like a dressed-up Neovim (a lualine-style statusline, Nerd Font icons); `neon` puts each agent in a card and your prompts in chat bubbles; `zen` keeps it to one row per agent. `[style]` mixes any layout and icons with any colors.
+- **Themes that change the layout.** `nebula` looks like a dressed-up Neovim (a lualine-style statusline, Nerd Font icons); `neon` puts each agent in a card and your prompts in chat bubbles; `zen` keeps it quiet: one row per agent, Nerd Font icons when you have the font. `[style]` mixes any layout and icons with any colors.
 - **Follow from your phone.** `:serve` shows an address and an access code.
 
 ## Engines

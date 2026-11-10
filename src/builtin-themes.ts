@@ -370,18 +370,45 @@ export const NEON: Theme = {
 	},
 };
 
-/** zen: quiet greens and greys, one row per agent, a header over each message */
+/**
+ * zen: quiet greens and greys, one row per agent (the focused one opens to
+ * show its branch and model), a header over each message, the sidebar's text
+ * a shade softer than the transcript's. With icons = "nerd" it gets Nerd Font
+ * icons for states, branches, tools and the message headers.
+ */
+const ZEN_BASE = fromPalette("zen", {
+	bg: "#1b1d1c", fg: "#c9cdc5", red: "#c4746e", yellow: "#c9b98c", green: "#8fa37e",
+	cyan: "#8ea9a6", blue: "#8ba1b2", magenta: "#a593a8", muted: "#6d736e",
+});
 export const ZEN: Theme = {
-	...fromPalette("zen", {
-		bg: "#1b1d1c", fg: "#c9cdc5", red: "#c4746e", yellow: "#c9b98c", green: "#8fa37e",
-		cyan: "#8ea9a6", blue: "#8ba1b2", magenta: "#a593a8", muted: "#6d736e",
-	}),
+	...ZEN_BASE,
+	// the sidebar reads lighter than the conversation
+	groups: { ...ZEN_BASE.groups, VigentSidebar: { ...ZEN_BASE.groups.VigentSidebar, fg: "#a7ada3" } },
 	style: {
 		sidebar: "compact",
 		messages: "labeled",
-		tool_icons: "unicode",
+		tool_icons: "nerd",
+		separators: "round", // with a Nerd Font; the plain statusline without one
 		user_label: "you",
 		icons: { prompt: "› ", bullet: "·", worktree: "↳ ", folded: "›", open: "⌄", open_agent: "›", idle: "·", waiting: "◌", ok: "•", warn: "◌", off: "·", unread: "•" },
+		nerd_icons: {
+			prompt: "\uf460 ", // nf-oct-chevron_right
+			worktree: "\ue725 ", // nf-dev-git_branch
+			folded: "\uf460",
+			open: "\uf47c", // nf-oct-chevron_down
+			open_agent: "\uf2db", // nf-fa-microchip
+			idle: "\uf10c", // nf-fa-circle_o
+			waiting: "\uf252", // nf-fa-hourglass_half
+			paused: "\uf04c", // nf-fa-pause
+			error: "\uf00d", // nf-fa-times
+			ok: "\uf00c", // nf-fa-check
+			warn: "\uf071", // nf-fa-warning
+			off: "\uf10c",
+			unread: "\uf0f3", // nf-fa-bell
+			queued: "\uf017", // nf-fa-clock_o
+			user: "\uf007", // nf-fa-user
+			agent: "\uf2db",
+		},
 	},
 };
 

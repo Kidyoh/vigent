@@ -14,6 +14,9 @@
  *   prompt = "λ "
  *   worktree = "⑂ "
  *   idle = "◇"                # agent states: idle, waiting, paused, error
+ *
+ *   [style.nerd_icons]        # the same, used only with icons = "nerd"
+ *   idle = "\uf10c"
  */
 
 export const SIDEBAR_STYLES = ["tree", "cards", "compact"] as const;
@@ -46,6 +49,9 @@ export const ICON_NAMES = [
 	"waiting",
 	"paused",
 	"error",
+	// before the names in labeled and bubble messages (none by default)
+	"user",
+	"agent",
 ] as const;
 export type IconName = (typeof ICON_NAMES)[number];
 
@@ -57,6 +63,8 @@ export interface StyleSpec {
 	user_label?: string;
 	separators?: SeparatorStyle;
 	icons?: Partial<Record<IconName, string>>;
+	/** used over `icons` only with icons = "nerd" (a Nerd Font in the terminal) */
+	nerd_icons?: Partial<Record<IconName, string>>;
 }
 
 /** The style in effect. */
@@ -69,13 +77,14 @@ export interface Style {
 	/** the statusline's segments: plain, or lualine's powerline shapes (with a Nerd Font) */
 	separators: SeparatorStyle;
 	icons: Partial<Record<IconName, string>>;
+	nerdIcons: Partial<Record<IconName, string>>;
 }
 
-export const DEFAULT_STYLE: Style = { sidebar: "tree", messages: "plain", userLabel: "You", separators: "none", icons: {} };
+export const DEFAULT_STYLE: Style = { sidebar: "tree", messages: "plain", userLabel: "You", separators: "none", icons: {}, nerdIcons: {} };
 
 /** Layer styles, lowest first: the default, the theme's, yours. */
 export function resolveStyle(...layers: (StyleSpec | undefined)[]): Style {
-	const s: Style = { ...DEFAULT_STYLE, icons: {} };
+	const s: Style = { ...DEFAULT_STYLE, icons: {}, nerdIcons: {} };
 	for (const l of layers) {
 		if (!l) continue;
 		if (l.sidebar) s.sidebar = l.sidebar;
@@ -84,6 +93,7 @@ export function resolveStyle(...layers: (StyleSpec | undefined)[]): Style {
 		if (l.user_label) s.userLabel = l.user_label;
 		if (l.separators) s.separators = l.separators;
 		if (l.icons) Object.assign(s.icons, l.icons);
+		if (l.nerd_icons) Object.assign(s.nerdIcons, l.nerd_icons);
 	}
 	return s;
 }
@@ -119,19 +129,23 @@ export function parseStyle(value: unknown, where: string, warnings: string[]): S
 				else warnings.push(`${where} [style]: 'user_label' should be a string`);
 				break;
 			case "icons":
+			case "nerd_icons": {
 				if (!v || typeof v !== "object" || Array.isArray(v)) {
-					warnings.push(`${where} [style]: 'icons' should be a table, e.g. prompt = "λ "`);
+					warnings.push(`${where} [style]: '${k}' should be a table, e.g. prompt = "λ "`);
 					break;
 				}
-				out.icons = {};
+				const table: Partial<Record<IconName, string>> = {};
 				for (const [name, glyph] of Object.entries(v)) {
-					if (!(ICON_NAMES as readonly string[]).includes(name)) warnings.push(`${where} [style.icons]: unknown icon '${name}' (${ICON_NAMES.join(", ")})`);
-					else if (typeof glyph !== "string") warnings.push(`${where} [style.icons]: '${name}' should be a string`);
-					else out.icons[name as IconName] = glyph;
+					if (!(ICON_NAMES as readonly string[]).includes(name)) warnings.push(`${where} [style.${k}]: unknown icon '${name}' (${ICON_NAMES.join(", ")})`);
+					else if (typeof glyph !== "string") warnings.push(`${where} [style.${k}]: '${name}' should be a string`);
+					else table[name as IconName] = glyph;
 				}
+				if (k === "icons") out.icons = table;
+				else out.nerd_icons = table;
 				break;
+			}
 			default:
-				warnings.push(`${where} [style]: unknown option '${k}' (sidebar, messages, tool_icons, separators, user_label, icons)`);
+				warnings.push(`${where} [style]: unknown option '${k}' (sidebar, messages, tool_icons, separators, user_label, icons, nerd_icons)`);
 		}
 	}
 	for (const k of Object.keys(out) as (keyof StyleSpec)[]) if (out[k] === undefined) delete out[k];

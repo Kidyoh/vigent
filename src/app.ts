@@ -120,6 +120,9 @@ interface Icons {
 	ok: string;
 	warn: string;
 	off: string;
+	/** before your name and the engine's in labeled and bubble messages (a style may set them) */
+	user?: string;
+	agent?: string;
 }
 
 const ICONS: Record<UiOptions["icons"], Icons> = {
@@ -316,7 +319,9 @@ export class App implements Component {
 
 	private get icons(): Icons {
 		const base = ICONS[this.ui.icons];
-		let o = this.style.icons;
+		const style = this.style;
+		// [style.nerd_icons] only with a Nerd Font, over [style.icons]
+		let o = this.ui.icons === "nerd" ? { ...style.icons, ...style.nerdIcons } : style.icons;
 		// a Nerd Font glyph (private use area) only shows with one: without it, the icon set's own
 		if (this.ui.icons !== "nerd") o = Object.fromEntries(Object.entries(o).filter(([, g]) => !/[\ue000-\uf8ff]|[\u{f0000}-\u{10ffff}]/u.test(g ?? "")));
 		if (!Object.keys(o).length) return base;
@@ -3352,17 +3357,25 @@ export class App implements Component {
 			const statWidth = stat.reduce((n, [, t]) => n + visibleWidth(t), 0);
 
 			if (sidebarStyle === "compact") {
-				// one row each: number, state, name, and the +/- counts at the right
+				// one row each: a bar on the focused one, state, name, and the +/- counts (quiet) at the right
+				const bar = focused ? (ascii ? "> " : "▎ ") : "  ";
 				const left: [string, string][] = [
-					[focused ? "CursorLineNr" : "LineNr", num],
+					[focused ? "Title" : "LineNr", this.ui.number ? `${bar}${String(i + 1).padStart(2)} ` : bar],
 					[glyphGroup, `${glyph} `],
 					[focused ? "Title" : "VigentSidebar", s.name],
 					...marks,
 				];
+				const quiet: [string, string][] = stat.map(([, t]) => ["Comment", t]);
 				const leftW = left.reduce((n, [, t]) => n + visibleWidth(t), 0);
 				const room = w - statWidth - 2;
 				const fitted = fitSegments(left, room);
-				lines.push(row([...fitted, ["VigentSidebar", " ".repeat(Math.max(1, room - Math.min(leftW, room) + 1))], ...stat], rowBg));
+				lines.push(row([...fitted, ["VigentSidebar", " ".repeat(Math.max(1, room - Math.min(leftW, room) + 1))], ...(focused ? stat : quiet)], rowBg));
+				// the focused agent opens to show where it works and what it runs on
+				if (focused) {
+					const pad = " ".repeat(visibleWidth(left[0][1]) + visibleWidth(`${glyph} `));
+					if (s.worktree) lines.push(row([["VigentSidebar", pad], ["Comment", truncateToWidth(`${I.worktree}${s.worktree.branch}`, Math.max(4, w - pad.length - 1), "…")]]));
+					lines.push(row([["VigentSidebar", pad], ["Comment", truncateToWidth(`${model} · ${formatUsage(s)}`, Math.max(4, w - pad.length - 1), "…")]]));
+				}
 				return;
 			}
 
@@ -3431,7 +3444,9 @@ export class App implements Component {
 				]),
 			);
 			const def = this.defaultEngine();
-			for (const e of engines) {
+			// compact: the engines you have, and one line for the rest
+			const folded = this.style.sidebar === "compact" ? engines.filter((e) => !e.installed && !e.checking) : [];
+			for (const e of engines.filter((x) => !folded.includes(x))) {
 				const glyph = e.connected ? I.ok : e.installed ? I.warn : I.off;
 				const group = e.connected ? "String" : e.installed ? "WarningMsg" : "Comment";
 				const note = e.checking
@@ -3457,6 +3472,10 @@ export class App implements Component {
 					]),
 				);
 			}
+		}
+		if (block.length && this.style.sidebar === "compact") {
+			const rest = (this.engines ?? []).filter((e) => !e.installed && !e.checking).length;
+			if (rest) block.push(row([["Comment", `  ${I.off} ${rest} more · :checkhealth`]]));
 		}
 		while (lines.length < h - block.length) lines.push(row([["EndOfBuffer", this.ui.tilde ? "~" : ""]]));
 		lines.push(...block);
@@ -3512,7 +3531,7 @@ export class App implements Component {
 						const [tl, tr, bl, br, hz, vt] = ascii ? ["+", "+", "+", "+", "-", "|"] : ["╭", "╮", "╰", "╯", "─", "│"];
 						const maxText = Math.max(8, Math.floor(paneW * 0.75) - 4);
 						const wrapped = item.text.split("\n").flatMap((l) => wrapTextWithAnsi(l, maxText));
-						const label = ` ${style.userLabel} `;
+						const label = ` ${I.user ? `${I.user} ` : ""}${style.userLabel} `;
 						const textW = Math.min(maxText, Math.max(visibleWidth(label) + 1, ...wrapped.map((l) => visibleWidth(l))));
 						const pad = " ".repeat(Math.max(0, paneW - textW - 4));
 						const top = `${tl}${hz}${label}${hz.repeat(Math.max(0, textW + 1 - visibleWidth(label)))}${tr}`;
@@ -3527,7 +3546,8 @@ export class App implements Component {
 					}
 					if (style.messages === "labeled") {
 						const bar = this.ui.icons === "ascii" ? "| " : "▎ ";
-						push(P.p("VigentUser", `${bar}${style.userLabel}`), `${bar}${style.userLabel}`, { item: n, start: true });
+						const head = `${bar}${I.user ? `${I.user} ` : ""}${style.userLabel}`;
+						push(P.p("VigentUser", head), head, { item: n, start: true });
 						wrapTextWithAnsi(item.text, paneW - 2).forEach((l) => push(`  ${P.s("Normal")}${paint(l)}`, `  ${stripAnsi(l)}`, { item: n }));
 						break;
 					}
@@ -3549,9 +3569,11 @@ export class App implements Component {
 					const indent = style.messages === "labeled" ? "  " : "";
 					if (style.messages === "labeled") {
 						const bar = this.ui.icons === "ascii" ? "| " : "▎ ";
-						push(P.p("Title", `${bar}${who}`), `${bar}${who}`, { item: n, start: true });
+						const head = `${bar}${I.agent ? `${I.agent} ` : ""}${who}`;
+						push(P.p("Title", head), head, { item: n, start: true });
 					} else if (style.messages === "bubbles") {
-						push(P.p("Special", `${I.open_agent} `) + P.p("Title", who), `${I.open_agent} ${who}`, { item: n, start: true });
+						const mark = I.agent ?? I.open_agent;
+						push(P.p("Special", `${mark} `) + P.p("Title", who), `${mark} ${who}`, { item: n, start: true });
 					}
 					const md = renderMarkdown(text, paneW - indent.length, P, I.bullet, nextBlock, { ascii: this.ui.icons === "ascii" });
 					md.lines.forEach((l, i) =>

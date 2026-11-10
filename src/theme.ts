@@ -431,7 +431,12 @@ export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set
 	if (spec.style !== undefined) {
 		// a theme file's style mistakes are left out; the rest of the style still counts
 		const own = parseStyle(spec.style, `theme '${name}'`, []);
-		style = { ...style, ...own, ...(style?.icons || own.icons ? { icons: { ...style?.icons, ...own.icons } } : {}) };
+		style = {
+			...style,
+			...own,
+			...(style?.icons || own.icons ? { icons: { ...style?.icons, ...own.icons } } : {}),
+			...(style?.nerd_icons || own.nerd_icons ? { nerd_icons: { ...style?.nerd_icons, ...own.nerd_icons } } : {}),
+		};
 	}
 	if (spec.palette) {
 		const missing = (["bg", "fg", "red", "yellow", "green", "cyan", "blue", "magenta"] as const).filter(
