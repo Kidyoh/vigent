@@ -5,11 +5,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ProcessTerminal, TUI } from "./tui.js";
 import { type AgentMeta, loadAgentMeta, reopenableAgents, saveAgentMeta, sessionDir } from "./agents.js";
+import { PI_BIN } from "./pi-cli.js";
 import { App } from "./app.js";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./notify.js";
 import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
-import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
+import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, ENGINE_NAMES, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig, PROJECT_CONFIG } from "./config.js";
 import { isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
@@ -447,11 +448,24 @@ async function main(): Promise<number | undefined> {
 		if (!wt?.path) return piSession(name, m, { cwd, effort });
 		return piSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path), effort });
 	};
-	/** Reopen a saved agent with the engine it was started with. */
-	const reopen = (meta: AgentMeta, worktree: WorktreeInfo): Session => {
+	/** Saved on pi (agents from before vigent recorded engines are too), and pi isn't here. */
+	const stranded = (meta: AgentMeta) => (!meta.engine || !isEngineId(meta.engine) || meta.engine === "pi") && !onPath(PI_BIN);
+	/** A pi agent can never answer without pi: the record that moves it to the engine you do have, if there is one. */
+	const movedOffPi = (meta: AgentMeta): AgentMeta | undefined => {
+		const engine = app.defaultEngine();
+		if (!stranded(meta) || engine === "pi" || !app.engines?.find((e) => e.id === engine)?.installed) return undefined;
+		// pi's model and thinking level mean nothing to another engine
+		return { ...meta, engine, model: "", requestedModel: config.engines[engine]?.model, effort: undefined, resumeId: undefined, detached: undefined };
+	};
+	/** Reopen a saved agent with the engine it was started with (or, without pi, the one it moved to). */
+	const reopen = (saved: AgentMeta, worktree: WorktreeInfo): Session => {
+		const moved = movedOffPi(saved);
+		if (moved) saveAgentMeta(worktree.path!, moved);
+		const meta = moved ?? saved;
 		const engine = meta.engine && isEngineId(meta.engine) ? meta.engine : "pi";
 		if (engine !== "pi") {
 			const s = cliSession(meta.name, engine, meta.requestedModel, worktree.path!, worktree, meta.resumeId, meta.effort);
+			if (moved) s.pushInfo(`pi isn't installed, so this agent now runs on ${ENGINE_NAMES[engine]}. It starts a new conversation in the same worktree; the pi one stays on disk.`);
 			// the CLI keeps the conversation; vigent keeps the running totals
 			s.tokens = meta.usage?.tokens ?? 0;
 			s.cost = meta.usage?.cost;
@@ -497,6 +511,8 @@ async function main(): Promise<number | undefined> {
 		// riftri views on OverlayFS lose their mount on reboot: they're repaired before any agent's record is read
 		const { agents, blocked } = reopenableAgents(root, config.worktree, prepareViews);
 		for (const b of blocked) warnings.push(`couldn't reopen the agent in ${b.path}: ${b.reason}`);
+		// a stranded agent moves for good, so wait to learn which engine is signed in
+		if (agents.some((a) => stranded(a.meta))) await detectEngines().then((engines) => app.setEngines(engines), () => {});
 		for (const { meta, worktree, backend } of agents) {
 			try {
 				app.addSession(reopen(meta, { ...worktree, riftri: backend }), false);

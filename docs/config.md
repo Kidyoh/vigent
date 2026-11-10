@@ -303,6 +303,8 @@ In a project's `.vigent.toml`, a `command` is a program to run, so it waits for 
 
 An open agent keeps its engine, because its conversation lives there. So a model from another engine is used by new agents instead, and `:new <task>` starts one. `:model codex:gpt-5.5` does this without the picker.
 
+The one exception is a pi agent when pi is no longer installed: at the next start it moves to your default engine and says so. It starts a new conversation in the same worktree, and the pi one stays on disk.
+
 Press `/` to filter by name or id. Enter on text that matches nothing uses the typed name as-is.
 
 `:effort` (`<Space>R`) picks the reasoning effort the same way.
