@@ -1857,9 +1857,12 @@ export class App implements Component {
 		if (value === undefined) delete opts[key];
 		else opts[key] = value;
 		this.permissionsChanged.add(id);
+		// kept at once: a permission you set stays set, across agents and restarts
+		const saved = this.savePermissions();
+		if (saved.startsWith("couldn't")) this.setMessage(`${saved} (it applies until vigent quits)`, "WarningMsg");
 	}
 
-	/** engines whose permissions :permissions changed (what w saves) */
+	/** engines whose permissions :permissions changed (what savePermissions writes) */
 	private permissionsChanged = new Set<EngineId>();
 
 	/**
@@ -1878,7 +1881,7 @@ export class App implements Component {
 				else allow.delete(rule);
 			}
 			this.setEngineOption("claude", "allow", [...allow]);
-			this.setMessage(`${m[1] === "allow" ? "allowed" : "removed"} ${rules.join(" ")} for Claude Code (from its next prompt) · :permissions, then w, saves it`, "Comment");
+			this.setMessage(`${m[1] === "allow" ? "allowed" : "removed"} ${rules.join(" ")} for Claude Code (saved; from its next prompt)`, "Comment");
 			return;
 		}
 		if (arg.trim()) {
@@ -1974,7 +1977,7 @@ export class App implements Component {
 			},
 			() => this.savePermissions(),
 			() => this.tui.requestRender(),
-			"Permissions · from each agent's next prompt",
+			"Permissions · saved as you change them, used from each agent's next prompt",
 		);
 		handle = this.tui.showOverlay(float, { width: Math.min(110, this.terminal.columns - 4), anchor: "center" });
 		this.tui.requestRender();

@@ -46,7 +46,7 @@ const press = (panel, label, ...keys) => {
 	for (const k of keys) panel.handleInput(k);
 };
 
-test(":permissions toggles each agent's permissions; agents use them from their next prompt; w saves them", async () => {
+test(":permissions toggles each agent's permissions; agents use them from their next prompt; each change is saved at once", async () => {
 	const { app, overlays, ex } = makeApp();
 	const engines = (app.engineOptions = {}); // shared with the CLI, as cli.ts does
 	ex("permissions");
@@ -85,7 +85,7 @@ test(":permissions toggles each agent's permissions; agents use them from their 
 	assert.deepEqual(argv.slice(argv.indexOf("--permission-mode"), argv.indexOf("--permission-mode") + 2), ["--permission-mode", "bypassPermissions"]);
 	assert.deepEqual(argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--allowedTools") + 3), ["Bash(gh:*)", "WebFetch"]);
 
-	panel.handleInput("w");
+	// no w needed: every change was written as it was made
 	const file = path.join(tmp, "xdg", "vigent", "config.toml");
 	const { config, warnings } = loadConfig(file);
 	assert.deepEqual(warnings, []);
@@ -100,6 +100,8 @@ test(":permissions allow <rule> / remove <rule>; :settings links to the panel", 
 	app.engineOptions = { claude: { allow: ["Bash(gh:*)"] } };
 	ex("permissions allow Bash(cargo:*)");
 	assert.deepEqual(app.engineOptions.claude.allow, ["Bash(gh:*)", "Bash(cargo:*)"]);
+	assert.deepEqual(loadConfig(path.join(tmp, "xdg", "vigent", "config.toml")).config.engines.claude.allow, ["Bash(gh:*)", "Bash(cargo:*)"], "saved, so it's still allowed after a restart");
+	assert.match(app.message, /saved; from its next prompt/);
 	assert.match(app.message, /allowed Bash\(cargo:\*\) for Claude Code/);
 	ex("permissions remove Bash(gh:*)");
 	assert.deepEqual(app.engineOptions.claude.allow, ["Bash(cargo:*)"]);

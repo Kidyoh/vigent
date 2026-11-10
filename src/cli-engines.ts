@@ -794,7 +794,7 @@ export class CliSession extends Session {
 				const allowed = new Set(this.opts.allow?.() ?? []);
 				const missing = rules.filter((r) => !allowed.has(r));
 				if (missing.length) {
-					this.pushInfo(`to allow it: :permissions allow ${missing.join(" ")}, then ask it to try again (allowing applies from its next prompt; or turn on asking in :permissions)`);
+					this.pushInfo(`to allow it: :permissions allow ${missing.join(" ")}, then ask it to try again (it's saved, and applies from its next prompt; or turn on asking in :permissions)`);
 				} else {
 					// everything it refused is allowed already: Claude Code wants approval for this kind of command anyway
 					this.pushInfo(

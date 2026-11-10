@@ -242,7 +242,7 @@ test("the refused-tool message: what to allow (only what isn't yet), from the ne
 	await settle(s);
 	let info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
 	assert.ok(info.some((t) => t.startsWith(`blocked by Claude Code's permissions: ${loop}`)), info.join("\n"));
-	assert.ok(info.some((t) => /^to allow it: :permissions allow Bash\(jq:\*\), then ask it to try again \(allowing applies from its next prompt/.test(t)), `only jq is missing: ${info.join("\n")}`);
+	assert.ok(info.some((t) => /^to allow it: :permissions allow Bash\(jq:\*\), then ask it to try again \(it's saved, and applies from its next prompt/.test(t)), `only jq is missing: ${info.join("\n")}`);
 
 	// everything is allowed and Claude Code still refused: say so, and what does work
 	allow = ["Bash(gh:*)", "Bash(jq:*)"];

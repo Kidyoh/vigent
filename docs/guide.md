@@ -75,7 +75,7 @@ model_args = ["--model", "{model}"]
 | Gemini CLI | its approval mode (`default`, `auto_edit`, `yolo`) |
 | Cursor CLI | running commands without asking (`--force`) |
 
-Changes apply from each agent's next prompt, agents already open included; `w` saves them to config.toml. `:permissions allow Bash(cargo:*)` adds any other Claude Code rule (several at once work too), and `:permissions remove <rule>` takes one away. It's also a row in `:settings`. The same settings live in `[engines.<id>]` ([details](config.md#when-claude-code-is-refused-a-tool)).
+Each change is saved to config.toml as you make it, so it stays set after a restart, and applies from each agent's next prompt, agents already open included. `:permissions allow Bash(cargo:*)` adds any other Claude Code rule (several at once work too), and `:permissions remove <rule>` takes one away. It's also a row in `:settings`. The same settings live in `[engines.<id>]` ([details](config.md#when-claude-code-is-refused-a-tool)).
 
 ### pi: extensions, skills and prompt templates
 
