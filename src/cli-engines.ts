@@ -787,10 +787,21 @@ export class CliSession extends Session {
 	 */
 	private blocked(denied: Denial[]): boolean {
 		const what = [...new Set(denied.map((d) => this.relative(describeDenial(d))))];
-		const rules = [...new Set(denied.map(allowRule))];
+		const rules = [...new Set(denied.flatMap(allowRules))];
 		this.pushInfo(`blocked by ${this.engineName}'s permissions: ${what.join(" · ")}`);
 		if (!this.asksToAllow || !this.approver) {
-			if (this.engine === "claude") this.pushInfo(`to allow it: :permissions allow ${rules.join(" ")} (or :permissions, to toggle it or be asked each time)`);
+			if (this.engine === "claude") {
+				const allowed = new Set(this.opts.allow?.() ?? []);
+				const missing = rules.filter((r) => !allowed.has(r));
+				if (missing.length) {
+					this.pushInfo(`to allow it: :permissions allow ${missing.join(" ")}, then ask it to try again (allowing applies from its next prompt; or turn on asking in :permissions)`);
+				} else {
+					// everything it refused is allowed already: Claude Code wants approval for this kind of command anyway
+					this.pushInfo(
+						`${rules.join(" ")} ${rules.length === 1 ? "is" : "are"} allowed, and Claude Code still refused: it asks before some commands whatever the rules say. In :permissions, set Mode to bypassPermissions (anything, in its worktree) or turn on asking, then ask it to try again.`,
+					);
+				}
+			}
 			return false;
 		}
 		this.setState("waiting");
@@ -875,20 +886,52 @@ export function describeDenial(d: Denial): string {
 	return s ? `${d.name} ${s}`.slice(0, 80) : d.name;
 }
 
+/** Shell words that aren't programs: loops, conditionals, and what only introduces a command. */
+const SHELL_KEYWORDS = new Set(["for", "in", "do", "done", "while", "until", "if", "then", "elif", "else", "fi", "case", "esac", "select", "function", "time", "!", "{", "}", "[[", "]]", "[", "]"]);
+
 /**
- * The Claude Code permission rule that allows a refused call: `Bash(gh:*)`
- * for a command (its program, any arguments), the tool's name otherwise.
+ * The programs a shell command runs: each command of a pipeline, list (`;`,
+ * `&&`, `||`), loop body or `$(...)`, without shell keywords and `VAR=value`
+ * prefixes. `for id in 1 2; do gh run view $id | jq .x; done` runs gh and jq.
  */
-export function allowRule(d: Denial): string {
-	if (d.name === "Bash" && typeof d.input?.command === "string") {
-		// skip leading VAR=value assignments; the program is the first word
-		const words = d.input.command.trim().split(/\s+/).filter((w: string) => w);
-		const prog = words.find((w: string) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
-		const m = prog && /^[^\s;&|()<>`$'"]+/.exec(prog);
-		if (m) return `Bash(${m[0]}:*)`;
-		return "Bash";
+export function commandPrograms(command: string): string[] {
+	// quoted text is an argument, never a command boundary
+	const text = command
+		.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, " _ ")
+		// redirections (2>&1, &>, >>) aren't command boundaries either
+		.replace(/\d*>&\d*|&>>?|\d*>>?|<<?/g, " ");
+	const out: string[] = [];
+	for (const segment of text.split(/\$\(|`|&&|\|\||[;|&\n()]/)) {
+		const words = segment.trim().split(/\s+/).filter(Boolean);
+		// `for x in a b` and `case $x in` name no program
+		if (words[0] === "for" || words[0] === "select" || words[0] === "case") continue;
+		// `if [ -f a ]`, `while [[ … ]]`: a test, not a program
+		const head = words.find((w) => !["if", "elif", "while", "until", "!"].includes(w));
+		if (head === "[" || head === "[[" || head === "test") continue;
+		const prog = words.find((w) => !SHELL_KEYWORDS.has(w) && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+		const m = prog && /^[^\s;&|()<>`$'"{}]+/.exec(prog);
+		if (m && !out.includes(m[0])) out.push(m[0]);
 	}
-	return d.name;
+	return out;
+}
+
+/**
+ * The Claude Code permission rules that allow a refused call: `Bash(gh:*)`
+ * for each program a command runs (any arguments), the tool's name otherwise.
+ * Claude Code checks every command of a pipeline, list or loop on its own,
+ * so `gh … | jq …` needs both.
+ */
+export function allowRules(d: Denial): string[] {
+	if (d.name === "Bash" && typeof d.input?.command === "string") {
+		const progs = commandPrograms(d.input.command);
+		return progs.length ? progs.map((p) => `Bash(${p}:*)`) : ["Bash"];
+	}
+	return [d.name];
+}
+
+/** The first of allowRules (kept for callers that want one). */
+export function allowRule(d: Denial): string {
+	return allowRules(d)[0];
 }
 
 function contentOf(message: any): any[] {

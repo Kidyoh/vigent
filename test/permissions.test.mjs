@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { allowRule, CLI_ADAPTERS, CliSession, describeDenial } from "../dist/cli-engines.js";
+import { allowRule, allowRules, CLI_ADAPTERS, CliSession, commandPrograms, describeDenial } from "../dist/cli-engines.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vigent-permissions-"));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -60,7 +60,8 @@ function settle(s) {
 test("a refused call becomes a permission rule: the program for a command, the tool's name otherwise", () => {
 	assert.equal(allowRule({ name: "Bash", input: { command: "gh pr view 12" } }), "Bash(gh:*)");
 	assert.equal(allowRule({ name: "Bash", input: { command: "  FOO=1 BAR=2 cargo test --all" } }), "Bash(cargo:*)");
-	assert.equal(allowRule({ name: "Bash", input: { command: "$(evil)" } }), "Bash");
+	assert.equal(allowRule({ name: "Bash", input: { command: "$(evil)" } }), "Bash(evil:*)", "what $(...) runs is a program too");
+	assert.equal(allowRule({ name: "Bash", input: { command: "   " } }), "Bash");
 	assert.equal(allowRule({ name: "WebFetch", input: { url: "https://x.dev" } }), "WebFetch");
 	assert.equal(describeDenial({ name: "Bash", input: { command: "gh  pr\nview 12" } }), "gh pr view 12");
 	assert.equal(describeDenial({ name: "WebFetch", input: { url: "https://x.dev" } }), "WebFetch https://x.dev");
@@ -101,7 +102,7 @@ test("without ask (the default): a refused tool is said, with how to allow it; n
 	assert.equal(fake.calls().length, 1);
 	const info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
 	assert.ok(info.some((t) => /blocked by Claude Code's permissions: gh pr view 12 --json title · GH_PAGER= gh pr checks 12 · WebFetch https:\/\/example.com/.test(t)), info.join("\n"));
-	assert.ok(info.some((t) => t.includes(":permissions allow Bash(gh:*) WebFetch") && t.includes("be asked each time")), info.join("\n"));
+	assert.ok(info.some((t) => t.includes(":permissions allow Bash(gh:*) WebFetch, then ask it to try again") && t.includes("next prompt")), info.join("\n"));
 	s.dispose();
 });
 
@@ -205,3 +206,50 @@ test("the app asks in a picker: allow once / always allow / no, naming the agent
 	assert.ok(fake.calls()[1].includes("--allowedTools"));
 	s.dispose();
 });
+
+test("chained commands: a rule for every program a pipeline, list, loop or $(...) runs", () => {
+	const cases = [
+		["gh run list --limit 200 --json databaseId,headSha | jq -r '.[] | select(.x)'", ["gh", "jq"]],
+		['for id in 42727 409956; do gh run view $id --log-failed | grep -n "ETIMEDOUT"; done', ["gh", "grep"]],
+		['echo "--- per job; still text"; gh api "repos/{owner}/{repo}/actions/jobs/129"', ["echo", "gh"]],
+		["GH_PAGER= gh pr checks 12", ["gh"]],
+		["cd crates && cargo test -p riftri-git 2>&1 | tail -20", ["cd", "cargo", "tail"]],
+		["x=$(git rev-parse HEAD) && echo $x", ["git", "echo"]],
+		["if [ -f a ]; then rm a; fi", ["rm"]],
+		["while [[ -n $x ]]; do sleep 1; done", ["sleep"]],
+		["npm test > out.log 2>&1 &", ["npm"]],
+	];
+	for (const [cmd, progs] of cases) assert.deepEqual(commandPrograms(cmd), progs, cmd);
+	assert.deepEqual(allowRules({ name: "Bash", input: { command: "for id in 1 2; do gh run view $id | jq .x; done" } }), ["Bash(gh:*)", "Bash(jq:*)"], "never Bash(for:*)");
+});
+
+/** A fake Claude Code that refuses one command whatever it's run with. */
+function refusingClaude(name, command) {
+	const dir = path.join(tmp, name);
+	fs.mkdirSync(dir, { recursive: true });
+	const file = path.join(dir, "claude");
+	const result = { type: "result", subtype: "success", is_error: false, result: "couldn't", session_id: "s-9", permission_denials: [{ tool_name: "Bash", tool_use_id: "t", tool_input: { command } }] };
+	fs.writeFileSync(file, `#!/usr/bin/env node\nfor (const e of [${JSON.stringify(init)}, ${JSON.stringify(result)}]) console.log(JSON.stringify(e));\n`);
+	fs.chmodSync(file, 0o755);
+	return file;
+}
+
+test("the refused-tool message: what to allow (only what isn't yet), from the next prompt; and when it's all allowed already", async () => {
+	const loop = "for id in 1 2; do gh run view $id | jq .x; done";
+	let allow = ["Bash(gh:*)"];
+	const s = new CliSession("loop", "claude", undefined, { cwd: tmp, bin: refusingClaude("loop", loop), allow: () => allow });
+	s.send("look at the runs");
+	await settle(s);
+	let info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
+	assert.ok(info.some((t) => t.startsWith(`blocked by Claude Code's permissions: ${loop}`)), info.join("\n"));
+	assert.ok(info.some((t) => /^to allow it: :permissions allow Bash\(jq:\*\), then ask it to try again \(allowing applies from its next prompt/.test(t)), `only jq is missing: ${info.join("\n")}`);
+
+	// everything is allowed and Claude Code still refused: say so, and what does work
+	allow = ["Bash(gh:*)", "Bash(jq:*)"];
+	s.send("again");
+	await settle(s);
+	info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
+	assert.ok(info.some((t) => /^Bash\(gh:\*\) Bash\(jq:\*\) are allowed, and Claude Code still refused: .*bypassPermissions.*asking/.test(t)), info.join("\n"));
+	s.dispose();
+});
+
