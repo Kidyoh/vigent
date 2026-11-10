@@ -391,6 +391,7 @@ async function main(): Promise<number | undefined> {
 	app.templates = config.templates;
 	app.hooks = config.hooks;
 	app.layout = config.layout;
+	app.styleConfig = config.style;
 	app.commands = config.commands;
 	// :trust: let this project's .vigent.toml run its commands, from now on
 	app.trustProject = () => {
@@ -401,6 +402,7 @@ async function main(): Promise<number | undefined> {
 		loadConfig(projectFile, { base: config, trusted: true, label: PROJECT_CONFIG });
 		app.hooks = config.hooks;
 		app.layout = config.layout;
+		app.styleConfig = config.style;
 		app.commands = config.commands;
 		return `trusted ${PROJECT_CONFIG}${gated.length ? `: ${gated.join(", ")} now run` : ""}`;
 	};

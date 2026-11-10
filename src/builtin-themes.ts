@@ -354,6 +354,37 @@ export const AYU_MIRAGE = fromPalette("ayu-mirage", {
 	cyan: "#95e6cb", blue: "#73d0ff", magenta: "#dfbfff", accent: "#ffcc66",
 });
 
+// Themes with a style of their own: colors, and how vigent lays things out (see style.ts).
+
+/** neon: synthwave colors, a card per agent, your prompts in chat bubbles */
+export const NEON: Theme = {
+	...fromPalette("neon", {
+		bg: "#140b26", fg: "#ece0ff", red: "#ff5c8a", yellow: "#ffd166", green: "#4dffb8",
+		cyan: "#2de2e6", blue: "#7aa2ff", magenta: "#ff4fd8", bg_dark: "#0e0720", muted: "#8a76b3",
+	}),
+	style: {
+		sidebar: "cards",
+		messages: "bubbles",
+		tool_icons: "unicode",
+		icons: { prompt: "» ", open_agent: "◆", worktree: "⑂ ", bullet: "▸", unread: "✦", idle: "◇", waiting: "◈", ok: "◆", warn: "◈", off: "◇", queued: "⋯" },
+	},
+};
+
+/** zen: quiet greens and greys, one row per agent, a header over each message */
+export const ZEN: Theme = {
+	...fromPalette("zen", {
+		bg: "#1b1d1c", fg: "#c9cdc5", red: "#c4746e", yellow: "#c9b98c", green: "#8fa37e",
+		cyan: "#8ea9a6", blue: "#8ba1b2", magenta: "#a593a8", muted: "#6d736e",
+	}),
+	style: {
+		sidebar: "compact",
+		messages: "labeled",
+		tool_icons: "unicode",
+		user_label: "you",
+		icons: { prompt: "› ", bullet: "·", worktree: "↳ ", folded: "›", open: "⌄", open_agent: "›", idle: "·", waiting: "◌", ok: "•", warn: "◌", off: "·", unread: "•" },
+	},
+};
+
 export const BUILTIN_THEMES: Record<string, Theme> = {
 	default: NVIM_DEFAULT,
 	gruvbox: GRUVBOX,
@@ -380,4 +411,6 @@ export const BUILTIN_THEMES: Record<string, Theme> = {
 	"github-light": GITHUB_LIGHT,
 	"monokai-pro": MONOKAI_PRO,
 	"ayu-mirage": AYU_MIRAGE,
+	neon: NEON,
+	zen: ZEN,
 };

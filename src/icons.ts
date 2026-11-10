@@ -37,16 +37,23 @@ export const NERD = {
 	bell: "", // nf-fa-bell
 } as const;
 
-/** An icon for a tool call, by the tool's name (Claude Code, Codex, OpenCode and pi names). */
-export function toolIcon(name: string): string {
+export type ToolKind = "terminal" | "pencil" | "fileText" | "search" | "globe" | "list" | "wrench";
+
+/** What kind of tool a call is, by its name (Claude Code, Codex, OpenCode, Gemini, Cursor and pi names). */
+export function toolKind(name: string): ToolKind {
 	const n = name.toLowerCase();
-	if (/bash|shell|exec|command|run/.test(n)) return NERD.terminal;
-	if (/edit|write|patch|apply/.test(n)) return NERD.pencil;
-	if (/read|view|cat|open/.test(n)) return NERD.fileText;
-	if (/grep|glob|search|find|^ls$|list/.test(n)) return NERD.search;
-	if (/web|fetch|http|url/.test(n)) return NERD.globe;
-	if (/todo|plan|task/.test(n)) return NERD.list;
-	return NERD.wrench;
+	if (/bash|shell|exec|command|run|terminal/.test(n)) return "terminal";
+	if (/edit|write|patch|apply|replace/.test(n)) return "pencil";
+	if (/read|view|cat|open/.test(n)) return "fileText";
+	if (/grep|glob|search|find|^ls$|list/.test(n)) return "search";
+	if (/web|fetch|http|url/.test(n)) return "globe";
+	if (/todo|plan|task/.test(n)) return "list";
+	return "wrench";
+}
+
+/** A Nerd Font icon for a tool call, by the tool's name. */
+export function toolIcon(name: string): string {
+	return NERD[toolKind(name)];
 }
 
 /**

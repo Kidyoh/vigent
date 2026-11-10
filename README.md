@@ -31,6 +31,7 @@ Press `i`, type what you want done, and press Enter. An agent starts on it in it
 - **Review and land.** `:diff` (or side by side), `:review` to drop hunks you don't want, then `:merge` or `:pr`.
 - **Your agents, as installed.** Each runs its own loop with its own login; vigent never reads credentials. `:checkhealth` shows what's installed and signed in.
 - **Vim all the way.** Modes, `/` search, folds, visual mode, `:set`, `:nmap`, `:command`, a which-key panel, and your Neovim colorscheme.
+- **Themes that change the layout.** `neon` puts each agent in a card and your prompts in chat bubbles; `zen` keeps it to one row per agent. `[style]` mixes any layout and icons with any colors.
 - **Follow from your phone.** `:serve` shows an address and an access code.
 
 ## Engines
@@ -89,7 +90,7 @@ Test = "!npm test"              # :Test runs in the agent's worktree
 
 - **[Using vigent](docs/guide.md):** engines, worktrees, reviewing, notifications, `:serve`, every key
 - **[Configuration](docs/config.md):** every option, engine setting, hook, command and key
-- **[Themes](docs/themes.md):** 25 built-in themes, importing any vim or Neovim colorscheme, highlight groups
+- **[Themes](docs/themes.md):** 27 built-in themes, layout styles (cards or compact sidebar, labeled or bubble messages, your own icons), importing any vim or Neovim colorscheme
 
 ## From source
 

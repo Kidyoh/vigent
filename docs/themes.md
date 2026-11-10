@@ -21,7 +21,7 @@ Files live in `~/.config/vigent/` (or `$XDG_CONFIG_HOME/vigent/`). `vigent theme
 
 ## Built-in themes
 
-25 of them, dark and light:
+27 of them, dark and light:
 
 | | |
 |---|---|
@@ -32,10 +32,56 @@ Files live in `~/.config/vigent/` (or `$XDG_CONFIG_HOME/vigent/`). `vigent theme
 | GitHub | `github-dark`, `github-light` (light) |
 | solarized | `solarized-dark`, `solarized-light` (light) |
 | more | `gruvbox`, `kanagawa`, `nord`, `dracula`, `onedark`, `everforest`, `nightfox`, `monokai-pro`, `ayu-mirage` |
+| with a layout of their own | `neon` (cards, chat bubbles), `zen` (compact rows, labeled messages); see [Styles](#styles-layout-and-icons) |
 
 `:colorscheme` (or `<Space>t`) opens a picker that shows each theme's colors and whether it's dark, light or transparent, and previews the one under the cursor live. Type to filter, Enter keeps it, Esc goes back.
 
 `lazyvim` is the look LazyVim starts with: tokyonight's "moon" palette with its highlight choices (orange current line number, blue rounded float borders, cyan italic keywords, blue / green / magenta / yellow mode badges), drawn on the terminal's own background. `tokyonight-moon` is the same theme with solid backgrounds.
+
+## Styles: layout and icons
+
+A theme can change how vigent is laid out, not only its colors: the sidebar, how messages look, and any icon. That part is its **style**, a `[style]` table in the theme file. `[style]` in config.toml sets the same things over whatever the theme says, so you can pair any colors with any layout.
+
+```toml
+[style]
+sidebar = "cards"          # tree (default), cards, compact
+messages = "bubbles"       # plain (default), labeled, bubbles
+tool_icons = "unicode"     # none, unicode, nerd (default: nerd with icons = "nerd", else none)
+user_label = "you"         # what labeled and bubble messages call you (default "You")
+
+[style.icons]              # replace any glyph
+prompt = "λ "
+worktree = "⑂ "
+idle = "◇"                 # agent states: idle, waiting, paused, error
+```
+
+| Option | Choices |
+|---|---|
+| `sidebar` | `tree`: neo-tree's look, a branch line under each agent. `cards`: a box per agent with its branch, changes, model and tokens. `compact`: one row per agent, the `+/-` counts at the right |
+| `messages` | `plain`: `❯` before your prompts. `labeled`: a header over each message (you, or the engine's name) with the text indented under it. `bubbles`: your prompts in a box at the right, like a chat; replies named by their engine |
+| `tool_icons` | an icon before each tool call: `unicode` (▶ shell, ✎ edit, ☰ read, ⌕ search, ◍ web, ☑ plan, ⚙ other) works in any font; `nerd` needs a Nerd Font |
+| `icons` | `prompt`, `worktree`, `folded`, `open`, `cursor`, `bullet`, `queued`, `open_agent`, `here`, `unread`, `light`, `ok`, `warn`, `off`, `sep`, and the agent states `idle`, `waiting`, `paused`, `error` |
+
+`:settings` (`<Space>s`) cycles the sidebar and message styles and saves them to `[style]`. `:colorscheme` previews a theme's layout along with its colors.
+
+The built-in `neon` and `zen` show what a style does:
+
+![neon: a card per agent, your prompt in a chat bubble, unicode tool icons](screenshots/theme-neon.png)
+
+![zen: one row per agent, a header over each message, quiet glyphs](screenshots/theme-zen.png)
+
+To make your own, extend one and change what you like (see [Writing your own theme](#writing-your-own-theme)):
+
+```toml
+# ~/.config/vigent/themes/mine.toml
+extends = "tokyonight"     # its colors
+[style]
+sidebar = "cards"
+messages = "labeled"
+tool_icons = "unicode"
+[style.icons]
+prompt = "λ "
+```
 
 ## Transparent backgrounds
 

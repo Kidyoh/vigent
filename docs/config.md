@@ -129,6 +129,19 @@ right = ["path"]
 
 A part with nothing to show (no effort set, no worktree) is left out. On the winbar, the right side gives way first when the line is too narrow.
 
+## `[style]`
+
+How vigent is laid out, over the theme's own style: the sidebar (`tree`, `cards`, `compact`), messages (`plain`, `labeled`, `bubbles`), tool-call icons and any glyph. See [Styles in themes.md](themes.md#styles-layout-and-icons).
+
+```toml
+[style]
+sidebar = "compact"
+messages = "labeled"
+tool_icons = "unicode"
+[style.icons]
+prompt = "λ "
+```
+
 ## `[highlights]`
 
 Overrides for any highlight group, applied on top of whichever theme is active, including after `:colorscheme`. A value can be a table, a vim `:hi` string, or the name of a group to link to:

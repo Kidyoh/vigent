@@ -166,7 +166,7 @@ export default function HomePage() {
         <Heading id="themes" title="5. Themes" tag="vigent-themes" doc="/docs#themes" />
         <L />
         <L>
-          25 colorschemes built in, any Vim or Neovim theme imports, and Nerd Font icons like AstroNvim. Or follow the theme your Neovim config sets:{" "}
+          27 colorschemes built in (two with layouts of their own), any Vim or Neovim theme imports, and Nerd Font icons like AstroNvim. Or follow the theme your Neovim config sets:{" "}
           <span className="cm">&gt;</span>
         </L>
         <L className="indent">

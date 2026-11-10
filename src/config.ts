@@ -24,6 +24,7 @@ import { parseTemplates, type Template } from "./templates.js";
 import { parseCommands, type UserCommands } from "./commands.js";
 import { HOOK_NAMES, type HookName, type Hooks } from "./hooks.js";
 import { defaultLayout, type Layout, parseSections, STATUSLINE_PARTS, WINBAR_PARTS } from "./layout.js";
+import { parseStyle, type StyleSpec } from "./style.js";
 import { ICON_SETS, type IconSet } from "./icons.js";
 import { CUSTOM_ENGINES, type CustomEngine, ENGINE_IDS, type EngineId, isEngineId, registerCustomEngine } from "./engines.js";
 import { WORKTREE_BACKENDS, type WorktreeBackend } from "./riftri.js";
@@ -85,6 +86,8 @@ export interface Config {
 	layout: Layout;
 	/** [commands]: your own ex commands */
 	commands: UserCommands;
+	/** [style]: sidebar and message layout and icons, over the theme's own */
+	style: StyleSpec;
 }
 
 export interface LoadOptions {
@@ -124,7 +127,7 @@ export function configPath(): string {
 
 /** Load the config file. Problems become warnings so a typo never stops vigent from starting. */
 export function loadConfig(file = configPath(), opts: LoadOptions = {}): { config: Config; warnings: string[]; gated: string[] } {
-	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {}, layout: defaultLayout(), commands: {} };
+	const config: Config = opts.base ?? { ui: { ...DEFAULT_UI }, highlights: {}, keys: {}, worktree: { ...DEFAULT_WORKTREE }, engines: {}, templates: {}, hooks: {}, layout: defaultLayout(), commands: {}, style: {} };
 	const warnings: string[] = [];
 	const gated: string[] = [];
 	const where = opts.label ?? "config";
@@ -206,6 +209,11 @@ export function loadConfig(file = configPath(), opts: LoadOptions = {}): { confi
 			case "templates":
 				config.templates = { ...config.templates, ...parseTemplates(value, warnings) };
 				break;
+			case "style": {
+				const own = parseStyle(value, where, warnings);
+				config.style = { ...config.style, ...own, ...(config.style.icons || own.icons ? { icons: { ...config.style.icons, ...own.icons } } : {}) };
+				break;
+			}
 			case "commands":
 				config.commands = { ...config.commands, ...parseCommands(value, where, warnings, gated, mayRun) };
 				break;
@@ -557,6 +565,14 @@ notify = "auto"          # an agent finished while you looked elsewhere: "auto",
 # [winbar]
 # left = ["agent", "model", "status"]
 # right = ["path"]
+
+# --- Style: layout and icons (themes neon and zen set their own) -------------
+# [style]
+# sidebar = "cards"        # tree (default), cards, compact
+# messages = "bubbles"     # plain (default), labeled, bubbles
+# tool_icons = "unicode"   # none, unicode, nerd
+# [style.icons]
+# worktree = "⑂ "
 
 # --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
 # Applied on top of whichever theme is active. A value is a table, a vim

@@ -60,7 +60,8 @@ import { renderMarkdown } from "./markdown.js";
 import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
-import { ICON_SETS, NERD, toolIcon } from "./icons.js";
+import { ICON_SETS, NERD, toolIcon, toolKind } from "./icons.js";
+import { MESSAGE_STYLES, resolveStyle, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { PiSession } from "./pi-session.js";
 import type { Session, SessionState } from "./session.js";
@@ -305,8 +306,22 @@ export class App implements Component {
 		});
 	}
 
+	/** [style] from config.toml: over the theme's own style */
+	styleConfig: StyleSpec = {};
+
+	/** The style in effect: the theme's, then yours (sidebar and message layout, icons). */
+	get style(): Style {
+		return resolveStyle(this.painter.theme.style, this.styleConfig);
+	}
+
 	private get icons(): Icons {
-		return ICONS[this.ui.icons];
+		const base = ICONS[this.ui.icons];
+		const o = this.style.icons;
+		if (!Object.keys(o).length) return base;
+		const { idle, waiting, paused, error, ...glyphs } = o;
+		const state = { ...base.state };
+		for (const [k, v] of Object.entries({ idle, waiting, paused, error })) if (v !== undefined) state[k as keyof typeof state] = v;
+		return { ...base, ...glyphs, state };
 	}
 
 	private spinner(): string {
@@ -1658,6 +1673,20 @@ export class App implements Component {
 				value: () => ui.sidebar_position,
 				change: () => ((ui.sidebar_position = ui.sidebar_position === "left" ? "right" : "left"), refresh()),
 			},
+			{
+				section: "Layout",
+				label: "Sidebar style",
+				value: () => this.style.sidebar,
+				change: (d) => ((this.styleConfig = { ...this.styleConfig, sidebar: cycle([...SIDEBAR_STYLES], this.style.sidebar, d) }), refresh()),
+				hint: "tree (neo-tree), cards (a box per agent), compact (a row per agent)",
+			},
+			{
+				section: "Layout",
+				label: "Messages",
+				value: () => this.style.messages,
+				change: (d) => ((this.styleConfig = { ...this.styleConfig, messages: cycle([...MESSAGE_STYLES], this.style.messages, d) }), refresh()),
+				hint: "plain (❯ prompts), labeled (a header per message), bubbles (your prompts in boxes)",
+			},
 			{ section: "Layout", label: "Session numbers", value: () => onOff(ui.number), change: () => ((ui.number = !ui.number), refresh()) },
 			{ section: "Layout", label: "~ on empty sidebar rows", value: () => onOff(ui.tilde), change: () => ((ui.tilde = !ui.tilde), refresh()) },
 			{
@@ -1796,6 +1825,8 @@ export class App implements Component {
 			set(undefined, "engine", this.preferredEngine);
 			set(undefined, "leader", this.keymap.leader);
 			for (const k of ["sidebar", "sidebar_width", "sidebar_position", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey", "notify"] as const) set("ui", k, ui[k]);
+			if (this.styleConfig.sidebar) set("style", "sidebar", this.styleConfig.sidebar);
+			if (this.styleConfig.messages) set("style", "messages", this.styleConfig.messages);
 			set("worktree", "enabled", this.workspace.config.enabled);
 			set("worktree", "backend", this.workspace.config.backend ?? "auto");
 			for (const [lhs, rhs] of this.keyChanges) set("keys.normal", lhs, rhs);
@@ -3271,6 +3302,8 @@ export class App implements Component {
 			]),
 		);
 
+		const sidebarStyle = this.style.sidebar;
+		const ascii = this.ui.icons === "ascii";
 		this.sessions.forEach((s, i) => {
 			const last = i === this.sessions.length - 1;
 			const focused = i === this.focusIdx;
@@ -3286,6 +3319,52 @@ export class App implements Component {
 							: "Comment";
 			const glyph = s.state === "running" ? this.spinner() : I.state[s.state];
 			const num = this.ui.number ? `${String(i + 1).padStart(3)} ` : " ";
+			const model = s.model.replace(/^claude-/, "");
+			const marks: [string, string][] = [
+				["Comment", s.queue.length > 0 ? ` ${I.queued}${s.queue.length}` : ""],
+				[s.state === "error" ? "ErrorMsg" : "WarningMsg", this.unread.has(s) ? ` ${I.unread}` : ""],
+			];
+			const stat = s.worktree ? this.statSegments(s.worktree.stat) : [];
+			const statWidth = stat.reduce((n, [, t]) => n + visibleWidth(t), 0);
+
+			if (sidebarStyle === "compact") {
+				// one row each: number, state, name, and the +/- counts at the right
+				const left: [string, string][] = [
+					[focused ? "CursorLineNr" : "LineNr", num],
+					[glyphGroup, `${glyph} `],
+					[focused ? "Title" : "VigentSidebar", s.name],
+					...marks,
+				];
+				const leftW = left.reduce((n, [, t]) => n + visibleWidth(t), 0);
+				const room = w - statWidth - 2;
+				const fitted = fitSegments(left, room);
+				lines.push(row([...fitted, ["VigentSidebar", " ".repeat(Math.max(1, room - Math.min(leftW, room) + 1))], ...stat], rowBg));
+				return;
+			}
+
+			if (sidebarStyle === "cards") {
+				// a box per agent: its name, where it works, its model and what it has used
+				const [tl, tr, bl, br, hz, vt] = ascii ? ["+", "+", "+", "+", "-", "|"] : ["╭", "╮", "╰", "╯", "─", "│"];
+				const border = focused ? (this.sidebarFocused ? "Title" : "Special") : "VigentIndent";
+				const inner = Math.max(4, w - 4);
+				const label = this.ui.number ? `${hz} ${i + 1} ` : "";
+				const card = (segs: [string, string][], cardBg = rowBg) => {
+					const fitted = fitSegments(segs, inner);
+					const used = fitted.reduce((n, [, t]) => n + visibleWidth(t), 0);
+					return row([[border, `${vt} `], ...fitted, ["VigentSidebar", " ".repeat(Math.max(0, inner - used))], [border, ` ${vt}`]], cardBg);
+				};
+				lines.push(row([[border, `${tl}${label}${hz.repeat(Math.max(0, w - 2 - visibleWidth(label)))}${tr}`]]));
+				lines.push(card([[glyphGroup, `${glyph} `], [focused ? "Title" : "VigentSidebar", s.name], ...marks]));
+				if (s.worktree) {
+					const branch = truncateToWidth(s.worktree.branch, Math.max(4, inner - visibleWidth(I.worktree) - statWidth), "…");
+					lines.push(card([["Comment", `${I.worktree}${branch}`], ...stat]));
+				}
+				lines.push(card([["Comment", `${model} · ${formatUsage(s)}`]]));
+				lines.push(row([[border, `${bl}${hz.repeat(Math.max(0, w - 2))}${br}`]]));
+				return;
+			}
+
+			// tree: neo-tree's look
 			lines.push(
 				row(
 					[
@@ -3293,21 +3372,17 @@ export class App implements Component {
 						["VigentIndent", last ? I.last : I.tee],
 						[glyphGroup, `${glyph} `],
 						[focused ? "Title" : "VigentSidebar", s.name],
-						["Comment", s.queue.length > 0 ? ` ${I.queued}${s.queue.length}` : ""],
-						[s.state === "error" ? "ErrorMsg" : "WarningMsg", this.unread.has(s) ? ` ${I.unread}` : ""],
+						...marks,
 					],
 					rowBg,
 				),
 			);
-			const model = s.model.replace(/^claude-/, "");
 			const indent: [string, string][] = [
 				["LineNr", " ".repeat(num.length)],
 				["VigentIndent", last ? "  " : I.pipe],
 			];
 			if (s.worktree) {
 				// the +/- counts matter more than the end of a long branch name
-				const stat = this.statSegments(s.worktree.stat);
-				const statWidth = stat.reduce((n, [, t]) => n + visibleWidth(t), 0);
 				const room = w - num.length - 2 - 2 - visibleWidth(I.worktree) - statWidth;
 				const branch = truncateToWidth(s.worktree.branch, Math.max(4, room), "…");
 				lines.push(row([...indent, ["Comment", `  ${I.worktree}${branch}`], ...stat]));
@@ -3363,6 +3438,14 @@ export class App implements Component {
 		return lines.slice(0, h);
 	}
 
+	/** A tool call's glyph: Nerd Font or plain unicode, as the style (or the icon set) says. */
+	private toolGlyph(name: string): string {
+		const mode = this.style.toolIcons ?? (this.ui.icons === "nerd" ? "nerd" : "none");
+		if (mode === "nerd") return `${toolIcon(name)} `;
+		if (mode === "unicode") return `${UNICODE_TOOL_ICONS[toolKind(name)]} `;
+		return "";
+	}
+
 	/** " +41 −18" in the diff colors; nothing when there are no changes yet. */
 	private statSegments(stat: DiffStat | undefined): [string, string][] {
 		if (!stat || (stat.added === 0 && stat.removed === 0)) return [];
@@ -3374,7 +3457,8 @@ export class App implements Component {
 
 	private buildPaneLines(paneW: number): PaneLine[] {
 		const s = this.focusedSession;
-		const key = `${s ? `${s.id}:${s.version}` : "empty"}:${paneW}:${this.painter.generation}:${this.ui.icons}`;
+		const style = this.style;
+		const key = `${s ? `${s.id}:${s.version}` : "empty"}:${paneW}:${this.painter.generation}:${this.ui.icons}:${JSON.stringify(style)}`;
 		if (this.paneCache.key === key) return this.paneCache.lines;
 
 		const P = this.painter;
@@ -3390,15 +3474,41 @@ export class App implements Component {
 			switch (item.kind) {
 				case "user": {
 					push("", "");
-					wrapTextWithAnsi(item.text, paneW - 2).forEach((l, i) => {
-						const painted = l
+					const paint = (l: string) =>
+						l
 							.replace(MENTION, (m) => `\0${m}\0`)
 							.split("\0")
 							.map((part, i) => (!part ? "" : P.p(i % 2 ? "VigentMention" : "Keyword", part)))
 							.join("");
+					if (style.messages === "bubbles") {
+						// your prompt in a box at the right, like a chat
+						const ascii = this.ui.icons === "ascii";
+						const [tl, tr, bl, br, hz, vt] = ascii ? ["+", "+", "+", "+", "-", "|"] : ["╭", "╮", "╰", "╯", "─", "│"];
+						const maxText = Math.max(8, Math.floor(paneW * 0.75) - 4);
+						const wrapped = item.text.split("\n").flatMap((l) => wrapTextWithAnsi(l, maxText));
+						const label = ` ${style.userLabel} `;
+						const textW = Math.min(maxText, Math.max(visibleWidth(label) + 1, ...wrapped.map((l) => visibleWidth(l))));
+						const pad = " ".repeat(Math.max(0, paneW - textW - 4));
+						const top = `${tl}${hz}${label}${hz.repeat(Math.max(0, textW + 1 - visibleWidth(label)))}${tr}`;
+						push(pad + P.p("VigentUser", top), pad + top, { item: n, start: true });
+						for (const l of wrapped) {
+							const fill = " ".repeat(Math.max(0, textW - visibleWidth(l)));
+							push(pad + P.p("VigentUser", `${vt} `) + P.s("Normal") + paint(l) + fill + P.p("VigentUser", ` ${vt}`), `${pad}${vt} ${stripAnsi(l)}${fill} ${vt}`, { item: n });
+						}
+						const bottom = `${bl}${hz.repeat(textW + 2)}${br}`;
+						push(pad + P.p("VigentUser", bottom), pad + bottom, { item: n });
+						break;
+					}
+					if (style.messages === "labeled") {
+						const bar = this.ui.icons === "ascii" ? "| " : "▎ ";
+						push(P.p("VigentUser", `${bar}${style.userLabel}`), `${bar}${style.userLabel}`, { item: n, start: true });
+						wrapTextWithAnsi(item.text, paneW - 2).forEach((l) => push(`  ${P.s("Normal")}${paint(l)}`, `  ${stripAnsi(l)}`, { item: n }));
+						break;
+					}
+					wrapTextWithAnsi(item.text, paneW - 2).forEach((l, i) => {
 						// the ❯ marks where a prompt starts; its other lines hang under it
 						const lead = i === 0 ? I.prompt : " ".repeat(visibleWidth(I.prompt));
-						push(P.p("VigentUser", lead) + P.s("Normal") + painted, lead + stripAnsi(l), {
+						push(P.p("VigentUser", lead) + P.s("Normal") + paint(l), lead + stripAnsi(l), {
 							item: n,
 							start: i === 0,
 						});
@@ -3408,9 +3518,18 @@ export class App implements Component {
 				case "agent": {
 					push("", "");
 					const text = item.text + (item.streaming ? ` ${I.cursor}` : "");
-					const md = renderMarkdown(text, paneW, P, I.bullet, nextBlock, { ascii: this.ui.icons === "ascii" });
+					// labeled: a header naming the engine, the reply indented under it; bubbles: the name, then the reply
+					const who = !s ? "agent" : this.demo ? s.model : (ENGINE_NAMES[s.engine] ?? s.engine);
+					const indent = style.messages === "labeled" ? "  " : "";
+					if (style.messages === "labeled") {
+						const bar = this.ui.icons === "ascii" ? "| " : "▎ ";
+						push(P.p("Title", `${bar}${who}`), `${bar}${who}`, { item: n, start: true });
+					} else if (style.messages === "bubbles") {
+						push(P.p("Special", `${I.open_agent} `) + P.p("Title", who), `${I.open_agent} ${who}`, { item: n, start: true });
+					}
+					const md = renderMarkdown(text, paneW - indent.length, P, I.bullet, nextBlock, { ascii: this.ui.icons === "ascii" });
 					md.lines.forEach((l, i) =>
-						push(P.s("Normal") + l.text + RESET, l.plain, { item: n, start: i === 0, block: l.block, label: l.label }),
+						push(indent + P.s("Normal") + l.text + RESET, indent + l.plain, { item: n, start: style.messages === "plain" && i === 0, block: l.block, label: l.label }),
 					);
 					nextBlock += md.blocks;
 					break;
@@ -3418,10 +3537,12 @@ export class App implements Component {
 				case "tool": {
 					const t = item.tool!;
 					const fold = t.folded ? I.folded : I.open;
-					const icon = this.ui.icons === "nerd" ? `${toolIcon(t.name)} ` : "";
+					const icon = this.toolGlyph(t.name);
+					// under a labeled reply, tool calls line up with its text
+					const ind = style.messages === "labeled" ? " " : "";
 					push(
-						P.p("NonText", ` ${fold} `) + P.p("Special", icon) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
-						` ${fold} ${icon}${t.name} ${t.summary}`,
+						ind + P.p("NonText", ` ${fold} `) + P.p("Special", icon) + P.p("VigentTool", t.name) + P.p("Comment", ` ${t.summary}`),
+						`${ind} ${fold} ${icon}${t.name} ${t.summary}`,
 						{ item: n },
 					);
 					if (!t.folded && t.output) {
@@ -3756,3 +3877,18 @@ const DASHBOARD: [string, string, string, string][] = [
 	["?", "⌘", "Keys", NERD.keyboard],
 	["q", "×", "Quit", NERD.power],
 ];
+
+/** Segments cut to fit `room` columns (the last one that doesn't fit ends in …). */
+function fitSegments(segs: [string, string][], room: number): [string, string][] {
+	const out: [string, string][] = [];
+	let used = 0;
+	for (const [g, t] of segs) {
+		if (!t) continue;
+		const left = room - used;
+		if (left <= 0) break;
+		const cut = visibleWidth(t) > left ? truncateToWidth(t, left, "…") : t;
+		out.push([g, cut]);
+		used += visibleWidth(cut);
+	}
+	return out;
+}

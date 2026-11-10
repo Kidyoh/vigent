@@ -19,6 +19,7 @@ import * as path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { BUILTIN_THEMES } from "./builtin-themes.js";
 import { isLight, mix, nearest256, parseHex } from "./color.js";
+import { parseStyle, type StyleSpec } from "./style.js";
 import { fromPalette, type Palette } from "./palette.js";
 import { didYouMean } from "./suggest.js";
 import { parseHighlightCommand, parseVimColorscheme } from "./vimcolors.js";
@@ -43,6 +44,8 @@ export interface Theme {
 	transparent?: boolean;
 	/** the palette it was built from, when it was */
 	palette?: Palette;
+	/** how it lays things out: sidebar, messages, icons (see style.ts) */
+	style?: StyleSpec;
 }
 
 /**
@@ -334,7 +337,7 @@ export function themesDir(): string {
 }
 
 const THEME_EXTS = [".toml", ".json", ".vim"];
-const SPEC_KEYS = ["name", "background", "extends", "transparent", "palette", "groups", "highlights"];
+const SPEC_KEYS = ["name", "background", "extends", "transparent", "palette", "groups", "highlights", "style"];
 
 /** A theme file: extend another theme, define a palette, and/or set groups. */
 export interface ThemeSpec {
@@ -346,6 +349,8 @@ export interface ThemeSpec {
 	palette?: Partial<Palette>;
 	groups?: Record<string, unknown>;
 	highlights?: Record<string, unknown>;
+	/** layout: sidebar = "cards", messages = "bubbles", [style.icons] ... (see style.ts) */
+	style?: unknown;
 }
 
 /**
@@ -412,6 +417,7 @@ export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set
 	let background = spec.background;
 	let transparent = typeof spec.transparent === "boolean" ? spec.transparent : undefined;
 	let palette: Palette | undefined;
+	let style: StyleSpec | undefined;
 
 	if (spec.extends) {
 		if (seen.has(spec.extends)) throw new Error(`theme '${name}' extends itself through '${spec.extends}'`);
@@ -420,6 +426,12 @@ export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set
 		background ??= base.background;
 		transparent ??= base.transparent;
 		palette = base.palette;
+		style = base.style;
+	}
+	if (spec.style !== undefined) {
+		// a theme file's style mistakes are left out; the rest of the style still counts
+		const own = parseStyle(spec.style, `theme '${name}'`, []);
+		style = { ...style, ...own, ...(style?.icons || own.icons ? { icons: { ...style?.icons, ...own.icons } } : {}) };
 	}
 	if (spec.palette) {
 		const missing = (["bg", "fg", "red", "yellow", "green", "cyan", "blue", "magenta"] as const).filter(
@@ -434,7 +446,14 @@ export function buildTheme(spec: ThemeSpec, fallbackName: string, seen = new Set
 	groups = { ...groups, ...normalizeGroups(spec.groups), ...normalizeGroups(spec.highlights) };
 	// groups set after the palette may have changed its colors; only keep it when they didn't
 	const exactPalette = palette && !spec.groups && !spec.highlights ? palette : undefined;
-	return { name, background, groups, ...(transparent ? { transparent } : {}), ...(exactPalette ? { palette: exactPalette } : {}) };
+	return {
+		name,
+		background,
+		groups,
+		...(transparent ? { transparent } : {}),
+		...(exactPalette ? { palette: exactPalette } : {}),
+		...(style && Object.keys(style).length ? { style } : {}),
+	};
 }
 
 /** Load a built-in theme, a theme file from ~/.config/vigent/themes, or a path. */
