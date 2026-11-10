@@ -1,6 +1,6 @@
 {
   "name": "@vigent/cli",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A vim-native terminal for running coding agents side by side, each in its own lightweight git worktree via riftri.",
   "keywords": [
     "vim",
