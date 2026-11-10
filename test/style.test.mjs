@@ -152,7 +152,7 @@ test(":settings changes the sidebar and message style, and w saves them to [styl
 	const rows = () => strip(panel.render(110).join("\n"));
 	assert.match(rows(), /Sidebar style\s+tree/);
 	assert.match(rows(), /Messages\s+plain/);
-	for (let i = 0; i < 40 && !/▸.*Sidebar style|❯.*Sidebar style/.test(rows()); i++) panel.handleInput("j");
+	panel.handleInput("g"); // from the first row, whatever the list holds
 	const before = app.style.sidebar;
 	// find and change the two rows through the panel's own keys
 	let guard = 0;

@@ -472,7 +472,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | Action | Does |
 |---|---|
 | `mode.normal` | back to NORMAL mode |
-| `mode.insert` | write a prompt to the focused agent (INSERT) |
+| `mode.insert` | write a prompt to the focused agent (INSERT); the cursor is where you left it |
+| `mode.insert_start`, `mode.append_end` | write the prompt from its start / its end (`I` / `A`) |
 | `mode.command` | open the `:` command line |
 | `mode.search` | search the transcript |
 | `mode.search_back` | search the transcript backward (`n` then goes up) |
@@ -483,6 +484,10 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `visual.yank` | copy the selected lines to the clipboard |
 | `visual.inner_block` | select the code block under the VISUAL cursor |
 | `visual.swap` | jump to the other end of the selection |
+| `visual.reselect` | select the last VISUAL selection again (`gv`) |
+| `view.center`, `view.top`, `view.bottom` | put the VISUAL cursor's line, or the search match, in the middle / at the top / at the bottom of the window (`zz` / `zt` / `zb`) |
+| `jump.back`, `jump.forward` | back to where you were before a jump, and forward again (`<C-o>` / `<Tab>`). `G`, `gg`, `{N}G`, `n`, `N`, `{`, `}`, a search and a mark are jumps |
+| `app.position` | the agent's name, how long its transcript is and how far down you are (`<C-g>`) |
 | `message.next`, `message.prev` | jump to the next / previous message |
 | `yank.reply` | copy the agent's last reply |
 | `yank.block` | copy the code block nearest the bottom of the screen |
@@ -507,7 +512,15 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `edit.submit` | send the prompt, or run the command line |
 | `edit.backspace` | delete the character before the cursor |
 | `edit.delete_word` | delete the word before the cursor |
-| `edit.clear` | clear the prompt or command line |
+| `edit.clear` | delete everything before the cursor (all of it when the cursor is at the end) |
+| `edit.delete` | delete the character under the cursor |
+| `edit.left`, `edit.right` | move the cursor one character |
+| `edit.word_left`, `edit.word_right` | move the cursor one word |
+| `edit.home`, `edit.end` | move the cursor to the start / end of the line |
+| `edit.history_prev`, `edit.history_next` | the older / newer line from history that starts with what's typed. In INSERT that's the agent's own earlier prompts; on the command line, the commands or searches you ran since vigent started |
+| `edit.paste` | put in what the line's NORMAL mode last deleted or yanked |
+| `edit.normal` | edit the line in NORMAL mode (see below) |
+| `edit.complete`, `edit.complete_prev` | complete a command, an agent (`:b`, `:vsplit`) or a theme (`:colorscheme`) and go through what fits, shown over the statusline; past the last one is what you typed |
 | `theme.picker` | pick a colorscheme (live preview) |
 | `app.help` | show every key |
 | `app.dashboard` | all agents at a glance (`:dash`) |
@@ -578,6 +591,11 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 | `<C-e>` `<C-n>` / `<C-y>` `<C-p>` | `scroll.down` / `scroll.up` |
 | `gt` / `gT` | `session.tab` / `session.prev` |
 | `zr` / `zm` | `fold.open_all` / `fold.close_all` |
+| `I` / `A` | `mode.insert_start` / `mode.append_end` |
+| `zz` / `zt` / `zb` | `view.center` / `view.top` / `view.bottom` (the current search match) |
+| `gv` | `visual.reselect` |
+| `<C-o>` / `<Tab>` | `jump.back` / `jump.forward` (`<Tab>` is what terminals send for `<C-i>`) |
+| `<C-g>` | `app.position` |
 | `ZZ` / `ZQ` | `app.quit` / `app.quit_force` |
 | `q` | `app.quit_hint` |
 | `<leader>n` | `:new ` (type the task) |
@@ -598,6 +616,8 @@ Like vim, every mapping is non-recursive, so `:nmap` behaves like `:nnoremap`. C
 
 Also: `<C-w>|` is `window.max_width`, and `<leader>|` is `window.vsplit` (`<leader>-` is `window.split`).
 
+Marks work like vim's, per agent: `m{a-z}` marks the line at the top of the window (in VISUAL, the cursor's line), `'{a-z}` or `` `{a-z} `` goes back to it, and `''` goes back to where you were before the last jump. `:marks` and `:jumps` list them. A mapping of your own on `m`, `'` or `` ` `` wins.
+
 **VISUAL mode** (`v` or `V`: whole lines, like vim's `V`)
 
 | Keys | Action |
@@ -610,6 +630,7 @@ Also: `<C-w>|` is `window.max_width`, and `<leader>|` is `window.vsplit` (`<lead
 | `y` | `visual.yank` |
 | `ib` | `visual.inner_block` |
 | `o` | `visual.swap` |
+| `zz` / `zt` / `zb` | `view.center` / `view.top` / `view.bottom` |
 | `<Esc>` `<C-c>` `v` `V` | `mode.normal` |
 
 **Insert mode and the command line**
@@ -621,4 +642,14 @@ Also: `<C-w>|` is `window.max_width`, and `<leader>|` is `window.vsplit` (`<lead
 | `<BS>` `<C-h>` | `edit.backspace` (on an empty command line, leaves it) |
 | `<C-w>` | `edit.delete_word` |
 | `<C-u>` | `edit.clear` |
+| `<Left>` / `<Right>` | `edit.left` / `edit.right` |
+| `<C-Left>` `<S-Left>` / `<C-Right>` `<S-Right>` | `edit.word_left` / `edit.word_right` |
+| `<Home>` / `<End>` | `edit.home` / `edit.end` (on the command line, `<C-b>` / `<C-e>` too) |
+| `<Del>` | `edit.delete` |
+| `<Up>` / `<Down>` | `edit.history_prev` / `edit.history_next` (on the command line, `<C-p>` / `<C-n>` too) |
+| `<C-r>"` | `edit.paste` |
+| `<C-f>` | `edit.normal` |
+| `<Tab>` / `<S-Tab>` | `edit.complete` / `edit.complete_prev` (command line) |
 | `@` | in INSERT, at the start of a word: pick a file to attach (`Esc` keeps a plain `@`) |
+
+`<C-f>` on the prompt or the command line edits it in vim's NORMAL mode, like the command-line window: `h` `l` `w` `b` `e` `W` `B` `E` `ge` `0` `^` `$` `f` `t` `F` `T` `;` `,`, `x` `X` `s` `S` `r` `~` `D` `C` `Y` `p` `P`, the operators `d` `c` `y` with any of those motions or the text objects `iw` `aw` `iW` `aW` `i"` `a"` `i'` `i(` `a(` `ib` `i[` `i{` `iB` `i<`, counts, `u` `<C-r>` and `.`. The statusline says NORMAL. `i` `a` `I` `A`, `c` and `Esc` go back to typing, `Enter` sends the prompt or runs the command, and `j` / `k` step through history.

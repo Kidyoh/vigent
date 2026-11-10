@@ -69,6 +69,8 @@ import type { PiSession } from "./pi-session.js";
 import type { Session, SessionState } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
+import { completeCommandLine } from "./completion.js";
+import { HistoryWalk, LineBuffer, LineEditor, remember } from "./line-edit.js";
 import {
 	DEFAULT_WORKTREE,
 	type DiffStat,
@@ -219,6 +221,9 @@ interface PaneLine {
 const MAX_COUNT = 9999;
 
 /** Built-in actions a count repeats: 5j, 3<C-d>, 2n, 4<C-w>> */
+/** Actions vim counts as jumps: <C-o> comes back from them. */
+const JUMPS = new Set(["scroll.top", "scroll.bottom", "search.next", "search.prev", "message.next", "message.prev"]);
+
 const REPEATABLE = new Set([
 	"scroll.down",
 	"scroll.up",
@@ -281,8 +286,38 @@ export class App implements Component {
 	private sidebarPending = "";
 	altIdx = 0;
 
-	private cmdBuf = "";
-	private inputBuf = "";
+	/** the prompt, and the : or / line, each with its cursor */
+	private input = new LineBuffer();
+	private cmd = new LineBuffer();
+	private get inputBuf(): string {
+		return this.input.text;
+	}
+	private set inputBuf(text: string) {
+		this.input.text = text;
+	}
+	private get cmdBuf(): string {
+		return this.cmd.text;
+	}
+	private set cmdBuf(text: string) {
+		this.cmd.text = text;
+	}
+	/** <C-f>: the mode whose line is being edited in NORMAL mode, while it's still that mode */
+	private lineNormalIn?: Mode;
+	private inputEditor = new LineEditor();
+	private cmdEditor = new LineEditor();
+	/** what the line's NORMAL mode last deleted or yanked; <C-r>" puts it in */
+	private lineRegister = "";
+	private cmdHistory: string[] = [];
+	private searchHistory: string[] = [];
+	private historyWalks = { prompt: new HistoryWalk(), command: new HistoryWalk(), search: new HistoryWalk() };
+	/** <Tab> on the command line: what's offered, which one is in, and what was typed */
+	private wild?: { base: string; items: string[]; idx: number; typed: string; after: string; shown: string };
+	/** each agent's marks (m{a-z}) and jump list (<C-o>), as lines from the top of its transcript */
+	private marks = new WeakMap<Session, Map<string, number>>();
+	private jumps = new WeakMap<Session, { list: number[]; at: number }>();
+	private lastVisual = new WeakMap<Session, { anchor: number; cursor: number }>();
+	/** m, ' or ` typed: the next key names the mark */
+	private pendingMark = "";
 	/** digits typed so far in NORMAL or VISUAL (5j); 0 when none */
 	private pendingCount = 0;
 	private message = "";
@@ -579,7 +614,13 @@ export class App implements Component {
 			this.tui.requestRender();
 			return;
 		}
-		if (this.countDigit(key)) {
+		if (this.lineNormal) {
+			this.lineKey(key);
+			if (this.mode === "SEARCH" && this.cmdBuf !== this.searchPreview) this.previewSearch();
+			this.tui.requestRender();
+			return;
+		}
+		if (this.markKey(key) || this.countDigit(key)) {
 			this.tui.requestRender();
 			return;
 		}
@@ -604,13 +645,241 @@ export class App implements Component {
 	}
 
 	private typeText(text: string) {
-		if (this.mode === "INSERT" && text === "@" && (this.inputBuf === "" || /\s$/.test(this.inputBuf))) {
-			this.inputBuf += text;
+		const before = this.input.parts[0];
+		if (this.mode === "INSERT" && text === "@" && (before === "" || /\s$/.test(before))) {
+			this.input.insert(text);
 			this.openAttach();
 			return;
 		}
-		if (this.mode === "INSERT") this.inputBuf += text;
-		else if (this.mode === "COMMAND" || this.mode === "SEARCH") this.cmdBuf += text;
+		this.activeLine()?.insert(text);
+	}
+
+	/** The line being typed in this mode: the prompt in INSERT, the : or / line, or none. */
+	private activeLine(): LineBuffer | undefined {
+		if (this.mode === "INSERT") return this.input;
+		if (this.mode === "COMMAND" || this.mode === "SEARCH") return this.cmd;
+		return undefined;
+	}
+
+	/** <C-f> was pressed and the line is still the one being typed. */
+	private get lineNormal(): boolean {
+		return this.lineNormalIn !== undefined && this.lineNormalIn === this.mode;
+	}
+
+	/** The mode the statusline shows: NORMAL while the line is edited in NORMAL mode. */
+	private get badgeMode(): Mode {
+		return this.lineNormal ? "NORMAL" : this.mode;
+	}
+
+	/** One key in the line's NORMAL mode (after <C-f>). */
+	private lineKey(key: string) {
+		const line = this.activeLine();
+		if (!line) return;
+		const ed = this.mode === "INSERT" ? this.inputEditor : this.cmdEditor;
+		ed.register = this.lineRegister;
+		const r = ed.feed(key);
+		this.lineRegister = ed.register;
+		line.text = ed.text;
+		line.pos = ed.pos;
+		if (r.history) {
+			this.historyStep(r.history);
+			ed.sync(line.text, Math.max(0, [...line.text].length - 1));
+			line.pos = ed.pos;
+		}
+		if (r.exit) this.lineNormalIn = undefined;
+		if (r.exit === "submit") this.submit();
+	}
+
+	/** m{a-z} sets a mark, '{a-z} and `{a-z} go to one, '' and `` go back to before the last jump. */
+	private markKey(key: string): boolean {
+		if (this.mode !== "NORMAL" && this.mode !== "VISUAL") return false;
+		if (this.pendingMark) {
+			const kind = this.pendingMark;
+			this.pendingMark = "";
+			if (kind === "m") this.setMark(key);
+			else this.gotoMark(key);
+			return true;
+		}
+		if (this.seq.pendingKeys.length > 0 || !["m", "'", "`"].includes(key)) return false;
+		const mapped = this.keymap.lookup(this.keyMode(), [key]);
+		if (mapped.exact || mapped.prefix) return false;
+		this.pendingMark = key;
+		this.pendingCount = 0;
+		return true;
+	}
+
+	/** Where you are: the VISUAL cursor, else the top line of the window. */
+	private hereLine(): number {
+		if (this.mode === "VISUAL") return this.visual.cursor;
+		return this.viewRange(this.buildPaneLines(this.paneWidth()).length).start;
+	}
+
+	private goLine(line: number) {
+		const total = this.buildPaneLines(this.paneWidth()).length;
+		const at = Math.max(0, Math.min(total - 1, line));
+		if (this.mode === "VISUAL") {
+			this.visual.cursor = at;
+			this.revealLine(at);
+		} else this.placeLine(at, "top");
+	}
+
+	private setMark(key: string) {
+		const s = this.focusedSession;
+		if (!s || !/^[a-zA-Z]$/.test(key)) return;
+		const marks = this.marks.get(s) ?? new Map<string, number>();
+		marks.set(key, this.hereLine());
+		this.marks.set(s, marks);
+	}
+
+	private gotoMark(key: string) {
+		const s = this.focusedSession;
+		if (!s) return;
+		if (key === "'" || key === "`") {
+			const j = this.jumps.get(s);
+			const back = j?.list[j.at - 1];
+			if (back === undefined) return;
+			this.recordJump();
+			return this.goLine(back);
+		}
+		if (!/^[a-zA-Z]$/.test(key)) return;
+		const line = this.marks.get(s)?.get(key);
+		if (line === undefined) {
+			this.setMessage("E20: Mark not set", "ErrorMsg");
+			return;
+		}
+		this.recordJump();
+		this.goLine(line);
+	}
+
+	/** Remember where you are before a jump (G, gg, n, {, a mark), for <C-o> and ''. */
+	private recordJump(line = this.hereLine()) {
+		const s = this.focusedSession;
+		if (!s) return;
+		const j = this.jumps.get(s) ?? { list: [], at: 0 };
+		j.list = j.list.slice(0, j.at).filter((l) => l !== line);
+		j.list.push(line);
+		if (j.list.length > 100) j.list.shift();
+		j.at = j.list.length;
+		this.jumps.set(s, j);
+	}
+
+	/** <C-o> (-1) and <Tab> (1) through the jump list. */
+	private jumpBy(dir: 1 | -1) {
+		const s = this.focusedSession;
+		const j = s && this.jumps.get(s);
+		if (!j) return;
+		if (dir < 0) {
+			if (j.at === 0) return;
+			// the first <C-o> keeps where you are, so <Tab> can come back to it
+			if (j.at === j.list.length) j.list.push(this.hereLine());
+			j.at--;
+		} else {
+			if (j.at >= j.list.length - 1) return;
+			j.at++;
+		}
+		this.goLine(j.list[j.at]);
+		if (j.at === j.list.length - 1) {
+			j.list.pop();
+			j.at = j.list.length;
+		}
+	}
+
+	/** :marks, :jumps and :history, like vim's lists. */
+	private listPlaces(kind: "marks" | "jumps" | "history") {
+		const s = this.focusedSession;
+		const lines = this.buildPaneLines(this.paneWidth());
+		const text = (line: number) => (lines[line]?.plain ?? "").trim().slice(0, 60);
+		const out: FloatLine[] = [];
+		if (kind === "history") {
+			out.push([["Title", "      #  cmd history"]]);
+			this.cmdHistory.forEach((c, i) => out.push([["Comment", String(i + 1).padStart(7)], ["NormalFloat", `  ${c}`]]));
+			if (this.searchHistory.length) out.push([], [["Title", "      #  search history"]]);
+			this.searchHistory.forEach((q, i) => out.push([["Comment", String(i + 1).padStart(7)], ["NormalFloat", `  ${q}`]]));
+		} else if (kind === "marks") {
+			const marks = [...((s && this.marks.get(s)) ?? new Map<string, number>())].sort(([a], [b]) => a.localeCompare(b));
+			out.push([["Title", "mark  line  text"]]);
+			for (const [m, line] of marks) out.push([["Identifier", ` ${m}`], ["Comment", String(line + 1).padStart(9)], ["NormalFloat", `  ${text(line)}`]]);
+		} else {
+			const j = (s && this.jumps.get(s)) ?? { list: [], at: 0 };
+			out.push([["Title", " jump  line  text"]]);
+			j.list.forEach((line, i) => out.push([["Identifier", (i === j.at ? ">" : " ") + String(Math.abs(j.at - i)).padStart(4)], ["Comment", String(line + 1).padStart(6)], ["NormalFloat", `  ${text(line)}`]]));
+			if (j.at === j.list.length) out.push([["Identifier", ">"]]);
+		}
+		if (out.length === 1) {
+			this.setMessage(kind === "marks" ? "no marks set: m{a-z} sets one" : kind === "jumps" ? "no jumps yet: G, gg, n, { and marks are jumps" : "no history yet", "Comment");
+			return;
+		}
+		this.openFloat(kind === "history" ? "history" : `${kind} · ${s?.name ?? ""}`, out, Math.min(84, this.terminal.columns - 4));
+	}
+
+	/** zz / zt / zb: the line in the middle, at the top or at the bottom of the window. */
+	private placeLine(idx: number, where: "top" | "center" | "bottom") {
+		const total = this.buildPaneLines(this.paneWidth()).length;
+		const h = this.contentHeight();
+		const start = where === "top" ? idx : where === "bottom" ? idx + 1 - h : idx - Math.floor((h - 1) / 2);
+		this.scrollOffset = Math.max(0, Math.min(Math.max(0, total - h), total - h - start));
+	}
+
+	/** <Up> / <Down>: an earlier line, from this agent's prompts or this run's commands or searches. */
+	private historyStep(dir: 1 | -1) {
+		const line = this.activeLine();
+		if (!line) return;
+		const kind = this.mode === "INSERT" ? "prompt" : this.mode === "SEARCH" ? "search" : "command";
+		const s = this.focusedSession;
+		// a prompt waiting in the queue is the newest one sent
+		const prompts = () => [...(s?.items ?? []).filter((i) => i.kind === "user").map((i) => i.text), ...(s?.queue ?? [])];
+		const entries = kind === "prompt" ? prompts() : kind === "search" ? this.searchHistory : this.cmdHistory;
+		const next = this.historyWalks[kind].step(entries, line.text, dir);
+		if (next !== undefined) line.text = next;
+	}
+
+	/** <Tab> / <S-Tab> on the command line: complete what's before the cursor, then go through what fits. */
+	private complete(dir: 1 | -1) {
+		if (this.mode !== "COMMAND") return;
+		let w = this.wild && this.wild.shown === this.cmdBuf ? this.wild : undefined;
+		if (!w) {
+			const [before, under, rest] = this.cmd.parts;
+			const after = this.cmd.pos < [...this.cmdBuf].length ? under + rest : "";
+			const { base, items } = completeCommandLine(before, { agents: this.sessions.map((x) => x.name), themes: listThemes() });
+			if (!items.length) {
+				this.wild = undefined;
+				return;
+			}
+			w = { base, items, idx: dir > 0 ? 0 : items.length - 1, typed: before, after, shown: "" };
+			this.wild = w;
+		} else {
+			// past the last one is what was typed, as in vim
+			const stops = w.items.length + 1;
+			w.idx = (w.idx + dir + stops) % stops;
+		}
+		const text = w.idx < w.items.length ? w.base + w.items[w.idx] : w.typed;
+		this.cmdBuf = text + w.after;
+		this.cmd.pos = [...text].length;
+		w.shown = this.cmdBuf;
+	}
+
+	/** The wildmenu over the statusline while <Tab> is going through more than one completion. */
+	private renderWildmenu(width: number): string | undefined {
+		const w = this.wild;
+		if (this.mode !== "COMMAND" || !w || w.shown !== this.cmdBuf || w.items.length < 2) return undefined;
+		const P = this.painter;
+		const cells = w.items.map((t) => ` ${t} `);
+		let first = 0;
+		const fits = (from: number) => cells.slice(from, w.idx + 1).reduce((n, c) => n + visibleWidth(c), 0) + 4 <= width;
+		while (w.idx < cells.length && first < w.idx && !fits(first)) first++;
+		let out = first > 0 ? P.p("StatusLine", "< ") : "";
+		let used = first > 0 ? 2 : 0;
+		for (let i = first; i < cells.length; i++) {
+			const c = cells[i];
+			if (used + visibleWidth(c) + 2 > width) {
+				out += P.p("StatusLine", " >");
+				used += 2;
+				break;
+			}
+			out += P.p(i === w.idx ? "PmenuSel" : "StatusLine", c);
+			used += visibleWidth(c);
+		}
+		return out + P.p("StatusLine", " ".repeat(Math.max(0, width - used)));
 	}
 
 	/** A digit that starts or extends a count, like vim's. A mapping of your own on that digit wins. */
@@ -629,6 +898,7 @@ export class App implements Component {
 		switch (name) {
 			case "scroll.top":
 			case "scroll.bottom":
+				if (this.mode === "NORMAL") this.recordJump();
 				return this.scrollToLine(count - 1);
 			case "cursor.top":
 			case "cursor.bottom": {
@@ -684,17 +954,24 @@ export class App implements Component {
 
 	/** Every built-in behavior, by the name used in keymaps. */
 	runAction(name: string, arg?: string): void {
+		if (this.mode === "NORMAL" && JUMPS.has(name)) this.recordJump();
 		const half = Math.floor(this.contentHeight() / 2);
 		const page = Math.max(1, this.contentHeight() - 2);
 		const count = this.sessions.length;
 		switch (name) {
 			case "mode.normal":
+				if (this.mode === "VISUAL" && this.focusedSession) this.lastVisual.set(this.focusedSession, { ...this.visual });
 				if (this.mode === "SEARCH") this.cancelSearch();
 				if (this.mode === "COMMAND" || this.mode === "SEARCH") this.cmdBuf = "";
 				this.mode = "NORMAL";
 				return;
 			case "mode.insert":
 				this.mode = "INSERT";
+				return;
+			case "mode.insert_start":
+			case "mode.append_end":
+				this.mode = "INSERT";
+				this.input.move(name === "mode.insert_start" ? "home" : "end");
 				return;
 			case "mode.command":
 				this.mode = "COMMAND";
@@ -749,7 +1026,37 @@ export class App implements Component {
 				this.visual = { anchor: idx[0], cursor: idx[idx.length - 1] };
 				return;
 			}
+			case "visual.reselect": {
+				const last = this.focusedSession && this.lastVisual.get(this.focusedSession);
+				const total = this.buildPaneLines(this.paneWidth()).length;
+				if (!last || total === 0) return;
+				this.visual = { anchor: Math.min(last.anchor, total - 1), cursor: Math.min(last.cursor, total - 1) };
+				this.mode = "VISUAL";
+				return this.revealLine(this.visual.cursor);
+			}
+			case "view.center":
+			case "view.top":
+			case "view.bottom": {
+				const line = this.mode === "VISUAL" ? this.visual.cursor : this.searchQuery ? this.curHit?.line : undefined;
+				if (line === undefined) {
+					this.setMessage("zz, zt and zb move the VISUAL cursor's line or the search match; there's neither", "WarningMsg");
+					return;
+				}
+				return this.placeLine(line, name === "view.center" ? "center" : name === "view.top" ? "top" : "bottom");
+			}
+			case "jump.back":
+			case "jump.forward":
+				return this.jumpBy(name === "jump.back" ? -1 : 1);
+			case "app.position": {
+				const s = this.focusedSession;
+				const total = this.buildPaneLines(this.paneWidth()).length;
+				if (!s) return;
+				const { end } = this.viewRange(total);
+				this.setMessage(`"${s.name}" ${total} line${total === 1 ? "" : "s"} --${total ? Math.round((end / total) * 100) : 100}%--`, "Normal");
+				return;
+			}
 			case "visual.yank": {
+				if (this.focusedSession) this.lastVisual.set(this.focusedSession, { ...this.visual });
 				const lines = this.buildPaneLines(this.paneWidth());
 				const [a, b] = [Math.min(this.visual.anchor, this.visual.cursor), Math.max(this.visual.anchor, this.visual.cursor)];
 				this.yank(lines.slice(a, b + 1).map((l) => l.plain).join("\n"), b - a + 1);
@@ -905,21 +1212,44 @@ export class App implements Component {
 				return this.submit();
 			case "edit.backspace":
 				if (this.mode === "INSERT") {
-					this.inputBuf = this.inputBuf.slice(0, -1);
+					this.input.backspace();
 				} else if (this.cmdBuf.length === 0) {
+					if (this.mode === "SEARCH") this.cancelSearch();
 					this.mode = "NORMAL"; // vim: backspace on an empty command line leaves it
 				} else {
-					this.cmdBuf = this.cmdBuf.slice(0, -1);
+					this.cmd.backspace();
 				}
 				return;
 			case "edit.delete_word":
-				if (this.mode === "INSERT") this.inputBuf = this.inputBuf.replace(/\S*\s*$/, "");
-				else this.cmdBuf = this.cmdBuf.replace(/\S*\s*$/, "");
-				return;
+				return this.activeLine()?.deleteWordBack();
 			case "edit.clear":
-				if (this.mode === "INSERT") this.inputBuf = "";
-				else this.cmdBuf = "";
+				return this.activeLine()?.deleteToStart();
+			case "edit.delete":
+				return this.activeLine()?.deleteForward();
+			case "edit.left":
+			case "edit.right":
+			case "edit.home":
+			case "edit.end":
+			case "edit.word_left":
+			case "edit.word_right":
+				return this.activeLine()?.move(name.slice(5) as "left");
+			case "edit.history_prev":
+			case "edit.history_next":
+				return this.historyStep(name === "edit.history_prev" ? -1 : 1);
+			case "edit.paste":
+				return this.activeLine()?.insert(this.lineRegister);
+			case "edit.normal": {
+				const line = this.activeLine();
+				if (!line) return;
+				// vim: leaving INSERT steps back onto the last character typed
+				(this.mode === "INSERT" ? this.inputEditor : this.cmdEditor).sync(line.text, Math.max(0, line.pos - 1));
+				line.pos = (this.mode === "INSERT" ? this.inputEditor : this.cmdEditor).pos;
+				this.lineNormalIn = this.mode;
 				return;
+			}
+			case "edit.complete":
+			case "edit.complete_prev":
+				return this.complete(name === "edit.complete" ? 1 : -1);
 			case "theme.picker":
 				return this.openThemePicker();
 			case "app.help":
@@ -945,9 +1275,11 @@ export class App implements Component {
 	}
 
 	private submit() {
+		this.lineNormalIn = undefined;
 		if (this.mode === "INSERT") {
 			const text = this.inputBuf.trim();
 			this.inputBuf = "";
+			this.inputEditor = new LineEditor();
 			this.mode = "NORMAL";
 			let s = this.focusedSession;
 			if (text && !s) {
@@ -963,12 +1295,18 @@ export class App implements Component {
 		} else if (this.mode === "COMMAND") {
 			const cmd = this.cmdBuf;
 			this.cmdBuf = "";
+			this.cmdEditor = new LineEditor();
+			this.wild = undefined;
 			this.mode = "NORMAL";
+			remember(this.cmdHistory, cmd);
 			this.exec(cmd);
 		} else if (this.mode === "SEARCH") {
 			const query = this.cmdBuf;
 			this.cmdBuf = "";
+			this.cmdEditor = new LineEditor();
 			this.mode = "NORMAL";
+			remember(this.searchHistory, query);
+			if (this.searchFrom) this.recordJump(Math.max(0, this.buildPaneLines(this.paneWidth()).length - this.contentHeight() - this.searchFrom.scroll));
 			this.runSearch(query);
 		}
 	}
@@ -1100,6 +1438,11 @@ export class App implements Component {
 			case "tree":
 				this.openTree();
 				return;
+			case "marks":
+			case "jumps":
+			case "his":
+			case "history":
+				return this.listPlaces(cmd === "marks" ? "marks" : cmd === "jumps" ? "jumps" : "history");
 			case "noh":
 			case "nohl":
 			case "nohlsearch":
@@ -1797,7 +2140,7 @@ export class App implements Component {
 		const dir = this.attachDir();
 		const items = this.listFiles(dir).then((files) => files.filter(mentionable).map((value) => ({ value })));
 		const takeBack = () => {
-			if (this.inputBuf.endsWith("@")) this.inputBuf = this.inputBuf.slice(0, -1);
+			if (this.input.parts[0].endsWith("@")) this.input.backspace();
 		};
 		this.openChoices(
 			`Attach a file · ${path.basename(dir)}`,
@@ -1806,7 +2149,7 @@ export class App implements Component {
 			false,
 			(v) => {
 				takeBack();
-				this.inputBuf += `@${v} `;
+				this.input.insert(`@${v} `);
 			},
 			{ search: true, onBackOut: takeBack, rows: 8 },
 			// a completion menu: just above the prompt, where you're typing
@@ -3463,7 +3806,7 @@ export class App implements Component {
 			const panel = this.whichKeyPanel(width, Math.max(3, Math.floor(sideH / 2)));
 			out.splice(out.length - panel.length, panel.length, ...panel);
 		}
-		out.push(this.renderStatusline(width));
+		out.push(this.renderWildmenu(width) ?? this.renderStatusline(width));
 		out.push(this.renderCmdline(width));
 		return out.map((l) => truncateToWidth(l, width));
 	}
@@ -4207,8 +4550,8 @@ export class App implements Component {
 		let first = true;
 		for (const p of leftParts) {
 			if (p === "mode") {
-				const badge = ` ${this.mode} `;
-				left += P.p(MODE_GROUP[this.mode], badge) + (this.demo ? P.p("VigentModeCommand", " DEMO ") : "");
+				const badge = ` ${this.badgeMode} `;
+				left += P.p(MODE_GROUP[this.badgeMode], badge) + (this.demo ? P.p("VigentModeCommand", " DEMO ") : "");
 				leftW += visibleWidth(badge) + (this.demo ? 6 : 0);
 				continue;
 			}
@@ -4220,7 +4563,7 @@ export class App implements Component {
 			leftW += visibleWidth(t);
 			first = false;
 		}
-		const parts = s ? rightParts.map((p) => (p === "mode" ? ` ${this.mode} ` : this.statuslinePart(p))).filter(Boolean) : [];
+		const parts = s ? rightParts.map((p) => (p === "mode" ? ` ${this.badgeMode} ` : this.statuslinePart(p))).filter(Boolean) : [];
 		const serve = this.server ? this.icons.serve : "";
 		const right = s ? (parts.length || serve ? ` ${serve}${parts.join("  ")} ` : "") : this.server ? ` ${serve}serving ` : "";
 		const fill = Math.max(0, width - leftW - visibleWidth(right));
@@ -4235,7 +4578,7 @@ export class App implements Component {
 	private renderPowerline(width: number, [toRight, toLeft]: [string, string]): string {
 		const P = this.painter;
 		const s = this.focusedSession;
-		const mode = P.attr(MODE_GROUP[this.mode]);
+		const mode = P.attr(MODE_GROUP[this.badgeMode]);
 		const fill = P.attr("StatusLine").bg ?? P.attr("Normal").bg;
 		const fillFg = P.attr("Comment").fg ?? P.attr("Normal").fg;
 		const middle = P.attr("CursorLine").bg ?? P.attr("Visual").bg ?? fill;
@@ -4252,7 +4595,7 @@ export class App implements Component {
 			clock: NERD.clock,
 		};
 		const text = (p: StatuslinePart): string => {
-			if (p === "mode") return `${icon.mode} ${this.mode}${this.demo ? " · DEMO" : ""}`;
+			if (p === "mode") return `${icon.mode} ${this.badgeMode}${this.demo ? " · DEMO" : ""}`;
 			const t = p === "agent" && !s ? "no agent" : s || p === "clock" || p === "agents" ? this.statuslinePart(p) : "";
 			if (!t) return "";
 			// the branch part already starts with the branch icon
@@ -4337,15 +4680,18 @@ export class App implements Component {
 		const P = this.painter;
 		const bg = P.s("MsgArea") || P.s("Normal");
 		let content: string;
+		// the cursor: a bar-like highlight while typing, the block cursor in the line's NORMAL mode
+		const cursorAt = (under: string, after: string) => P.p(this.lineNormal ? "Cursor" : "PmenuSel", under) + bg + P.s("Normal") + after;
+		const withCursor = (line: LineBuffer) => line.parts[0] + cursorAt(line.parts[1], line.parts[2]);
 		switch (this.confirm ? "CONFIRM" : this.mode) {
 			case "CONFIRM":
 				content = P.p("Question", this.confirm!.question) + P.s("Normal") + " " + P.p("PmenuSel", " ");
 				break;
 			case "COMMAND":
-				content = P.s("Normal") + ":" + this.cmdBuf + P.p("PmenuSel", " ");
+				content = P.s("Normal") + ":" + withCursor(this.cmd);
 				break;
 			case "SEARCH":
-				content = P.s("Normal") + (this.searchBackward ? "?" : "/") + this.cmdBuf + P.p("PmenuSel", " ");
+				content = P.s("Normal") + (this.searchBackward ? "?" : "/") + withCursor(this.cmd);
 				break;
 			case "VISUAL": {
 				const n = Math.abs(this.visual.cursor - this.visual.anchor) + 1;
@@ -4354,12 +4700,14 @@ export class App implements Component {
 			}
 			case "INSERT":
 				content =
-					P.p("ModeMsg", "-- INSERT --") +
+					P.p("ModeMsg", this.lineNormal ? "-- NORMAL --" : "-- INSERT --") +
 					P.s("Normal") +
 					`  ${this.icons.prompt}` +
-					this.inputBuf +
+					this.input.parts[0] +
 					P.p("Comment", formatKeys(this.seq.pendingKeys).replace(/<Space>/g, " ")) +
-					P.p("PmenuSel", " ") +
+					bg +
+					P.s("Normal") +
+					cursorAt(this.input.parts[1], this.input.parts[2]) +
 					(this.sessions.length === 0 && !this.inputBuf
 						? P.p("Comment", `  type what you want done; Enter starts an agent on ${ENGINE_NAMES[this.defaultEngine()]}`)
 						: "");
@@ -4370,7 +4718,7 @@ export class App implements Component {
 			}
 		}
 		// vim's 'showcmd': keys typed so far for a pending mapping, near the right edge
-		const showcmd = this.mode === "INSERT" ? "" : formatKeys(this.seq.pendingKeys);
+		const showcmd = this.lineNormal ? (this.mode === "INSERT" ? this.inputEditor : this.cmdEditor).pendingKeys : this.mode === "INSERT" ? "" : this.pendingMark || formatKeys(this.seq.pendingKeys);
 		const showWidth = showcmd ? Math.max(10, visibleWidth(showcmd) + 1) : 0;
 		const pad = Math.max(0, width - visibleWidth(stripAnsi(content)) - showWidth);
 		const right = showcmd ? P.s("Normal") + showcmd.padEnd(showWidth) : "";
@@ -4450,6 +4798,8 @@ const EX_HELP: [string, string][] = [
 	[":serve  /  :serve stop", "follow and prompt your agents from your phone (local: this machine only)"],
 	[":trust", "let this project's .vigent.toml run its hooks and engine arguments"],
 	[":tree", "the conversation's branches; go back and branch"],
+	[":marks  /  :jumps", "this agent's marks (m{a-z}, '{a-z}) and jump list (<C-o>, <Tab>)"],
+	[":history", "the commands and searches you ran this time"],
 	[":new [task] --engine claude", "run the agent with Claude Code, codex, opencode or pi"],
 	[":checkhealth", "which engines are installed and signed in"],
 	[":model [name]", "pick the agent's model (no agent: for new agents)"],
