@@ -60,7 +60,7 @@ test("[style] in a theme file and in config.toml; mistakes are warnings", () => 
 		`config [style]: 'sidebar' should be "tree", "cards", "compact"`,
 		"config [style.icons]: 'prompt' should be a string",
 		"config [style.icons]: unknown icon 'sparkle' (prompt, worktree, folded, open, cursor, bullet, queued, open_agent, here, unread, light, ok, warn, off, sep, idle, waiting, paused, error)",
-		"config [style]: unknown option 'colour' (sidebar, messages, tool_icons, user_label, icons)",
+		"config [style]: unknown option 'colour' (sidebar, messages, tool_icons, separators, user_label, icons)",
 	]);
 
 	// a theme file: its own colors and layout, built on another theme's
@@ -75,13 +75,13 @@ test("[style] in a theme file and in config.toml; mistakes are warnings", () => 
 	const { config } = loadConfig(write("config.toml", `[style]\nmessages = "plain"\n[style.icons]\nidle = "○"\n`));
 	const s = resolveStyle(mine.style, config.style);
 	assert.deepEqual([s.sidebar, s.messages, s.icons.prompt, s.icons.idle], ["cards", "plain", "λ ", "○"]);
-	assert.deepEqual(resolveStyle(), { sidebar: "tree", messages: "plain", userLabel: "You", icons: {} }, "nothing set: vigent's usual look");
+	assert.deepEqual(resolveStyle(), { sidebar: "tree", messages: "plain", userLabel: "You", separators: "none", icons: {} }, "nothing set: vigent's usual look");
 });
 
 test("sidebar styles: tree (default), cards, compact", () => {
 	let { sidebar } = makeApp();
 	assert.match(sidebar()[1], /^\s+1 ├╴○ cart total/);
-	assert.match(sidebar()[2], /│\s+⎇ fix\/cart-to.* \+41 −18/, "a long branch gives way to the counts");
+	assert.match(sidebar()[2], /│\s+⎇ fix\/cart-t.*… \+41 −18 $/, "a long branch gives way to the counts, a column spare");
 
 	({ sidebar } = makeApp("default", { sidebar: "cards" }));
 	const cards = sidebar();
@@ -169,3 +169,42 @@ test(":settings changes the sidebar and message style, and w saves them to [styl
 	assert.match(saved, /\[style\][^[]*sidebar = "cards"/);
 	assert.match(saved, /\[style\][^[]*messages = "labeled"/);
 });
+
+test("separators: a lualine-style statusline and the agent in a pill, with a Nerd Font; plain without one", () => {
+	const raw = (app) => app.render(120);
+	// with icons = "nerd": rounded segments (U+E0B4 / U+E0B6), icons on each part
+	let { app, screen } = makeApp("default", { separators: "round" }, { icons: "nerd" });
+	let status = screen().at(-2);
+	assert.match(status, /^\ue0b6 \ue62b NORMAL \ue0b4/, "the mode in a rounded segment, with the vim icon");
+	assert.match(status, /\ue0b4 .*claude-sonnet-4-5 /, "the model, with its icon");
+	assert.match(status, /\ue0b6 .*0\/2 \ue0b4$/, "the right end mirrors the left");
+	assert.match(screen()[0].slice(31), /^ \ue0b6 .*cart total \ue0b4/, "the winbar's agent in a pill");
+	assert.match(raw(app).at(-2), /\x1b\[/, "colored");
+	assert.equal([...status].length, 120, "the whole width, no more");
+
+	({ screen } = makeApp("default", { separators: "arrow" }, { icons: "nerd" }));
+	assert.match(screen().at(-2), /NORMAL \ue0b0/);
+	({ screen } = makeApp("default", { separators: "slant" }, { icons: "nerd" }));
+	assert.match(screen().at(-2), /NORMAL \ue0bc/);
+
+	// without a Nerd Font the shapes would be empty boxes: the plain statusline
+	({ screen } = makeApp("default", { separators: "round" }));
+	assert.match(screen().at(-2), /^ NORMAL {2}cart total/);
+	assert.doesNotMatch(screen().join("\n"), /[\ue000-\uf8ff]/u, "no Nerd Font glyph anywhere");
+});
+
+test("nebula: the dressed-up Neovim look, falling back cleanly without a Nerd Font", () => {
+	assert.deepEqual([BUILTIN_THEMES.nebula.style.separators, BUILTIN_THEMES.nebula.style.tool_icons], ["round", "nerd"]);
+	let { screen } = makeApp("nebula", {}, { icons: "nerd" });
+	const all = screen().join("\n");
+	assert.match(all, /\ue0b6 \ue62b NORMAL/, "lualine-style statusline");
+	assert.match(all, /\uf120 bash npm test|\uf489 bash npm test|bash npm test/, "tool call");
+	assert.match(all, / \uf03a SESSIONS/, "sidebar headers get icons");
+
+	({ screen } = makeApp("nebula"));
+	const plain = screen().join("\n");
+	assert.doesNotMatch(plain, /[\ue000-\uf8ff]/u, "unicode icons: no Nerd Font glyph shows, not even the theme's own");
+	assert.match(plain, /▶ bash npm test/, "tool icons fall back to unicode ones");
+	assert.match(plain, /▎ Claude Code/, "labeled messages either way");
+});
+

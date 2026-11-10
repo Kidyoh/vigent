@@ -131,7 +131,7 @@ A part with nothing to show (no effort set, no worktree) is left out. On the win
 
 ## `[style]`
 
-How vigent is laid out, over the theme's own style: the sidebar (`tree`, `cards`, `compact`), messages (`plain`, `labeled`, `bubbles`), tool-call icons and any glyph. See [Styles in themes.md](themes.md#styles-layout-and-icons).
+How vigent is laid out, over the theme's own style: the sidebar (`tree`, `cards`, `compact`), messages (`plain`, `labeled`, `bubbles`), a lualine-style statusline (`separators = "round"`, with `icons = "nerd"`), tool-call icons and any glyph. See [Styles in themes.md](themes.md#styles-layout-and-icons).
 
 ```toml
 [style]

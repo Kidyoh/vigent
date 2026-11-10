@@ -21,7 +21,7 @@ Files live in `~/.config/vigent/` (or `$XDG_CONFIG_HOME/vigent/`). `vigent theme
 
 ## Built-in themes
 
-27 of them, dark and light:
+28 of them, dark and light:
 
 | | |
 |---|---|
@@ -32,7 +32,7 @@ Files live in `~/.config/vigent/` (or `$XDG_CONFIG_HOME/vigent/`). `vigent theme
 | GitHub | `github-dark`, `github-light` (light) |
 | solarized | `solarized-dark`, `solarized-light` (light) |
 | more | `gruvbox`, `kanagawa`, `nord`, `dracula`, `onedark`, `everforest`, `nightfox`, `monokai-pro`, `ayu-mirage` |
-| with a layout of their own | `neon` (cards, chat bubbles), `zen` (compact rows, labeled messages); see [Styles](#styles-layout-and-icons) |
+| with a layout of their own | `nebula` (lualine-style statusline, Nerd Font icons), `neon` (cards, chat bubbles), `zen` (compact rows, labeled messages); see [Styles](#styles-layout-and-icons) |
 
 `:colorscheme` (or `<Space>t`) opens a picker that shows each theme's colors and whether it's dark, light or transparent, and previews the one under the cursor live. Type to filter, Enter keeps it, Esc goes back.
 
@@ -48,6 +48,7 @@ sidebar = "cards"          # tree (default), cards, compact
 messages = "bubbles"       # plain (default), labeled, bubbles
 tool_icons = "unicode"     # none, unicode, nerd (default: nerd with icons = "nerd", else none)
 user_label = "you"         # what labeled and bubble messages call you (default "You")
+separators = "round"       # none (default), round, arrow, slant: lualine-style statusline
 
 [style.icons]              # replace any glyph
 prompt = "λ "
@@ -59,12 +60,15 @@ idle = "◇"                 # agent states: idle, waiting, paused, error
 |---|---|
 | `sidebar` | `tree`: neo-tree's look, a branch line under each agent. `cards`: a box per agent with its branch, changes, model and tokens. `compact`: one row per agent, the `+/-` counts at the right |
 | `messages` | `plain`: `❯` before your prompts. `labeled`: a header over each message (you, or the engine's name) with the text indented under it. `bubbles`: your prompts in a box at the right, like a chat; replies named by their engine |
-| `tool_icons` | an icon before each tool call: `unicode` (▶ shell, ✎ edit, ☰ read, ⌕ search, ◍ web, ☑ plan, ⚙ other) works in any font; `nerd` needs a Nerd Font |
+| `separators` | the statusline as lualine draws it: the mode in its color, then a lighter section, then the bar, with rounded (`round`), arrow (`arrow`) or slanted (`slant`) ends, an icon on each part, and the winbar's agent in a pill. These are Nerd Font glyphs: without `icons = "nerd"` the plain statusline shows instead |
+| `tool_icons` | an icon before each tool call: `unicode` (▶ shell, ✎ edit, ≡ read, ⌕ search, ◍ web, ✓ plan, ✱ other) works in any font; `nerd` needs a Nerd Font |
 | `icons` | `prompt`, `worktree`, `folded`, `open`, `cursor`, `bullet`, `queued`, `open_agent`, `here`, `unread`, `light`, `ok`, `warn`, `off`, `sep`, and the agent states `idle`, `waiting`, `paused`, `error` |
 
 `:settings` (`<Space>s`) cycles the sidebar and message styles and saves them to `[style]`. `:colorscheme` previews a theme's layout along with its colors.
 
-The built-in `neon` and `zen` show what a style does:
+The built-in `nebula`, `neon` and `zen` show what a style does:
+
+![nebula: a lualine-style statusline with rounded segments, the agent in a pill, Nerd Font icons](screenshots/theme-nebula.png)
 
 ![neon: a card per agent, your prompt in a chat bubble, unicode tool icons](screenshots/theme-neon.png)
 
@@ -82,6 +86,23 @@ tool_icons = "unicode"
 [style.icons]
 prompt = "λ "
 ```
+
+## A Neovim-style setup
+
+To make vigent look like a dressed-up Neovim (AstroNvim, LazyVim, NvChad):
+
+1. Use a [Nerd Font](https://www.nerdfonts.com) in your terminal, for example JetBrainsMono Nerd Font (on macOS: `brew install --cask font-jetbrains-mono-nerd-font`, then pick it in your terminal's settings).
+2. Turn on Nerd Font icons and pick a theme with a layout of its own:
+
+```toml
+# ~/.config/vigent/config.toml
+theme = "nebula"
+
+[ui]
+icons = "nerd"
+```
+
+`nebula` gives a lualine-style statusline with rounded segments, the agent's name in a pill, and icons on tool calls, branches and headers. Any other theme gets the same look with `[style] separators = "round"` and `tool_icons = "nerd"`, or try them live: `:set icons=nerd`, then `:colorscheme nebula`.
 
 ## Transparent backgrounds
 

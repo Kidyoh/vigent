@@ -385,6 +385,27 @@ export const ZEN: Theme = {
 	},
 };
 
+/**
+ * nebula: the look of a dressed-up Neovim (AstroNvim, LazyVim, NvChad): a
+ * lualine-style statusline with rounded segments, the agent's name in a pill,
+ * Nerd Font icons on tool calls and headers, labeled messages. Set
+ * icons = "nerd" (and a Nerd Font in your terminal) to see all of it; without
+ * one it falls back to plain shapes and unicode icons.
+ */
+export const NEBULA: Theme = {
+	...fromPalette("nebula", {
+		bg: "#13131f", fg: "#cdd6f4", red: "#f38ba8", yellow: "#f9e2af", green: "#a6e3a1",
+		cyan: "#89dceb", blue: "#89b4fa", magenta: "#cba6f7", bg_dark: "#0d0d17", bg_alt: "#232336", muted: "#7f849c",
+	}),
+	style: {
+		sidebar: "tree",
+		messages: "labeled",
+		separators: "round",
+		tool_icons: "nerd",
+		icons: { prompt: "❯ ", open_agent: "\uf2db", unread: "\uf0f3", queued: "\uf017" },
+	},
+};
+
 export const BUILTIN_THEMES: Record<string, Theme> = {
 	default: NVIM_DEFAULT,
 	gruvbox: GRUVBOX,
@@ -413,4 +434,5 @@ export const BUILTIN_THEMES: Record<string, Theme> = {
 	"ayu-mirage": AYU_MIRAGE,
 	neon: NEON,
 	zen: ZEN,
+	nebula: NEBULA,
 };

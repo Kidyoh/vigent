@@ -115,15 +115,15 @@ test(":settings changes the look, the engine and the keys live, and w saves them
 	assert.equal(overlays.length, 2);
 });
 
-test("27 built-in themes, each with its own colors, and the picker shows them", () => {
+test("28 built-in themes, each with its own colors, and the picker shows them", () => {
 	const names = Object.keys(BUILTIN_THEMES);
-	assert.equal(names.length, 27);
-	for (const n of ["neon", "zen", "dracula", "onedark", "everforest", "nightfox", "catppuccin-frappe", "catppuccin-macchiato", "tokyonight-storm", "rose-pine-moon", "rose-pine-dawn", "solarized-dark", "solarized-light", "github-dark", "github-light", "monokai-pro", "ayu-mirage"]) {
+	assert.equal(names.length, 28);
+	for (const n of ["neon", "zen", "nebula", "dracula", "onedark", "everforest", "nightfox", "catppuccin-frappe", "catppuccin-macchiato", "tokyonight-storm", "rose-pine-moon", "rose-pine-dawn", "solarized-dark", "solarized-light", "github-dark", "github-light", "monokai-pro", "ayu-mirage"]) {
 		assert.ok(names.includes(n), n);
 	}
 	for (const light of ["rose-pine-dawn", "solarized-light", "github-light", "catppuccin-latte"]) assert.equal(BUILTIN_THEMES[light].background, "light", light);
 	const backgrounds = new Set(names.map((n) => extractPalette(BUILTIN_THEMES[n]).bg));
-	assert.ok(backgrounds.size >= 26, "distinct backgrounds");
+	assert.ok(backgrounds.size >= 27, "distinct backgrounds");
 
 	const { app, overlays, ex } = makeApp();
 	ex("colorscheme");

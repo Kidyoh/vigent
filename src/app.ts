@@ -61,7 +61,7 @@ import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon, toolKind } from "./icons.js";
-import { MESSAGE_STYLES, resolveStyle, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
+import { MESSAGE_STYLES, resolveStyle, SEPARATOR_GLYPHS, SEPARATOR_STYLES, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { PiSession } from "./pi-session.js";
 import type { Session, SessionState } from "./session.js";
@@ -316,7 +316,9 @@ export class App implements Component {
 
 	private get icons(): Icons {
 		const base = ICONS[this.ui.icons];
-		const o = this.style.icons;
+		let o = this.style.icons;
+		// a Nerd Font glyph (private use area) only shows with one: without it, the icon set's own
+		if (this.ui.icons !== "nerd") o = Object.fromEntries(Object.entries(o).filter(([, g]) => !/[\ue000-\uf8ff]|[\u{f0000}-\u{10ffff}]/u.test(g ?? "")));
 		if (!Object.keys(o).length) return base;
 		const { idle, waiting, paused, error, ...glyphs } = o;
 		const state = { ...base.state };
@@ -1687,6 +1689,13 @@ export class App implements Component {
 				change: (d) => ((this.styleConfig = { ...this.styleConfig, messages: cycle([...MESSAGE_STYLES], this.style.messages, d) }), refresh()),
 				hint: "plain (❯ prompts), labeled (a header per message), bubbles (your prompts in boxes)",
 			},
+			{
+				section: "Layout",
+				label: "Statusline shapes",
+				value: () => this.style.separators + (this.style.separators !== "none" && this.ui.icons !== "nerd" ? " (needs icons = nerd)" : ""),
+				change: (d) => ((this.styleConfig = { ...this.styleConfig, separators: cycle([...SEPARATOR_STYLES], this.style.separators, d) }), refresh()),
+				hint: "lualine-style segments: round, arrow or slant (Nerd Font glyphs)",
+			},
 			{ section: "Layout", label: "Session numbers", value: () => onOff(ui.number), change: () => ((ui.number = !ui.number), refresh()) },
 			{ section: "Layout", label: "~ on empty sidebar rows", value: () => onOff(ui.tilde), change: () => ((ui.tilde = !ui.tilde), refresh()) },
 			{
@@ -1827,6 +1836,7 @@ export class App implements Component {
 			for (const k of ["sidebar", "sidebar_width", "sidebar_position", "number", "tilde", "icons", "termguicolors", "transparent", "whichkey", "notify"] as const) set("ui", k, ui[k]);
 			if (this.styleConfig.sidebar) set("style", "sidebar", this.styleConfig.sidebar);
 			if (this.styleConfig.messages) set("style", "messages", this.styleConfig.messages);
+			if (this.styleConfig.separators) set("style", "separators", this.styleConfig.separators);
 			set("worktree", "enabled", this.workspace.config.enabled);
 			set("worktree", "backend", this.workspace.config.backend ?? "auto");
 			for (const [lhs, rhs] of this.keyChanges) set("keys.normal", lhs, rhs);
@@ -2918,7 +2928,9 @@ export class App implements Component {
 		const term = intro ? "" : this.mode === "SEARCH" ? this.cmdBuf : this.searchQuery;
 
 		const out: string[] = [];
-		const sep = P.p("WinSeparator", this.icons.sep);
+		// the divider on the theme's background, so it isn't a stripe of the terminal's own
+		const sepBg = P.attr("Normal").bg;
+		const sep = sepBg ? P.on("WinSeparator", sepBg) + this.icons.sep + RESET : P.p("WinSeparator", this.icons.sep);
 		const normalBg = P.s("Normal");
 		const onRight = this.ui.sidebar_position === "right";
 		for (let r = 0; r < sideH; r++) {
@@ -3063,7 +3075,18 @@ export class App implements Component {
 		if (!s && !lefts.some((x) => x.group === "WinBar")) lefts.unshift({ text: `${this.icons.open_agent} [no agent]`, group: "WinBar" });
 		let left = "";
 		let leftW = 0;
+		// with powerline shapes (a Nerd Font), the agent's name sits in a rounded pill
+		const seps = this.style.separators;
+		const pill = seps !== "none" && this.ui.icons === "nerd" ? SEPARATOR_GLYPHS[seps] : undefined;
+		const pillBg = P.attr("CursorLine").bg ?? P.attr("Visual").bg ?? bg;
 		lefts.forEach((x, i) => {
+			if (pill && x.group === "WinBar") {
+				const [toRight, toLeft] = pill;
+				const lead = i ? "  " : " ";
+				left += RESET + P.on("Normal", bg) + lead + sgr({ fg: pillBg, bg }, P.colorMode) + toLeft + sgr({ fg: P.attr("Title").fg, bg: pillBg, bold: true }, P.colorMode) + ` ${x.text} ` + sgr({ fg: pillBg, bg }, P.colorMode) + toRight + RESET;
+				leftW += visibleWidth(lead) + visibleWidth(toLeft) + visibleWidth(x.text) + 2 + visibleWidth(toRight);
+				return;
+			}
 			const t = `${i ? "  " : " "}${x.text}`;
 			left += (x.group === "WinBar" ? P.on("WinBar", bg) : RESET + P.on(x.group, bg)) + t;
 			leftW += visibleWidth(t);
@@ -3293,7 +3316,8 @@ export class App implements Component {
 		// winbar
 		const running = this.sessions.filter((x) => x.state === "running").length;
 		const right = running > 0 ? `${running} running ` : `${this.sessions.length} `;
-		const title = this.sidebarFocused ? `${I.folded} SESSIONS` : " SESSIONS";
+		const nerd = this.ui.icons === "nerd";
+		const title = this.sidebarFocused ? `${I.folded} SESSIONS` : nerd ? ` ${NERD.list} SESSIONS` : " SESSIONS";
 		lines.push(
 			row([
 				[this.sidebarFocused ? "Title" : "WinBar", title],
@@ -3383,7 +3407,8 @@ export class App implements Component {
 			];
 			if (s.worktree) {
 				// the +/- counts matter more than the end of a long branch name
-				const room = w - num.length - 2 - 2 - visibleWidth(I.worktree) - statWidth;
+				// one column spare, so the counts don't run into the divider
+				const room = w - num.length - 2 - 2 - visibleWidth(I.worktree) - statWidth - 1;
 				const branch = truncateToWidth(s.worktree.branch, Math.max(4, room), "…");
 				lines.push(row([...indent, ["Comment", `  ${I.worktree}${branch}`], ...stat]));
 			} else {
@@ -3396,7 +3421,7 @@ export class App implements Component {
 		const block: string[] = [];
 		if (engines && h - lines.length >= engines.length + 3) {
 			const ready = engines.filter((e) => e.connected).length;
-			const title = " ENGINES";
+			const title = this.ui.icons === "nerd" ? ` ${NERD.chip} ENGINES` : " ENGINES";
 			const count = `${ready}/${engines.length} `;
 			block.push(
 				row([
@@ -3441,7 +3466,8 @@ export class App implements Component {
 	/** A tool call's glyph: Nerd Font or plain unicode, as the style (or the icon set) says. */
 	private toolGlyph(name: string): string {
 		const mode = this.style.toolIcons ?? (this.ui.icons === "nerd" ? "nerd" : "none");
-		if (mode === "nerd") return `${toolIcon(name)} `;
+		// Nerd Font tool icons need one; a theme asking for them gets plain unicode ones without
+		if (mode === "nerd") return this.ui.icons === "nerd" || this.styleConfig.tool_icons === "nerd" ? `${toolIcon(name)} ` : `${UNICODE_TOOL_ICONS[toolKind(name)]} `;
 		if (mode === "unicode") return `${UNICODE_TOOL_ICONS[toolKind(name)]} `;
 		return "";
 	}
@@ -3576,6 +3602,9 @@ export class App implements Component {
 
 	/** mode and agent on the left, model, usage and agents on the right ([statusline] picks the parts) */
 	private renderStatusline(width: number): string {
+		const seps = this.style.separators;
+		// powerline shapes are Nerd Font glyphs: without one, the plain statusline
+		if (seps !== "none" && this.ui.icons === "nerd") return this.renderPowerline(width, SEPARATOR_GLYPHS[seps]);
 		const P = this.painter;
 		const s = this.focusedSession;
 		const { left: leftParts, right: rightParts } = this.layout.statusline;
@@ -3602,6 +3631,79 @@ export class App implements Component {
 		const right = s ? (parts.length || serve ? ` ${serve}${parts.join("  ")} ` : "") : this.server ? ` ${serve}serving ` : "";
 		const fill = Math.max(0, width - leftW - visibleWidth(right));
 		return left + P.s(first ? "StatusLine" : "StatusLineNC") + " ".repeat(fill) + P.s("StatusLine") + right + RESET;
+	}
+
+	/**
+	 * lualine's look: the mode in its color, then a lighter section, then the
+	 * bar; the right side mirrors it. Each part gets its Nerd Font icon, and
+	 * the shapes between sections carry one's color into the next.
+	 */
+	private renderPowerline(width: number, [toRight, toLeft]: [string, string]): string {
+		const P = this.painter;
+		const s = this.focusedSession;
+		const mode = P.attr(MODE_GROUP[this.mode]);
+		const fill = P.attr("StatusLine").bg ?? P.attr("Normal").bg;
+		const fillFg = P.attr("Comment").fg ?? P.attr("Normal").fg;
+		const middle = P.attr("CursorLine").bg ?? P.attr("Visual").bg ?? fill;
+		const midFg = P.attr("Normal").fg;
+		const icon: Partial<Record<StatuslinePart, string>> = {
+			mode: "\ue62b", // nf-custom-vim
+			agent: NERD.chip,
+			model: NERD.bolt,
+			engine: NERD.terminal,
+			effort: NERD.gear,
+			usage: "\uf201", // nf-fa-line_chart
+			agents: NERD.list,
+			path: "\uf07b", // nf-fa-folder
+			clock: NERD.clock,
+		};
+		const text = (p: StatuslinePart): string => {
+			if (p === "mode") return `${icon.mode} ${this.mode}${this.demo ? " · DEMO" : ""}`;
+			const t = p === "agent" && !s ? "no agent" : s || p === "clock" || p === "agents" ? this.statuslinePart(p) : "";
+			if (!t) return "";
+			// the branch part already starts with the branch icon
+			return p === "branch" || !icon[p] ? t : `${icon[p]} ${t}`;
+		};
+		type Seg = { text: string; fg?: string; bg?: string; bold?: boolean };
+		const colors = (i: number, n: number, fromEnd: boolean): Pick<Seg, "fg" | "bg" | "bold"> => {
+			const k = fromEnd ? n - 1 - i : i;
+			return k === 0 ? { fg: mode.fg, bg: mode.bg, bold: true } : k === 1 ? { fg: midFg, bg: middle } : { fg: fillFg, bg: fill };
+		};
+		const build = (parts: StatuslinePart[], fromEnd: boolean): Seg[] => {
+			const texts = parts.map(text).filter(Boolean);
+			return texts.map((t, i) => ({ text: ` ${t} `, ...colors(i, texts.length, fromEnd) }));
+		};
+		const left = build(this.layout.statusline.left, false);
+		const right = s || this.server ? build(this.layout.statusline.right, true) : [];
+		const paint = (seg: Pick<Seg, "fg" | "bg" | "bold">, t: string) => sgr({ fg: seg.fg, bg: seg.bg, ...(seg.bold ? { bold: true } : {}) }, P.colorMode) + t + RESET;
+		let out = "";
+		let used = 0;
+		const put = (seg: Pick<Seg, "fg" | "bg" | "bold">, t: string) => {
+			out += paint(seg, t);
+			used += visibleWidth(t);
+		};
+		// left: a rounded start, then each section running into the next
+		if (left.length) put({ fg: left[0].bg, bg: fill }, toLeft);
+		left.forEach((seg, i) => {
+			put(seg, seg.text);
+			put({ fg: seg.bg, bg: left[i + 1]?.bg ?? fill }, toRight);
+		});
+		let tail = "";
+		let tailW = 0;
+		right.forEach((seg, i) => {
+			const prev = right[i - 1]?.bg ?? fill;
+			tail += paint({ fg: seg.bg, bg: prev }, toLeft) + paint(seg, seg.text);
+			tailW += visibleWidth(toLeft) + visibleWidth(seg.text);
+		});
+		if (right.length) {
+			tail += paint({ fg: right.at(-1)!.bg, bg: fill }, toRight);
+			tailW += visibleWidth(toRight);
+		}
+		if (used + tailW > width) {
+			tail = "";
+			tailW = 0;
+		}
+		return out + sgr({ bg: fill }, P.colorMode) + " ".repeat(Math.max(0, width - used - tailW)) + RESET + tail;
 	}
 
 	private statuslinePart(p: StatuslinePart): string {

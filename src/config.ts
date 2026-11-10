@@ -571,6 +571,7 @@ notify = "auto"          # an agent finished while you looked elsewhere: "auto",
 # sidebar = "cards"        # tree (default), cards, compact
 # messages = "bubbles"     # plain (default), labeled, bubbles
 # tool_icons = "unicode"   # none, unicode, nerd
+# separators = "round"     # lualine-style statusline (needs icons = "nerd")
 # [style.icons]
 # worktree = "⑂ "
 

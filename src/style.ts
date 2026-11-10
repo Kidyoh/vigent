@@ -8,6 +8,7 @@
  *   messages = "bubbles"      # plain (default), labeled, bubbles
  *   tool_icons = "unicode"    # none, unicode, nerd (default: nerd with icons = "nerd", else none)
  *   user_label = "you"        # what labeled and bubble messages call you
+ *   separators = "round"      # none (default), round, arrow, slant: lualine-style statusline (needs icons = "nerd")
  *
  *   [style.icons]             # any glyph by name, over the icon set
  *   prompt = "λ "
@@ -18,6 +19,8 @@
 export const SIDEBAR_STYLES = ["tree", "cards", "compact"] as const;
 export const MESSAGE_STYLES = ["plain", "labeled", "bubbles"] as const;
 export const TOOL_ICON_STYLES = ["none", "unicode", "nerd"] as const;
+export const SEPARATOR_STYLES = ["none", "round", "arrow", "slant"] as const;
+export type SeparatorStyle = (typeof SEPARATOR_STYLES)[number];
 export type SidebarStyle = (typeof SIDEBAR_STYLES)[number];
 export type MessageStyle = (typeof MESSAGE_STYLES)[number];
 export type ToolIconStyle = (typeof TOOL_ICON_STYLES)[number];
@@ -52,6 +55,7 @@ export interface StyleSpec {
 	messages?: MessageStyle;
 	tool_icons?: ToolIconStyle;
 	user_label?: string;
+	separators?: SeparatorStyle;
 	icons?: Partial<Record<IconName, string>>;
 }
 
@@ -62,10 +66,12 @@ export interface Style {
 	/** undefined: follow the icon set */
 	toolIcons?: ToolIconStyle;
 	userLabel: string;
+	/** the statusline's segments: plain, or lualine's powerline shapes (with a Nerd Font) */
+	separators: SeparatorStyle;
 	icons: Partial<Record<IconName, string>>;
 }
 
-export const DEFAULT_STYLE: Style = { sidebar: "tree", messages: "plain", userLabel: "You", icons: {} };
+export const DEFAULT_STYLE: Style = { sidebar: "tree", messages: "plain", userLabel: "You", separators: "none", icons: {} };
 
 /** Layer styles, lowest first: the default, the theme's, yours. */
 export function resolveStyle(...layers: (StyleSpec | undefined)[]): Style {
@@ -76,6 +82,7 @@ export function resolveStyle(...layers: (StyleSpec | undefined)[]): Style {
 		if (l.messages) s.messages = l.messages;
 		if (l.tool_icons) s.toolIcons = l.tool_icons;
 		if (l.user_label) s.userLabel = l.user_label;
+		if (l.separators) s.separators = l.separators;
 		if (l.icons) Object.assign(s.icons, l.icons);
 	}
 	return s;
@@ -104,6 +111,9 @@ export function parseStyle(value: unknown, where: string, warnings: string[]): S
 			case "tool_icons":
 				out.tool_icons = oneOf(k, v, TOOL_ICON_STYLES);
 				break;
+			case "separators":
+				out.separators = oneOf(k, v, SEPARATOR_STYLES);
+				break;
 			case "user_label":
 				if (typeof v === "string" && v.trim()) out.user_label = v.trim();
 				else warnings.push(`${where} [style]: 'user_label' should be a string`);
@@ -121,20 +131,30 @@ export function parseStyle(value: unknown, where: string, warnings: string[]): S
 				}
 				break;
 			default:
-				warnings.push(`${where} [style]: unknown option '${k}' (sidebar, messages, tool_icons, user_label, icons)`);
+				warnings.push(`${where} [style]: unknown option '${k}' (sidebar, messages, tool_icons, separators, user_label, icons)`);
 		}
 	}
 	for (const k of Object.keys(out) as (keyof StyleSpec)[]) if (out[k] === undefined) delete out[k];
 	return out;
 }
 
-/** Tool-call glyphs without a Nerd Font. */
+/** Powerline shapes (Nerd Fonts): the end of a segment pointing right, and one pointing left. */
+export const SEPARATOR_GLYPHS: Record<Exclude<SeparatorStyle, "none">, [right: string, left: string]> = {
+	round: ["\ue0b4", "\ue0b6"],
+	arrow: ["\ue0b0", "\ue0b2"],
+	slant: ["\ue0bc", "\ue0ba"],
+};
+
+/**
+ * Tool-call glyphs without a Nerd Font. Each is one column wide everywhere:
+ * no emoji-capable symbols (☰ ☑ ⚙), which some terminals draw two wide.
+ */
 export const UNICODE_TOOL_ICONS = {
 	terminal: "▶",
 	pencil: "✎",
-	fileText: "☰",
+	fileText: "≡",
 	search: "⌕",
 	globe: "◍",
-	list: "☑",
-	wrench: "⚙",
+	list: "✓",
+	wrench: "✱",
 } as const;
