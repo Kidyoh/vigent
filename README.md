@@ -62,6 +62,7 @@ command = ["aider", "--yes-always", "--message", "{prompt}"]
 :pr                              " push the branch and open a pull request
 :dash                            " every agent at a glance
 :model  /  :effort               " pick a model or reasoning effort
+:permissions                     " what each agent may do without asking (gh, git, web, sandbox, network)
 :kill                            " stop the agent, keep its work (:kill! also removes the worktree)
 ```
 

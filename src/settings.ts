@@ -41,6 +41,8 @@ export class SettingsFloat implements Component {
 		private onClose: () => void,
 		private onSave: () => string,
 		private requestRender: () => void,
+		/** the frame's title (:permissions uses this float too) */
+		private title = "Settings",
 	) {}
 
 	/** rows: section headers and items, in order */
@@ -146,7 +148,7 @@ export class SettingsFloat implements Component {
 		const row = (content: string, used: number, rowBg = bg) =>
 			border(I.v) + content + P.on("NormalFloat", rowBg) + " ".repeat(Math.max(0, inner - used)) + RESET + border(I.v);
 
-		const title = " Settings ";
+		const title = ` ${this.title} `;
 		const lines = [border(I.tl + I.h) + P.on("FloatTitle", bg) + title + RESET + border(I.h.repeat(Math.max(0, inner - 1 - visibleWidth(title))) + I.tr)];
 
 		const rows = this.rows();

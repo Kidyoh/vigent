@@ -370,12 +370,13 @@ async function main(): Promise<number | undefined> {
 			worktree: wt,
 			resumeId,
 			effort,
-			extraArgs: config.engines[engine]?.args,
+			// read at each prompt: :permissions changes them while agents are open
+			extraArgs: () => config.engines[engine]?.args,
 			// e.g. Claude Code without ANTHROPIC_API_KEY when it has a Claude account (see detectClaude)
 			env: () => engineEnv(app.engines?.find((e) => e.id === engine)),
 			// Claude Code's permission rules: [engines.claude] allow, and ask (opt-in) to allow a refused tool and retry
 			allow: () => config.engines[engine]?.allow,
-			ask: config.engines[engine]?.ask,
+			ask: () => config.engines[engine]?.ask,
 			onAlwaysAllow: (rules) => {
 				const why = alwaysAllow(engine, rules);
 				if (why) app.notify(why);
@@ -391,6 +392,7 @@ async function main(): Promise<number | undefined> {
 	app.templates = config.templates;
 	app.hooks = config.hooks;
 	app.layout = config.layout;
+	app.engineOptions = config.engines;
 	app.styleConfig = config.style;
 	app.commands = config.commands;
 	// :trust: let this project's .vigent.toml run its commands, from now on

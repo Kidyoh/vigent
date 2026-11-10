@@ -64,7 +64,18 @@ command = ["aider", "--yes-always", "--message", "{prompt}"]
 model_args = ["--model", "{model}"]
 ```
 
-**Permissions:** with `-p`, Claude Code can't stop to ask before running a command it isn't allowed, so it refuses it (for example `gh` or `cargo` under `acceptEdits`). vigent shows what was refused. You can allow commands up front with `[engines.claude] allow = ["Bash(gh:*)"]`. Or opt in with `ask = true`: vigent then asks **allow once / always allow / no** and runs the agent again with the permission ([details](config.md#when-claude-code-is-refused-a-tool)).
+**Permissions:** agents run headless, so one can't stop to ask before a command it isn't allowed; it refuses it (for example `gh`, `git fetch` or a web fetch under Claude Code's `acceptEdits`). vigent shows what was refused and the `:permissions allow …` line that would permit it.
+
+**`:permissions`** opens a panel of what each agent may do without asking, changed in place:
+
+| Agent | What you can toggle |
+|---|---|
+| Claude Code | its mode (`acceptEdits`, `default`, `plan`, `bypassPermissions`), asking when it's refused a tool (allow once / always / no), and allow rules for `gh`, `git`, `npm`, web fetch and web search |
+| Codex | its sandbox (`read-only`, `workspace-write`, `danger-full-access`) and network access (off by default in `workspace-write`) |
+| Gemini CLI | its approval mode (`default`, `auto_edit`, `yolo`) |
+| Cursor CLI | running commands without asking (`--force`) |
+
+Changes apply from each agent's next prompt, agents already open included; `w` saves them to config.toml. `:permissions allow Bash(cargo:*)` adds any other Claude Code rule (several at once work too), and `:permissions remove <rule>` takes one away. It's also a row in `:settings`. The same settings live in `[engines.<id>]` ([details](config.md#when-claude-code-is-refused-a-tool)).
 
 ### pi: extensions, skills and prompt templates
 

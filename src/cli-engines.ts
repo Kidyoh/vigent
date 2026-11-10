@@ -516,8 +516,8 @@ export interface CliSessionOptions {
 	worktree?: WorktreeInfo;
 	/** continue this CLI conversation (restored agents) */
 	resumeId?: string;
-	/** replaces the adapter's default extra arguments */
-	extraArgs?: string[];
+	/** replaces the adapter's default extra arguments; a function is asked at each run (:permissions can change them) */
+	extraArgs?: string[] | (() => string[] | undefined);
 	/** reasoning effort to start with */
 	effort?: string;
 	/** the CLI to run; default: the engine's usual command on PATH */
@@ -528,8 +528,8 @@ export interface CliSessionOptions {
 	onResumeId?: (id: string) => void;
 	/** permission rules every run may use ([engines.claude] allow); asked at each run */
 	allow?: () => string[] | undefined;
-	/** when the CLI refuses a tool, ask to allow it and retry ([engines.claude] ask; opt-in) */
-	ask?: boolean;
+	/** when the CLI refuses a tool, ask to allow it and retry ([engines.claude] ask; opt-in); a function is asked each time */
+	ask?: boolean | (() => boolean | undefined);
 	/** "always allow" was picked: keep these rules ([engines.claude] allow) */
 	onAlwaysAllow?: (rules: string[]) => void;
 }
@@ -592,7 +592,8 @@ export class CliSession extends Session {
 
 	/** whether a refused tool can be asked about (opt-in, and only Claude Code reports them) */
 	get asksToAllow(): boolean {
-		return !!this.opts.ask && this.engine === "claude";
+		const ask = typeof this.opts.ask === "function" ? this.opts.ask() : this.opts.ask;
+		return !!ask && this.engine === "claude";
 	}
 
 	private setThinking(active: boolean): void {
@@ -613,7 +614,7 @@ export class CliSession extends Session {
 			model: this.requestedModel,
 			effort: this.effort,
 			resumeId: this.resumeId,
-			extraArgs: this.opts.extraArgs,
+			extraArgs: typeof this.opts.extraArgs === "function" ? this.opts.extraArgs() : this.opts.extraArgs,
 			allowedTools: [...new Set([...(this.opts.allow?.() ?? []), ...once])],
 		});
 		let child: ChildProcess;
@@ -789,7 +790,7 @@ export class CliSession extends Session {
 		const rules = [...new Set(denied.map(allowRule))];
 		this.pushInfo(`blocked by ${this.engineName}'s permissions: ${what.join(" · ")}`);
 		if (!this.asksToAllow || !this.approver) {
-			if (this.engine === "claude") this.pushInfo(`to allow it, in config.toml: [engines.claude] allow = ${JSON.stringify(rules)} (or ask = true, to be asked each time)`);
+			if (this.engine === "claude") this.pushInfo(`to allow it: :permissions allow ${rules.join(" ")} (or :permissions, to toggle it or be asked each time)`);
 			return false;
 		}
 		this.setState("waiting");

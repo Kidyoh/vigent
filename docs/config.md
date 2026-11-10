@@ -237,6 +237,8 @@ args = ["--force"]                            # the default: edits and commands 
 | `allow` | Claude Code only. Permission rules every run may use, passed as `--allowedTools`: `"Bash(gh:*)"` allows `gh` with any arguments, `"WebFetch"` a whole tool. Same syntax as Claude Code's own `permissions.allow`. |
 | `ask` | Claude Code only, **off unless you set it**. See below. |
 
+`:permissions` changes these without editing the file: Claude Code's mode, `ask` and `allow`, Codex's sandbox and network, Gemini's approval mode and Cursor's `--force`, live, and `w` writes them here ([guide](guide.md#engines)).
+
 ### When Claude Code is refused a tool
 
 vigent runs Claude Code with `-p`, where it can't stop and ask you. So a command its permission settings don't allow (say `gh pr view` or `cargo test` under `acceptEdits`) is refused, and the agent carries on without it. vigent shows what was refused in the transcript, along with the `allow` line that would permit it.

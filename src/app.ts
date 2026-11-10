@@ -15,7 +15,8 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "./tui.js";
-import { applySetCommand, CONFIG_TEMPLATE, configPath, DEFAULT_UI, type UiOptions } from "./config.js";
+import { applySetCommand, CONFIG_TEMPLATE, configPath, DEFAULT_UI, type EngineOptions, type UiOptions } from "./config.js";
+import { CLAUDE_MODES, CLAUDE_PRESETS, CODEX_SANDBOXES, codexOption, flagValue, GEMINI_APPROVALS, withCodexOption, withFlag, withSwitch } from "./permissions.js";
 import { setTomlValue, tomlValue } from "./config-edit.js";
 import { type SettingItem, SettingsFloat } from "./settings.js";
 import { type FloatLine, type FloatOptions, TextFloat } from "./float.js";
@@ -41,7 +42,7 @@ import { HunkReview } from "./hunk-review.js";
 import { listFiles, MENTION, mentionable } from "./attach.js";
 import { allTemplates, fillTemplate, needsTask, type Template } from "./templates.js";
 import type { PiUiHost } from "./pi-ui.js";
-import { type AllowChoice, type CliSession, type Denial, describeDenial } from "./cli-engines.js";
+import { type AllowChoice, CLI_ADAPTERS, type CliSession, type Denial, describeDenial } from "./cli-engines.js";
 import { type ServeHandle, type ServeHost, type ServeOptions, startServer } from "./serve.js";
 import { HOOK_TIMEOUT_MS, type HookName, type Hooks, lastLine, runHook, took } from "./hooks.js";
 import { PROJECT_CONFIG } from "./config.js";
@@ -308,6 +309,9 @@ export class App implements Component {
 			hintDelay: () => 300,
 		});
 	}
+
+	/** [engines.<id>] from config.toml, shared with the CLI: :permissions changes it, agents read it at each prompt */
+	engineOptions: Partial<Record<EngineId, EngineOptions>> = {};
 
 	/** [style] from config.toml: over the theme's own style */
 	styleConfig: StyleSpec = {};
@@ -889,6 +893,12 @@ export class App implements Component {
 			case "che":
 			case "engines":
 				this.openHealth();
+				return;
+			case "permissions":
+			case "permission":
+			case "perms":
+			case "perm":
+				this.execPermissions(arg);
 				return;
 			case "settings":
 			case "options":
@@ -1705,6 +1715,16 @@ export class App implements Component {
 			{ section: "Layout", label: "~ on empty sidebar rows", value: () => onOff(ui.tilde), change: () => ((ui.tilde = !ui.tilde), refresh()) },
 			{
 				section: "Agents",
+				label: "Permissions",
+				value: () => "what each agent may do without asking",
+				open: () => {
+					handle?.hide();
+					this.openPermissions();
+				},
+				hint: ":permissions · Claude Code's mode and allowed commands, Codex's sandbox and network, Gemini's approval",
+			},
+			{
+				section: "Agents",
 				label: "Engine for new agents",
 				value: () => (this.preferredEngine === "auto" ? `auto (${ENGINE_NAMES[this.defaultEngine()]})` : ENGINE_NAMES[this.preferredEngine]),
 				change: (d) => {
@@ -1824,6 +1844,162 @@ export class App implements Component {
 		);
 		handle = this.tui.showOverlay(float, { width: Math.min(96, this.terminal.columns - 4), anchor: "center" });
 		this.tui.requestRender();
+	}
+
+	/** The arguments an engine runs with: yours from [engines.<id>] args, else its defaults. */
+	private engineArgs(id: "claude" | "codex" | "gemini" | "cursor"): string[] {
+		return [...(this.engineOptions[id]?.args ?? CLI_ADAPTERS[id].defaultArgs)];
+	}
+
+	private setEngineOption<K extends keyof EngineOptions>(id: EngineId, key: K, value: EngineOptions[K]) {
+		const opts = (this.engineOptions[id] ??= {});
+		if (value === undefined) delete opts[key];
+		else opts[key] = value;
+		this.permissionsChanged.add(id);
+	}
+
+	/** engines whose permissions :permissions changed (what w saves) */
+	private permissionsChanged = new Set<EngineId>();
+
+	/**
+	 * `:permissions`: what each agent may do without asking, toggled in place;
+	 * `:permissions allow <rule>` / `remove <rule>` change Claude Code's rules.
+	 * Changes apply from each agent's next prompt; w saves them to config.toml.
+	 */
+	execPermissions(arg = "") {
+		const m = /^(allow|remove|unallow|deny)\s+(.+)$/.exec(arg.trim());
+		if (m) {
+			// several rules may follow; a rule's own spaces stay inside its parentheses: Bash(npm run test:*)
+			const rules = m[2].match(/[^\s(]+(?:\([^)]*\))?/g) ?? [];
+			const allow = new Set(this.engineOptions.claude?.allow ?? []);
+			for (const rule of rules) {
+				if (m[1] === "allow") allow.add(rule);
+				else allow.delete(rule);
+			}
+			this.setEngineOption("claude", "allow", [...allow]);
+			this.setMessage(`${m[1] === "allow" ? "allowed" : "removed"} ${rules.join(" ")} for Claude Code (from its next prompt) · :permissions, then w, saves it`, "Comment");
+			return;
+		}
+		if (arg.trim()) {
+			this.setMessage("usage: :permissions  |  :permissions allow <rule>  |  :permissions remove <rule>", "ErrorMsg");
+			return;
+		}
+		this.openPermissions();
+	}
+
+	openPermissions() {
+		this.seq.reset();
+		const onOff = (b: boolean) => (b ? "on" : "off");
+		const cycle = <T,>(values: readonly T[], now: T, dir: 1 | -1) => values[(values.indexOf(now) + dir + values.length) % values.length];
+		const name = (id: EngineId) => {
+			const e = this.engines?.find((x) => x.id === id);
+			return `${ENGINE_NAMES[id]}${e && !e.installed ? " (not installed)" : ""}`;
+		};
+		const allow = () => this.engineOptions.claude?.allow ?? [];
+		const items: SettingItem[] = [
+			{
+				section: name("claude"),
+				label: "Mode",
+				value: () => flagValue(this.engineArgs("claude"), "--permission-mode") ?? "default",
+				change: (d) => this.setEngineOption("claude", "args", withFlag(this.engineArgs("claude"), "--permission-mode", cycle(CLAUDE_MODES, flagValue(this.engineArgs("claude"), "--permission-mode") ?? "default", d))),
+				hint: "acceptEdits: edits go ahead, other tools need a rule · default: only what's allowed · plan: read-only · bypassPermissions: everything (in its worktree)",
+			},
+			{
+				section: name("claude"),
+				label: "Ask when it's refused a tool",
+				value: () => onOff(!!this.engineOptions.claude?.ask),
+				change: () => this.setEngineOption("claude", "ask", this.engineOptions.claude?.ask ? undefined : true),
+				hint: "allow once / always allow / no, then the agent runs again with the permission",
+			},
+			...CLAUDE_PRESETS.map(
+				([rule, label]): SettingItem => ({
+					section: name("claude"),
+					label: `Allow ${label}`,
+					value: () => (allow().includes(rule) ? `on  ${rule}` : "off"),
+					change: () => this.setEngineOption("claude", "allow", allow().includes(rule) ? allow().filter((r) => r !== rule) : [...allow(), rule]),
+					hint: `the rule ${rule}, without asking`,
+				}),
+			),
+			{
+				section: name("claude"),
+				label: "Other allowed",
+				value: () => {
+					const other = allow().filter((r) => !CLAUDE_PRESETS.some(([p]) => p === r));
+					return other.length ? truncateToWidth(other.join(", "), 40, "…") : "none";
+				},
+				hint: ":permissions allow Bash(cargo:*) adds a rule · :permissions remove <rule> takes one away",
+			},
+			{
+				section: name("codex"),
+				label: "Sandbox",
+				value: () => codexOption(this.engineArgs("codex"), "sandbox_mode") ?? "read-only",
+				change: (d) => this.setEngineOption("codex", "args", withCodexOption(this.engineArgs("codex"), "sandbox_mode", cycle(CODEX_SANDBOXES, codexOption(this.engineArgs("codex"), "sandbox_mode") ?? "read-only", d))),
+				hint: "workspace-write: it edits its worktree · read-only: looks only · danger-full-access: no sandbox",
+			},
+			{
+				section: name("codex"),
+				label: "Network (fetch, git, gh)",
+				value: () => onOff(codexOption(this.engineArgs("codex"), "sandbox_workspace_write.network_access") === "true"),
+				change: () => {
+					const on = codexOption(this.engineArgs("codex"), "sandbox_workspace_write.network_access") === "true";
+					this.setEngineOption("codex", "args", withCodexOption(this.engineArgs("codex"), "sandbox_workspace_write.network_access", on ? undefined : true));
+				},
+				hint: "the workspace-write sandbox has no network unless this is on",
+			},
+			{
+				section: name("gemini"),
+				label: "Approval",
+				value: () => flagValue(this.engineArgs("gemini"), "--approval-mode") ?? "default",
+				change: (d) => this.setEngineOption("gemini", "args", withFlag(this.engineArgs("gemini"), "--approval-mode", cycle(GEMINI_APPROVALS, flagValue(this.engineArgs("gemini"), "--approval-mode") ?? "default", d))),
+				hint: "auto_edit: edits go ahead · yolo: edits, commands and fetches too · default: headless Gemini refuses what needs approval",
+			},
+			{
+				section: name("cursor"),
+				label: "Run commands without asking",
+				value: () => onOff(this.engineArgs("cursor").includes("--force")),
+				change: () => this.setEngineOption("cursor", "args", withSwitch(this.engineArgs("cursor"), "--force", !this.engineArgs("cursor").includes("--force"))),
+				hint: "--force: edits and commands in its worktree (headless Cursor can't ask)",
+			},
+		];
+		let handle: { hide(): void } | undefined;
+		const float = new SettingsFloat(
+			this.painter,
+			PICKER_ICONS[this.ui.icons],
+			items,
+			() => this.terminal.rows - 2,
+			() => {
+				handle?.hide();
+				this.repaint();
+			},
+			() => this.savePermissions(),
+			() => this.tui.requestRender(),
+			"Permissions · from each agent's next prompt",
+		);
+		handle = this.tui.showOverlay(float, { width: Math.min(110, this.terminal.columns - 4), anchor: "center" });
+		this.tui.requestRender();
+	}
+
+	/** Write what :permissions changed into config.toml ([engines.<id>] args, allow, ask), keeping the rest of the file. */
+	savePermissions(): string {
+		const file = configPath();
+		try {
+			let text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : CONFIG_TEMPLATE;
+			for (const id of this.permissionsChanged) {
+				const o = this.engineOptions[id] ?? {};
+				const section = `engines.${id}`;
+				if (o.args) text = setTomlValue(text, section, "args", JSON.stringify(o.args));
+				if (id === "claude") {
+					text = setTomlValue(text, section, "allow", JSON.stringify(o.allow ?? []));
+					text = setTomlValue(text, section, "ask", String(!!o.ask));
+				}
+			}
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			fs.writeFileSync(file, text);
+			this.permissionsChanged.clear();
+			return `saved to ${this.shortPath(file)}`;
+		} catch (err) {
+			return `couldn't save: ${(err as Error).message}`;
+		}
 	}
 
 	/** Write what :settings changed into config.toml, keeping everything else in the file as it is. */
@@ -3902,6 +4078,8 @@ const EX_HELP: [string, string][] = [
 	[":!{cmd}", "run a shell command in the agent's worktree; its output goes in the transcript"],
 	[":command [Name] [cmd]", "your own commands: list them, show one, or define one (| separates steps)"],
 	[":delcommand Name", "forget one of your commands"],
+	[":permissions", "what each agent may do without asking: modes, allowed commands, sandbox, network (w saves)"],
+	[":permissions allow <rule>", "let Claude Code run something without asking, e.g. Bash(cargo:*) (remove <rule> takes it away)"],
 ];
 
 /** One line of a message for previews: markdown markers and code fences dropped. */

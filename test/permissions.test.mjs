@@ -101,7 +101,7 @@ test("without ask (the default): a refused tool is said, with how to allow it; n
 	assert.equal(fake.calls().length, 1);
 	const info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
 	assert.ok(info.some((t) => /blocked by Claude Code's permissions: gh pr view 12 --json title · GH_PAGER= gh pr checks 12 · WebFetch https:\/\/example.com/.test(t)), info.join("\n"));
-	assert.ok(info.some((t) => t.includes('allow = ["Bash(gh:*)","WebFetch"]') && t.includes("ask = true")), info.join("\n"));
+	assert.ok(info.some((t) => t.includes(":permissions allow Bash(gh:*) WebFetch") && t.includes("be asked each time")), info.join("\n"));
 	s.dispose();
 });
 
