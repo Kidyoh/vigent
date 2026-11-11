@@ -294,18 +294,38 @@ process.exit(1);`);
 	await settle(missing);
 	assert.match(missing.items.at(-1).text, /isn't installed .*:checkhealth/);
 
+	const pidFile = path.join(dir, "slow.pid");
 	const slow = fakeBin(dir, "claude", `
+require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "s1", model: "m" }));
 setTimeout(() => {}, 60000);`);
 	const a = new CliSession("a", "claude", undefined, { cwd: tmp, bin: slow });
 	a.send("long task");
-	await new Promise((r) => setTimeout(r, 300));
+	// the CLI is up once it has said which conversation it's in, however long it took to start
+	await until(() => a.resumeId === "s1");
 	assert.equal(a.state, "running");
+	const pid = Number(fs.readFileSync(pidFile, "utf8"));
+	const alive = () => {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	// the first change after the stopped CLI has exited is the session handling that exit
+	const handledExit = new Promise((resolve) => {
+		const off = a.onChange(() => {
+			if (!alive()) {
+				off();
+				resolve();
+			}
+		});
+	});
 	a.abort();
 	assert.equal(a.state, "idle");
-	await new Promise((r) => setTimeout(r, 200));
+	await handledExit;
 	assert.equal(a.state, "idle", "the stopped run doesn't turn into an error");
-	assert.equal(a.resumeId, "s1");
 });
 
 test("the app: engines in the sidebar and intro, :checkhealth, :new --engine", async () => {
