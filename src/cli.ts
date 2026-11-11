@@ -33,7 +33,7 @@ import {
 	worktreesDir,
 } from "./worktree.js";
 
-const HELP = `vigent — vim-native orchestrator for the coding agents you have installed
+const HELP = `vigent — a vim-native orchestrator for coding-agent harnesses (the agent CLIs you have installed)
 
 usage:
   vigent --version                           which vigent this is (and the commit, from a clone)

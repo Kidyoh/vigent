@@ -1,7 +1,7 @@
 {
   "name": "@vigent/cli",
   "version": "0.8.0",
-  "description": "A vim-native terminal for running coding agents side by side, each in its own lightweight git worktree via riftri.",
+  "description": "A vim-native orchestrator for coding-agent harnesses: Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI and pi side by side, each in its own lightweight git worktree.",
   "keywords": [
     "vim",
     "neovim",

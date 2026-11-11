@@ -30,7 +30,7 @@ For prompts you use often, `:new -t fix the cart total is off by one` starts an 
 
 ## Engines
 
-Each engine is an agent you install yourself: vigent runs it as installed, in the agent's worktree, so each one uses its own login and settings, and runs its own agent loop (tools, retries, context). vigent is the screen around them. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected. If `ANTHROPIC_API_KEY` is set and Claude Code is also signed in with a Claude account, vigent runs Claude Code without that variable, so it uses your account (a key that isn't scoped to a workspace, or is out of credit, would otherwise fail every request). `:checkhealth` says so: *signed in (Claude account; ANTHROPIC_API_KEY left out)*.
+Each engine is a harness you install yourself: a program that runs the whole agent loop, from calling its model to running its tools (bash, edit, search…) and managing its context, retries and permissions. vigent runs it as installed, in the agent's worktree, so each one uses its own login and settings. vigent is the orchestrator around them: it starts them, reads what they stream, and handles queues, permissions, restarts, review and merge. vigent never reads their credentials; it only runs their version and sign-in status commands to show what's connected. If `ANTHROPIC_API_KEY` is set and Claude Code is also signed in with a Claude account, vigent runs Claude Code without that variable, so it uses your account (a key that isn't scoped to a workspace, or is out of credit, would otherwise fail every request). `:checkhealth` says so: *signed in (Claude account; ANTHROPIC_API_KEY left out)*.
 
 ```vim
 :new fix the race --engine codex            " this agent runs Codex

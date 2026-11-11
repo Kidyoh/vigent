@@ -10,7 +10,7 @@ import { THEMES } from "../lib/themes";
 export const dynamic = "force-static";
 
 export const metadata: Metadata = {
-  title: "vigent — the vim-native agent harness",
+  title: "vigent — a vim-native orchestrator for coding-agent harnesses",
   description:
     "Run Claude Code, Codex, OpenCode and pi in parallel, each in its own copy-on-write worktree powered by riftri.",
 };
@@ -22,7 +22,7 @@ export default function HomePage() {
       <main className="buffer" id="top">
         <L className="row">
           <span>
-            <span className="tag">*vigent.txt*</span> <span className="cm">the vim-native agent harness</span>
+            <span className="tag">*vigent.txt*</span> <span className="cm">orchestrator for coding-agent harnesses</span>
           </span>
           <span className="cm">MIT</span>
         </L>
@@ -33,13 +33,13 @@ export default function HomePage() {
             </pre>
           </div>
           <div className="hero-copy">
-            <L className="eyebrow">an agent harness for the terminal</L>
+            <L className="eyebrow">an orchestrator for coding-agent harnesses</L>
             <div className="l">
               <h1 className="t lede">Run every coding agent at once, each in its own worktree.</h1>
             </div>
             <div className="l">
               <p className="t sub">
-                vigent drives Claude Code, Codex, OpenCode and pi in parallel. Every agent gets a copy-on-write worktree from{" "}
+                Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI and pi are harnesses: each runs its own agent loop with its own login. vigent runs yours side by side. Every agent gets a copy-on-write worktree from{" "}
                 <a className="link" href="https://riftri.dev">
                   riftri
                 </a>
@@ -129,11 +129,13 @@ export default function HomePage() {
         <Rule />
         <Heading id="engines" title="3. Engines" tag="vigent-engines" doc="/docs#engines" />
         <L />
-        <L>vigent is the harness. The agents are the ones you already use, with the logins they already have. vigent never reads their credentials.</L>
+        <L>vigent isn't a harness itself. The harnesses are the ones you already use: each calls its model and runs its tools with its own login, and vigent starts them, shows what they do and lands their work. It never reads their credentials.</L>
         <L />
         <KeyRow k="Claude Code">your installed CLI, signed in as usual</KeyRow>
         <KeyRow k="Codex">your installed CLI, with its own model list</KeyRow>
         <KeyRow k="OpenCode">your installed CLI and its providers</KeyRow>
+        <KeyRow k="Gemini CLI">your installed CLI, signed in with Google or a key</KeyRow>
+        <KeyRow k="Cursor CLI">your installed cursor-agent</KeyRow>
         <KeyRow k="pi">your installed pi, with its keys or login</KeyRow>
         <L />
         <L>

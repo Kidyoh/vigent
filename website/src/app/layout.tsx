@@ -5,7 +5,7 @@ import { PAINT_SAVED_THEME } from "../lib/site-theme";
 
 export const metadata: Metadata = {
   title: "vigent",
-  description: "The vim-native agent harness: run Claude Code, Codex, OpenCode and pi in parallel, each in its own copy-on-write worktree.",
+  description: "A vim-native orchestrator for coding-agent harnesses: run Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI and pi side by side, each in its own copy-on-write worktree.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
   },

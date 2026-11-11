@@ -1,6 +1,6 @@
 # vigent
 
-A vim-native terminal app for running several coding agents at once, each in its own git worktree. It drives the agents you already have installed (Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI, [pi](https://github.com/badlogic/pi-mono), or any CLI you add) with their own logins, and bundles none of them.
+A vim-native orchestrator for coding-agent harnesses. Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI and [pi](https://github.com/badlogic/pi-mono) are harnesses: each runs its own agent loop (the model calls, the tools, the permissions) with its own login. vigent runs the ones you already have side by side, each in its own git worktree, and gives you one vim-native screen to watch them, steer them and land their work. It bundles none of them and never reads their credentials.
 
 **Website:** [vigent.farming-labs.dev](https://vigent.farming-labs.dev) · **Docs:** [vigent.farming-labs.dev/docs](https://vigent.farming-labs.dev/docs)
 
@@ -29,12 +29,14 @@ Press `i`, type what you want done, and press Enter. An agent starts on it in it
 - **Many agents, one screen.** A sidebar of agents, switch with `<Space>1`–`9` or `]s` / `[s`. Each one gets a bell or desktop notification when it finishes or needs you.
 - **A worktree per agent.** Agents never touch your checkout or each other's files. With riftri, worktrees share copy-on-write storage, so ten agents cost about one checkout of disk.
 - **Review and land.** `:diff` (or side by side), `:review` to drop hunks you don't want, then `:merge` or `:pr`.
-- **Your agents, as installed.** Each runs its own loop with its own login; vigent never reads credentials. `:checkhealth` shows what's installed and signed in.
+- **Harnesses as installed, orchestrated.** vigent doesn't call models or run tools itself: it starts each harness in its worktree, reads the events it streams (replies, tool calls, usage), and handles everything around the loop: queues, permissions, approvals, restarts, hooks, review and merge. `:checkhealth` shows which harnesses are installed and signed in.
 - **Vim all the way.** Modes, `/` search, folds, visual mode, `:set`, `:nmap`, `:command`, a which-key panel, and your Neovim colorscheme.
 - **Themes that change the layout.** `nebula` looks like a dressed-up Neovim (a lualine-style statusline, Nerd Font icons); `neon` puts each agent in a card and your prompts in chat bubbles; `zen` keeps it quiet: one row per agent, Nerd Font icons when you have the font. `[style]` mixes any layout and icons with any colors.
 - **Follow from your phone.** `:serve` shows an address and an access code.
 
-## Engines
+## Harnesses
+
+vigent calls the harness an agent runs on its *engine*.
 
 | Engine | vigent runs |
 |---|---|
