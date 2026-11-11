@@ -380,3 +380,59 @@ test("--demo races three scripted agents, and :race completes on Tab", () => {
 	assert.deepEqual(made.map((m) => m.name), ["add dark mode claude", "add dark mode codex", "add dark mode gemini"]);
 	assert.deepEqual(completeCommandLine("ra", { agents: [], themes: [] }).items, ["race"]);
 });
+
+/** a worktree being made, that the test finishes or fails */
+function deferred() {
+	let resolve, reject;
+	const promise = new Promise((a, b) => ((resolve = a), (reject = b)));
+	promise.catch(() => {});
+	return { promise, resolve, reject };
+}
+
+test("racers whose worktrees are still being made all start when the last one is there", async () => {
+	const pending = new Map();
+	const { app, ex, tick } = makeApp({ worktreeFor: (name) => ({ branch: `race/${name.replace(/ /g, "-")}`, path: `/wt/${name.replace(/ /g, "-")}` }) });
+	const newSession = app.newSession;
+	app.newSession = (name, opts) => {
+		const s = newSession(name, opts);
+		const d = deferred();
+		pending.set(s.engine, d);
+		s.setup = d.promise;
+		return s;
+	};
+	ex("race fix it");
+	const [claude, codex] = app.sessions;
+	assert.equal(claude.holdReason, "making worktree");
+	assert.match(app.message, /^race: claude, codex on 'fix it'/);
+	tick(5_000);
+	pending.get("claude").resolve();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual([claude.sent, codex.sent], [[], []], "claude waits for codex's worktree");
+	tick(3_000);
+	pending.get("codex").resolve();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual([claude.sent, codex.sent], [["fix it"], ["fix it"]]);
+	assert.equal(app.races[0].startedAt, 9_000, "the clock starts when they do");
+});
+
+test("an agent whose worktree can't be made is taken out, and a race goes on without it", async () => {
+	const pending = new Map();
+	const { app, ex } = makeApp({ worktreeFor: (name) => ({ branch: `race/${name.replace(/ /g, "-")}`, path: `/wt/${name.replace(/ /g, "-")}` }) });
+	const newSession = app.newSession;
+	app.newSession = (name, opts) => {
+		const s = newSession(name, opts);
+		const d = deferred();
+		pending.set(s.engine, d);
+		s.setup = d.promise;
+		return s;
+	};
+	ex("race fix it");
+	const [claude] = app.sessions;
+	pending.get("codex").reject(new Error("git worktree add failed: disk full"));
+	pending.get("claude").resolve();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual(app.sessions.map((s) => s.name), ["fix it claude"]);
+	assert.match(app.message, /'fix it codex' couldn't start: git worktree add failed: disk full/);
+	assert.deepEqual(app.races[0].racers, [claude]);
+	assert.deepEqual(claude.sent, ["fix it"]);
+});

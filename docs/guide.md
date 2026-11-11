@@ -130,7 +130,7 @@ Every agent gets its own git worktree and branch, so agents never touch your che
 :kill                            " stop the agent, keep its work  (:kill! also removes the worktree, safely)
 ```
 
-Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `refactor/…`) and are taken from the task you type. The sidebar and statusline show each agent's branch with live `+added −removed` counts. Removing a worktree goes through git's own safety checks, so uncommitted or unmerged work is never thrown away. Folder, branch pattern and base branch are set in `[worktree]` ([docs/config.md](config.md#worktree)).
+Branch names follow the usual conventions (`fix/…`, `feat/…`, `docs/…`, `refactor/…`) and are taken from the task you type. The sidebar and statusline show each agent's branch with live `+added −removed` counts. A new agent shows up at once while its worktree is made in the background, so a big checkout never freezes vigent; what you type to it waits until the worktree is there, and if it can't be made, the agent is taken out and the message line says why. Removing a worktree goes through git's own safety checks, so uncommitted or unmerged work is never thrown away. Folder, branch pattern and base branch are set in `[worktree]` ([docs/config.md](config.md#worktree)).
 
 ### Lightweight worktrees with riftri
 

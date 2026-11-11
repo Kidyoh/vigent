@@ -2340,10 +2340,7 @@ export class App implements Component {
 				return;
 			}
 			if (!this.demo && !s.worktree) {
-				s.abort();
-				s.dispose();
-				this.sessions.splice(this.sessions.indexOf(s), 1);
-				this.dropFromWindows(s);
+				this.forgetAgent(s);
 				failed.push(`${labels[i]}: it got no worktree of its own`);
 				return;
 			}
@@ -2352,7 +2349,15 @@ export class App implements Component {
 		});
 		if (race.racers.length === 0) return undefined; // startAgent said why
 		this.races.push(race);
-		for (const s of race.racers) s.submit(prompt);
+		// every racer starts when the last worktree is made, so the times compare like for like
+		const setups = race.racers.map((s) => s.setup).filter((p) => p !== undefined);
+		const go = () => {
+			race.startedAt = this.now();
+			for (const s of race.racers) if (this.sessions.includes(s)) s.submit(prompt);
+			this.tui.requestRender();
+		};
+		if (setups.length) void Promise.allSettled(setups).then(go);
+		else go();
 		this.focusSession(first);
 		const names = race.racers.map((s) => this.raceLabel.get(s)).join(", ");
 		if (race.racers.length < 2) this.setMessage(`only ${names} could start, so it runs alone · ${failed.join(" · ")}`, "WarningMsg");
@@ -2454,7 +2459,7 @@ export class App implements Component {
 				this.sessions.splice(this.sessions.indexOf(s), 1);
 				this.dropFromWindows(s);
 				const wt = s.worktree;
-				if (!wt?.path || !this.workspace.root) continue;
+				if (!wt?.path || !this.workspace.root || this.settingUp.has(s)) continue; // one still being made is removed once it is
 				// you said yes to losing their changes, so uncommitted work doesn't stop the removal
 				const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch, base: wt.base }, true);
 				if (!r.removed) kept.push(`${wt.branch}: ${r.message}`);
@@ -3010,15 +3015,47 @@ export class App implements Component {
 			const s = this.newSession(name, { worktree: withWorktree, model, engine, ...(effort ? { effort } : {}) });
 			this.addSession(s);
 			const wt = s.worktree;
-			if (wt?.riftri) this.refreshStorage();
-			if (wt?.path && this.hooks.worktree_created) this.setUpWorktree(s);
 			const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
-			if (wt?.path) {
-				const how = wt.riftri ? " · lightweight copy" : wt.riftriSkipped ? " · full copy (:checkhealth says why)" : "";
-				this.setMessage(
-					`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}${how}`,
-					wt.riftriSkipped ? "WarningMsg" : "ModeMsg",
+			const made = () => {
+				if (wt?.riftri) this.refreshStorage();
+				if (wt?.path && this.hooks.worktree_created) this.setUpWorktree(s);
+				const how = wt?.riftri ? " · lightweight copy" : wt?.riftriSkipped ? " · full copy (:checkhealth says why)" : "";
+				return {
+					text: `'${name}'${by} on ${wt?.branch} in ${this.shortPath(wt?.path ?? "")}${wt?.base ? ` (from ${wt.base})` : ""}${how}`,
+					hl: wt?.riftriSkipped ? "WarningMsg" : "ModeMsg",
+				};
+			};
+			if (s.setup && wt?.path) {
+				// a big checkout takes seconds to copy: the agent shows up now and its prompts wait for the worktree
+				const making = `'${name}'${by} on ${wt.branch} · making its worktree…`;
+				s.hold("making worktree");
+				this.settingUp.add(s);
+				this.setMessage(making, "Comment");
+				s.setup.then(
+					() => {
+						this.settingUp.delete(s);
+						if (!this.sessions.includes(s)) {
+							// killed while it was being made: nothing ran in it yet, so it goes too
+							if (this.workspace.root) removeWorktree(this.workspace.root, { path: wt.path!, branch: wt.branch, base: wt.base }, true);
+							return;
+						}
+						const m = made();
+						// worktree_created holds it again until the hook has run; without one, its prompts go now
+						if (!(this.hooks.worktree_created)) s.release();
+						if (this.message === making) this.setMessage(m.text, m.hl);
+						this.tui.requestRender();
+					},
+					(err: Error) => {
+						this.settingUp.delete(s);
+						if (!this.sessions.includes(s)) return;
+						this.forgetAgent(s);
+						this.setMessage(`'${name}' couldn't start: ${err.message}`, "ErrorMsg");
+						this.tui.requestRender();
+					},
 				);
+			} else if (wt?.path) {
+				const m = made();
+				this.setMessage(m.text, m.hl);
 			} else if (wt) {
 				this.setMessage(`'${name}'${by} on ${wt.branch}`, "ModeMsg");
 			} else {
@@ -3030,6 +3067,23 @@ export class App implements Component {
 			this.setMessage(String(err?.message ?? err), "ErrorMsg");
 			return undefined;
 		}
+	}
+
+	/** agents whose worktree is still being made */
+	private settingUp = new Set<Session>();
+
+	/** Take an agent out of vigent (it couldn't start): stop it, drop it from windows and races. */
+	private forgetAgent(s: Session) {
+		s.abort();
+		s.dispose();
+		const i = this.sessions.indexOf(s);
+		if (i >= 0) this.sessions.splice(i, 1);
+		if (this.sessions.length === 0) this.sidebarFocused = false;
+		this.focusIdx = Math.max(0, Math.min(this.focusIdx, this.sessions.length - 1));
+		this.altIdx = Math.min(this.altIdx, this.sessions.length - 1);
+		this.dropFromWindows(s);
+		for (const r of this.races) r.racers = r.racers.filter((x) => x !== s);
+		this.server?.sync();
 	}
 
 	/** "no engine is signed in: run claude auth login or codex login, or for pi export ANTHROPIC_API_KEY=… · :checkhealth" */
@@ -3488,6 +3542,10 @@ export class App implements Component {
 		const wt = s.worktree;
 		if (!wt?.path || !this.workspace.root) {
 			this.setMessage(`killed '${s.name}'`, "WarningMsg");
+			return;
+		}
+		if (this.settingUp.has(s)) {
+			this.setMessage(`killed '${s.name}' · its worktree is removed as soon as it's made`, "WarningMsg");
 			return;
 		}
 		if (!removeTree) {
