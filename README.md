@@ -4,7 +4,7 @@ A vim-native orchestrator for coding-agent harnesses. Claude Code, Codex, OpenCo
 
 **Website:** [vigent.farming-labs.dev](https://vigent.farming-labs.dev) · **Docs:** [vigent.farming-labs.dev/docs](https://vigent.farming-labs.dev/docs)
 
-![vigent: a prompt with an @file, a Claude Code agent fixing the bug in its own worktree, the diff side by side, then switching themes with Space t and :colorscheme](https://vigent.farming-labs.dev/showcase.gif)
+![vigent: a prompt with an @file and a Claude Code agent fixing the bug in its own worktree; Ctrl-w v forks it into a split, :model gives the fork Claude Opus 5.5 and it writes a test; Ctrl-w h/l/k move between windows, Ctrl-w s stacks another fork, :diff split, then a new theme with Space t](https://vigent.farming-labs.dev/showcase.gif)
 
 ## Install
 
