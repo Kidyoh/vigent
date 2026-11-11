@@ -488,6 +488,16 @@ test("markdown: text after **bold** or `code` keeps the theme's text color", () 
 	assert.ok(afterBold.indexOf(P.s("Normal")) < afterBold.indexOf("after") && afterBold.includes(P.s("Normal")), "Normal comes back before 'after'");
 });
 
+test("markdown: a one-letter **b**, *i* or ~~s~~ ends at its own marker, not at the next one's", () => {
+	const P = new Painter(BUILTIN_THEMES.default);
+	const plain = (md) => renderMarkdown(md, 80, P).lines[0].plain;
+	assert.equal(plain("three mugs show **3**, an empty cart **0**."), "three mugs show 3, an empty cart 0.");
+	assert.equal(plain("*a* and *b*, ~~x~~ or ~~y~~"), "a and b, x or y");
+	assert.equal(plain("**two words** and **more of them**"), "two words and more of them");
+	const [line] = renderMarkdown("show **3**, then **0**", 80, P).lines;
+	assert.equal(line.text.split("\x1b[1m").length - 1, 2, "two bold runs, each one letter");
+});
+
 const plainLast = (app) => app.render(120).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
 
 test("<Space>e puts the cursor in the sessions sidebar: j/k pick an agent, Enter goes back", () => {
