@@ -377,14 +377,21 @@ export async function diffStat(wt: WorktreeInfo): Promise<DiffStat> {
 	for (const file of await untrackedFiles(wt.path)) {
 		stat.files++;
 		try {
-			const buf = fs.readFileSync(path.join(wt.path, file));
-			const text = buf.includes(0) ? "" : buf.toString("utf8"); // skip binary files
-			if (text) stat.added += text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+			// read in the background, one file at a time, so a worktree full of new files never freezes the screen
+			stat.added += lineCount(await fs.promises.readFile(path.join(wt.path, file)));
 		} catch {
 			// unreadable: count the file, not its lines
 		}
 	}
 	return stat;
+}
+
+/** Lines in a new file, as git diff counts them (a last line without a newline counts too); 0 for a binary file. */
+export function lineCount(buf: Buffer): number {
+	if (buf.length === 0 || buf.includes(0)) return 0;
+	let n = 0;
+	for (let i = buf.indexOf(10); i !== -1; i = buf.indexOf(10, i + 1)) n++;
+	return buf[buf.length - 1] === 10 ? n : n + 1;
 }
 
 /** Unified diff of everything the agent changed, new files included. */

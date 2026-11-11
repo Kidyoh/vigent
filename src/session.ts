@@ -77,8 +77,10 @@ export abstract class Session {
 			if (this.statRunning) return this.refreshStat(delayMs);
 			this.statRunning = true;
 			try {
+				const before = wt.stat;
 				wt.stat = await diffStat(wt);
-				this.emit();
+				// polled every few seconds: redraw only when the numbers moved
+				if (!before || before.files !== wt.stat.files || before.added !== wt.stat.added || before.removed !== wt.stat.removed) this.emit();
 			} catch {
 				// the worktree may have been removed; keep the last numbers
 			} finally {

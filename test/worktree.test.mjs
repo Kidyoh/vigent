@@ -11,6 +11,7 @@ import {
 	diffStat,
 	diffText,
 	findWorktree,
+	lineCount,
 	listWorktrees,
 	removeWorktree,
 	repoRoot,
@@ -270,4 +271,16 @@ test("the app: :new, :worktrees, :worktree remove, :kill, :kill!, :new!", async 
 	assert.match(app.message, /in this checkout/);
 	ex("diff");
 	assert.match(app.message, /has no worktree to diff/);
+});
+
+test("a new file's lines are counted like git diff counts them, from the bytes", () => {
+	const n = (text) => lineCount(Buffer.from(text));
+	assert.equal(n(""), 0);
+	assert.equal(n("one"), 1, "no newline at the end still counts");
+	assert.equal(n("one\n"), 1);
+	assert.equal(n("one\ntwo"), 2);
+	assert.equal(n("one\ntwo\n"), 2);
+	assert.equal(n("\n\n"), 2);
+	assert.equal(n("héllo\nwörld\n"), 2, "multi-byte text");
+	assert.equal(lineCount(Buffer.from([1, 0, 10, 2])), 0, "binary: no lines");
 });
