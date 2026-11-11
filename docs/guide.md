@@ -4,6 +4,7 @@ The README is the short version. This is everything else about using vigent day 
 
 - [Getting around](#getting-around)
 - [Engines](#engines)
+- [Racing engines](#racing-engines)
 - [Worktrees](#worktrees)
 - [Reviewing and landing work](#reviewing-and-landing-work)
 - [While several agents run](#while-several-agents-run)
@@ -88,6 +89,34 @@ Install pi with `npm install -g @mariozechner/pi-coding-agent` (and give it a ke
 vigent gives extensions a UI of their own. When an extension asks for confirmation, vigent shows a y/n question in the command line. Choices and text input open pickers. Notifications go to the transcript and the message line, and statuses show in the winbar. Each one names the agent it came from, and a question from an agent you aren't looking at rings the bell. So pi's permission gate works the same as in pi: it asks before an `rm -rf`, and **No** blocks the command.
 
 Type an extension's command (`/deploy`), a skill (`/skill:changelog`) or a prompt template (`/tidy src/cart.js`) as a prompt. **`:pi`** lists everything the focused agent loaded. Press Enter on a command, skill or prompt template to start a prompt with it. An extension that doesn't load stops pi, as it does in pi itself; the agent's transcript says which one and why.
+
+## Racing engines
+
+Not sure which engine or model handles a task best? `:race` gives the same task to several at once, each in its own worktree and branch, and you keep the result you like.
+
+```vim
+:race fix the flaky checkout test                    " every engine you're signed in to
+:race fix it --engines claude,codex                  " only these
+:race fix it --models claude-opus-5-5,gpt-5.5        " these models, each on the engine that runs it
+:race fix it --engines opencode --models gpt-5.5     " both: two racers
+:race fix it --engines codex,codex,codex             " the same one three times: agents don't answer the same way twice
+:race fix it --models opencode:anthropic/claude-opus-5-5,gpt-5.5   " engine:model picks the engine yourself
+:race the cart total is off by one -t fix            " send a template's prompt
+:race                                                " compare the racers
+:race pick                                           " keep the one you're on, remove the rest
+```
+
+`--models` (`-m`) takes exact model ids, the ones `:model` lists, and Tab completes them from the engines you're signed in to, as it completes `--engines` (`-e`). vigent finds the engine whose model list has the id, so `claude-opus-5-5` runs on Claude Code and `gpt-5.5` on Codex; aliases such as `opus` work too. It doesn't guess past that: an id no engine lists, one that more than one engine routes to (`anthropic/claude-opus-5-5` on OpenCode and pi), or one whose engine isn't signed in stops the race before anything starts, and the message line says what to type instead. A race never moves a model to another engine. `engine:model` runs a model on the engine you name, in `--models` or `--engines`, for one no list has.
+
+Each racer is an ordinary agent named after the task and its model, or its engine when you didn't pick a model (`fix flaky checkout test gpt-5.5` on `fix/flaky-checkout-test-gpt-5-5`), so everything else works on it: follow-ups, `:diff`, `:review`, `:model`, `:kill`. An engine that can't start is left out and named in the message line, and the others race without it.
+
+Racers never share a folder: a race needs a git repo with worktrees on, and refuses to start otherwise (`[worktree] enabled = false`), since agents in one checkout would overwrite each other's work.
+
+When every racer has stopped, the message line ranks them by time (`race over: codex 41.2s +12 −3 · claude 1m 05s +40 −8`) and the bell rings if you were looking elsewhere. **`:race`** opens the comparison: the racers with the first to finish on top, each with its state, time, lines and files changed, tokens and cost, and the start of its last reply. `j`/`k` and Enter open one; read its `:diff`, or `:review` it.
+
+**`:race pick`** keeps the racer you're on and, after a y/n, stops the others and removes their worktrees and branches, uncommitted changes included (`:race! pick` doesn't ask). The one you kept is then yours to `:merge` or `:pr`. To keep more than one, don't pick: `:kill` the ones you don't want and the rest stay.
+
+A race lasts until you quit. After a restart its agents come back as plain agents, without the comparison.
 
 ## Worktrees
 
