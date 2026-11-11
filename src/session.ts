@@ -60,6 +60,14 @@ export abstract class Session {
 		public worktree?: WorktreeInfo,
 	) {}
 
+	/** the agent this one was forked from by a split; the worktree stays that agent's to save to and remove */
+	forkOf?: Session;
+
+	/** The worktree this agent works in: its own, or, for a fork, its original's. */
+	get worksIn(): WorktreeInfo | undefined {
+		return this.worktree ?? this.forkOf?.worksIn;
+	}
+
 	/** Recount the worktree's changes (throttled; runs git in the background). */
 	refreshStat(delayMs = 300) {
 		const wt = this.worktree;

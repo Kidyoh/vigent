@@ -474,3 +474,20 @@ test("in a split every window's bar is a strip of its own, so you can see where 
 	own.ex("split 2");
 	assert.deepEqual((await barColors(own.app, 120, 30)).map(([n, c]) => [n, c]), [["alpha", "#00005f"], ["beta", "#5f0000"]]);
 });
+
+test("a fork works in its original's worktree: :diff, the sidebar and the winbar find it there, but it stays the original's", () => {
+	const { app, ex, type, screen, w } = makeApp(["alpha"], { rows: 40, columns: 160 });
+	const alpha = app.focusedSession;
+	alpha.worktree = { path: "/tmp/shop-worktrees/fix-badge", branch: "fix/badge" };
+	type(w, "v");
+	const fork = app.focusedSession;
+	assert.equal(fork.name, "alpha (fork)");
+	assert.equal(fork.worktree, undefined, "a fork owns no worktree: :kill! and saving its model never touch the original's");
+	assert.equal(fork.worksIn, alpha.worktree);
+	assert.equal(screen().match(/fix\/badge/g)?.length >= 2, true, "the sidebar names the branch for both");
+	ex("diff");
+	assert.doesNotMatch(app.message, /has no worktree/);
+	ex("model sonnet");
+	assert.equal(fork.model, "sonnet");
+	assert.notEqual(alpha.model, "sonnet", "the original keeps its model");
+});
