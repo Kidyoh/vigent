@@ -199,6 +199,37 @@ test("<Tab> completes commands, agents and themes, and goes through them; <S-Tab
 	assert.equal(app.cmdBuf, "zzz", "nothing fits: nothing changes");
 });
 
+test("while you type a command, what fits shows: the rest of the first match dim after the cursor, every match over the statusline; <Tab> puts it in", () => {
+	const { app, type, screen } = makeApp();
+	const raw = () => app.render(140).at(-1);
+	type(":", "perm");
+	assert.equal(screen().at(-1).trimEnd(), ":permissions", "the rest of the command shows as you type");
+	assert.equal(app.cmdBuf, "perm", "shown, not typed: Enter runs what you typed");
+	assert.ok(raw().includes(app.painter.p("NonText", "ssions")), "dim, the cursor on its first letter");
+	assert.ok(raw().indexOf("perm") < raw().indexOf("ssions"), "after what's typed");
+	assert.doesNotMatch(screen().at(-2), /permissions/, "one match: no list");
+	type(K.tab);
+	assert.equal(app.cmdBuf, "permissions", "<Tab> puts in what was shown");
+
+	type(K.esc, ":", "co");
+	assert.match(screen().at(-2), /^ colorscheme\s+cost\s*$/, "every command that fits, over the statusline");
+	assert.equal(screen().at(-1).trimEnd(), ":colorscheme");
+	type(K.tab, K.tab);
+	assert.equal(app.cmdBuf, "cost", "<Tab> goes through them as before");
+
+	type(K.esc, ":", "colorscheme tokyo");
+	assert.match(screen().at(-1), /^:colorscheme tokyonight/, "arguments too: themes");
+	type(K.esc, ":", "b add");
+	assert.equal(screen().at(-1).trimEnd(), ":b add retries", "and agents");
+
+	type(K.esc, ":", "zzz");
+	assert.equal(screen().at(-1).trimEnd(), ":zzz", "nothing fits: nothing shows");
+	type(K.esc, ":", "permissions");
+	assert.equal(screen().at(-1).trimEnd(), ":permissions", "typed in full: nothing more to show");
+	type(K.esc, ":", "perm", K.left);
+	assert.equal(screen().at(-1).trimEnd(), ":perm", "only with the cursor at the end");
+});
+
 test("m{a-z} sets a mark, '{a-z} goes back to it, '' and <C-o> undo jumps, <Tab> redoes them", () => {
 	const { app, type, overlays } = makeApp();
 	const top = () => app.viewRange(app.buildPaneLines(app.paneWidth()).length).start;

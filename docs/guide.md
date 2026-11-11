@@ -171,7 +171,7 @@ The code is new each time, and every request needs it. Prompts and stops need it
 | INSERT, `:` | `<Left>` `<Right>` `<C-Left>` `<Home>` `<End>` `<Del>` | The prompt and the command line have a cursor; typing goes in where it is. `<C-w>` and `<C-u>` delete the word or everything before it |
 | INSERT, `:` | `<Up>` `<Down>` | Earlier prompts to this agent, or earlier commands and searches, only the ones starting with what you've typed |
 | INSERT, `:` | `<C-f>` | Edit the line in NORMAL mode: `w` `b` `e` `f`, `dw` `ciw` `di"` `x` `p`, counts, `u`, `.`. `i` or `Esc` goes back to typing, `Enter` sends |
-| `:` | `<Tab>` `<S-Tab>` | Complete a command, an agent's name (`:b fla<Tab>`) or a theme, and go through what fits |
+| `:` | `<Tab>` `<S-Tab>` | Complete a command, an agent's name (`:b fla<Tab>`) or a theme, and go through what fits. While you type, the rest of the first match shows dim after the cursor (`:perm` → `:permissions`) and every match shows over the statusline; `<Tab>` puts it in |
 | NORMAL | `m{a-z}` `'{a-z}` `''` `<C-o>` `<Tab>` | Marks and the jump list, per agent: back to where you were before `G`, `gg`, a search or a mark. `:marks`, `:jumps` |
 | NORMAL, VISUAL | `zz` `zt` `zb` `gv` `<C-g>` | Center the VISUAL cursor's line or the search match, select the last selection again, show where you are |
 

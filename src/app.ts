@@ -313,6 +313,8 @@ export class App implements Component {
 	private historyWalks = { prompt: new HistoryWalk(), command: new HistoryWalk(), search: new HistoryWalk() };
 	/** <Tab> on the command line: what's offered, which one is in, and what was typed */
 	private wild?: { base: string; items: string[]; idx: number; typed: string; after: string; shown: string };
+	/** what fits the command line as it's typed, kept for the text it was worked out for */
+	private typedCompletion?: { line: string; items: string[]; rest: string };
 	/** each agent's marks (m{a-z}) and jump list (<C-o>), as lines from the top of its transcript */
 	private marks = new WeakMap<Session, Map<string, number>>();
 	private jumps = new WeakMap<Session, { list: number[]; at: number }>();
@@ -862,10 +864,30 @@ export class App implements Component {
 		w.shown = this.cmdBuf;
 	}
 
-	/** The wildmenu over the statusline while <Tab> is going through more than one completion. */
+	/**
+	 * What fits the command line while you type, before any <Tab>: every match, and the
+	 * rest of the first one (what <Tab> puts in) when it starts with what's typed.
+	 */
+	private completionAsTyped(): { items: string[]; rest: string } | undefined {
+		if (this.mode !== "COMMAND" || this.lineNormal || !this.cmdBuf.trim() || this.cmd.pos < [...this.cmdBuf].length) return undefined;
+		if (this.wild && this.wild.shown === this.cmdBuf) return undefined; // <Tab> is going through them
+		if (this.typedCompletion?.line !== this.cmdBuf) {
+			const { base, items } = completeCommandLine(this.cmdBuf, { agents: this.sessions.map((x) => x.name), themes: listThemes() });
+			const typed = this.cmdBuf.slice(base.length);
+			const first = items[0];
+			const rest = first && first.toLowerCase().startsWith(typed.toLowerCase()) ? first.slice(typed.length) : "";
+			this.typedCompletion = { line: this.cmdBuf, items, rest };
+		}
+		const c = this.typedCompletion;
+		return c.items.length ? c : undefined;
+	}
+
+	/** The wildmenu over the statusline: what fits while you type, then what <Tab> goes through. */
 	private renderWildmenu(width: number): string | undefined {
-		const w = this.wild;
-		if (this.mode !== "COMMAND" || !w || w.shown !== this.cmdBuf || w.items.length < 2) return undefined;
+		if (this.mode !== "COMMAND") return undefined;
+		const typing = this.completionAsTyped();
+		const w = this.wild && this.wild.shown === this.cmdBuf ? this.wild : typing ? { items: typing.items, idx: -1 } : undefined;
+		if (!w || w.items.length < 2) return undefined;
 		const P = this.painter;
 		const cells = w.items.map((t) => ` ${t} `);
 		let first = 0;
@@ -4714,9 +4736,14 @@ export class App implements Component {
 			case "CONFIRM":
 				content = P.p("Question", this.confirm!.question) + P.s("Normal") + " " + P.p("PmenuSel", " ");
 				break;
-			case "COMMAND":
-				content = P.s("Normal") + ":" + withCursor(this.cmd);
+			case "COMMAND": {
+				// the rest of what <Tab> would put in, dim, the cursor on its first letter (like fish)
+				const rest = this.completionAsTyped()?.rest;
+				content = rest
+					? P.s("Normal") + ":" + this.cmd.parts[0] + cursorAt([...rest][0], "") + P.p("NonText", [...rest].slice(1).join(""))
+					: P.s("Normal") + ":" + withCursor(this.cmd);
 				break;
+			}
 			case "SEARCH":
 				content = P.s("Normal") + (this.searchBackward ? "?" : "/") + withCursor(this.cmd);
 				break;
