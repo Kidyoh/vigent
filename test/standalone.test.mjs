@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { bundledBinary, selfCommand, standaloneDir } from "../dist/standalone.js";
+import { formula, parseSums } from "../scripts/homebrew-formula.mjs";
 import { Tty } from "./support/terminal.mjs";
 
 const binary = process.env.VIGENT_BINARY ? path.resolve(process.env.VIGENT_BINARY) : undefined;
@@ -171,4 +172,53 @@ test("install.sh: checks the download, installs vigent and riftri, and links vig
 	const none = install(`file://${built}`, { VIGENT_TARGET: "plan9-mips" });
 	assert.notEqual(none.status, 0);
 	assert.match(none.stderr, /couldn't download .*vigent-plan9-mips\.tar\.gz/);
+});
+
+test("install.ps1 (Windows): checks the download, installs vigent.exe and riftri.exe, and leaves PATH alone when asked", { skip: skip || (!windows ? "the PowerShell installer is for Windows" : false), timeout: 120000 }, () => {
+	const built = path.dirname(path.dirname(binary));
+	const installer = path.join(import.meta.dirname, "..", "install.ps1");
+	const to = path.join(tmp, "installed-ps");
+	const install = (base) =>
+		spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", installer], { encoding: "utf8", env: { ...process.env, VIGENT_INSTALL: to, VIGENT_NO_PATH: "1", VIGENT_DOWNLOAD_BASE: base } });
+
+	const bad = path.join(tmp, "tampered-ps");
+	fs.mkdirSync(bad);
+	fs.copyFileSync(path.join(built, "SHA256SUMS"), path.join(bad, "SHA256SUMS"));
+	fs.writeFileSync(path.join(bad, "vigent-windows-x64.tar.gz"), "not the archive");
+	const refused = install(bad);
+	assert.notEqual(refused.status, 0);
+	assert.match(refused.stderr + refused.stdout, /checksum mismatch/);
+	assert.ok(!fs.existsSync(to));
+
+	const r = install(built);
+	assert.equal(r.status, 0, r.stderr + r.stdout);
+	assert.match(r.stdout, new RegExp(`installed vigent ${pkg.version.replace(/\./g, "\\.")} in `));
+	assert.ok(fs.existsSync(path.join(to, "riftri.exe")), "riftri is beside vigent");
+	assert.equal(execFileSync(path.join(to, "vigent.exe"), ["--version"], { encoding: "utf8" }).trim(), `vigent ${pkg.version}`);
+	assert.equal(install(built).status, 0, "again over itself (an update)");
+});
+
+test("the Homebrew formula: each platform's archive and checksum at this version, vigent linked with riftri beside it", () => {
+	const sha = (c) => c.repeat(64);
+	const sums = parseSums(
+		[`${sha("a")}  vigent-darwin-arm64.tar.gz`, `${sha("b")}  vigent-darwin-x64.tar.gz`, `${sha("c")}  vigent-linux-arm64.tar.gz`, `${sha("d")} *vigent-linux-x64.tar.gz`, "", "not a checksum line"].join("\n"),
+	);
+	assert.deepEqual(Object.keys(sums).sort(), ["vigent-darwin-arm64.tar.gz", "vigent-darwin-x64.tar.gz", "vigent-linux-arm64.tar.gz", "vigent-linux-x64.tar.gz"]);
+	const text = formula("1.2.3", sums);
+	assert.match(text, /^class Vigent < Formula$/m);
+	assert.match(text, /version "1\.2\.3"/);
+	for (const [target, c] of [["darwin-arm64", "a"], ["darwin-x64", "b"], ["linux-arm64", "c"], ["linux-x64", "d"]]) {
+		assert.ok(text.includes(`url "https://github.com/farming-labs/vigent/releases/download/v1.2.3/vigent-${target}.tar.gz"\n      sha256 "${sha(c)}"`), target);
+	}
+	assert.match(text, /libexec\.install "vigent", "riftri"\n    bin\.install_symlink libexec\/"vigent"/);
+	delete sums["vigent-linux-arm64.tar.gz"];
+	assert.throws(() => formula("1.2.3", sums), /no line for vigent-linux-arm64\.tar\.gz/);
+
+	// it's Ruby that Homebrew will load
+	if (spawnSync("ruby", ["--version"]).status === 0) {
+		const file = path.join(tmp, "vigent.rb");
+		fs.writeFileSync(file, text);
+		const check = spawnSync("ruby", ["-c", file], { encoding: "utf8" });
+		assert.equal(check.status, 0, check.stderr);
+	}
 });

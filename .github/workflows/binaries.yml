@@ -12,7 +12,10 @@ on:
   pull_request:
     paths:
       - scripts/build-binary.mjs
+      - scripts/homebrew-formula.mjs
       - install.sh
+      - install.ps1
+      - docker/**
       - src/standalone.ts
       - test/standalone.test.mjs
       - .github/workflows/binaries.yml
@@ -82,7 +85,7 @@ jobs:
           - { target: darwin-arm64, os: macos-14 }
           # no Intel runner: the x64 build runs under Rosetta
           - { target: darwin-x64, os: macos-14 }
-          # no pty on Windows: the version, the commands and riftri are checked
+          # no pty on Windows: the version, the commands, riftri and install.ps1 are checked
           - { target: windows-x64, os: windows-latest }
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +111,7 @@ jobs:
           grep " vigent-${{ matrix.target }}.tar.gz\$" SHA256SUMS | (sha256sum -c - 2>/dev/null || shasum -a 256 -c -)
           tar -xzf "vigent-${{ matrix.target }}.tar.gz"
 
-      # --version, the commands, riftri beside it, an agent in a worktree with no node on PATH, and install.sh
+      # --version, the commands, riftri beside it, an agent in a worktree with no node on PATH, and the installer
       - name: Test the binary
         shell: bash
         run: |
@@ -147,10 +150,47 @@ jobs:
             ~/.vigent/riftri --version
           '
 
+  image:
+    name: Container image
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-bin
+
+      # the build context: each platform's vigent and riftri under Docker's name for it;
+      # amd64 gets the baseline build, so the image also runs on VMs without AVX2
+      - name: Lay out the context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p context/amd64 context/arm64 unpacked
+          tar -xzf dist-bin/vigent-linux-x64-baseline.tar.gz -C unpacked
+          tar -xzf dist-bin/vigent-linux-arm64.tar.gz -C unpacked
+          cp unpacked/vigent-linux-x64-baseline/{vigent,riftri} context/amd64/
+          cp unpacked/vigent-linux-arm64/{vigent,riftri} context/arm64/
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for this runner and try it
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --load -t vigent:check -f docker/Dockerfile context
+          version="$(node -p 'require("./package.json").version')"
+          test "$(docker run --rm vigent:check --version)" = "vigent $version"
+          docker run --rm vigent:check theme list | grep -q '^tokyonight'
+          docker run --rm --entrypoint /opt/vigent/riftri vigent:check --version
+
   release:
     name: Attach to the release
     if: github.ref_type == 'tag'
-    needs: [check, check-musl]
+    needs: [check, check-musl, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -170,3 +210,89 @@ jobs:
           set -euo pipefail
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" dist-bin/*.tar.gz dist-bin/SHA256SUMS --clobber
+
+  # After the release has its archives: a failed push here doesn't hold them back.
+  image-push:
+    name: Push the container image
+    if: github.ref_type == 'tag'
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-bin
+
+      - name: Lay out the context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p context/amd64 context/arm64 unpacked
+          tar -xzf dist-bin/vigent-linux-x64-baseline.tar.gz -C unpacked
+          tar -xzf dist-bin/vigent-linux-arm64.tar.gz -C unpacked
+          cp unpacked/vigent-linux-x64-baseline/{vigent,riftri} context/amd64/
+          cp unpacked/vigent-linux-arm64/{vigent,riftri} context/arm64/
+
+      # the arm64 image's apt-get runs emulated
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx build --push --platform linux/amd64,linux/arm64 \
+            -t "$image:${GITHUB_REF_NAME#v}" -t "$image:latest" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -f docker/Dockerfile context
+
+  # The repository is its own Homebrew tap: Formula/vigent.rb on the default branch,
+  # rewritten for each release with the new archives' checksums.
+  homebrew:
+    name: Update the Homebrew formula
+    if: github.ref_type == 'tag'
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-bin
+
+      - name: Write and commit the formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$(node -p 'require("./package.json").version')" != "$version" ]]; then
+            echo "the default branch is no longer at $version; not touching the formula" >&2
+            exit 0
+          fi
+          node scripts/homebrew-formula.mjs Formula/vigent.rb
+          ruby -c Formula/vigent.rb
+          git add Formula/vigent.rb
+          if git diff --cached --quiet; then echo "the formula is already at $version"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "chore(homebrew): vigent $version"
+          git push
