@@ -14,19 +14,17 @@ import type { EngineId } from "./engines.js";
 export const MAX_INLINE_BYTES = 100 * 1024;
 
 /** The files an agent can be pointed at: tracked and new ones, without what .gitignore hides. */
-export function listFiles(cwd: string): Promise<string[]> {
-	return new Promise((resolve) => {
-		execFile(
-			"git",
-			["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-			{ cwd, maxBuffer: 64 * 1024 * 1024 },
-			(err, stdout) => {
-				if (err) return resolve(walk(cwd));
-				const files = [...new Set(String(stdout).split("\0").filter(Boolean))].filter((f) => fs.existsSync(path.join(cwd, f)));
-				resolve(files.sort(byDepthThenName));
-			},
+export async function listFiles(cwd: string): Promise<string[]> {
+	const git = (args: string[]) =>
+		new Promise<string[] | undefined>((resolve) =>
+			execFile("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => resolve(err ? undefined : String(stdout).split("\0").filter(Boolean))),
 		);
-	});
+	// tracked files you deleted are still in the index: git names them, so nothing is checked on disk one by one
+	const [listed, deleted] = await Promise.all([git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]), git(["ls-files", "--deleted", "-z"])]);
+	if (!listed) return walk(cwd);
+	const gone = new Set(deleted ?? []);
+	const files = [...new Set(listed)].filter((f) => !gone.has(f));
+	return sortByDepthThenName(files);
 }
 
 /** Not a git repository: a shallow walk, skipping the usual heavy folders. */
@@ -49,11 +47,20 @@ function walk(cwd: string, max = 5000): string[] {
 		}
 	};
 	visit("", 0);
-	return out.sort(byDepthThenName);
+	return sortByDepthThenName(out);
 }
 
-function byDepthThenName(a: string, b: string): number {
-	return a.split("/").length - b.split("/").length || a.localeCompare(b);
+const collator = new Intl.Collator();
+
+/** Shallow paths first, then by name (each path's depth counted once, not at every comparison). */
+function sortByDepthThenName(files: string[]): string[] {
+	const depth = new Map<string, number>();
+	for (const f of files) {
+		let n = 1;
+		for (let i = f.indexOf("/"); i !== -1; i = f.indexOf("/", i + 1)) n++;
+		depth.set(f, n);
+	}
+	return files.sort((a, b) => depth.get(a)! - depth.get(b)! || collator.compare(a, b));
 }
 
 /** a path that can follow `@`: letters, digits, `_ . / @ + -`, not ending in `.` or `@` (so "see @a.js." works) */

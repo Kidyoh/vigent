@@ -37,6 +37,9 @@ test("the files you can attach: tracked and new, not what .gitignore hides; shal
 	const dir = repo();
 	const files = await listFiles(dir);
 	assert.deepEqual(files, [".gitignore", "big.log", "logo.png", "notes.txt", "README.md", "src/cart.js"]);
+	// a tracked file you deleted is still in git's index, but not on the list
+	fs.rmSync(path.join(dir, "README.md"));
+	assert.deepEqual(await listFiles(dir), [".gitignore", "big.log", "logo.png", "notes.txt", "src/cart.js"]);
 	// not a repository: a walk that skips the heavy folders
 	const plainDir = fs.mkdtempSync(path.join(tmp, "plain-"));
 	fs.mkdirSync(path.join(plainDir, "node_modules", "x"), { recursive: true });
