@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { expandPrompt } from "./attach.js";
 import { CUSTOM_ENGINES, type CustomEngine, ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
+import { LineSplitter } from "./lines.js";
 import { flagValue } from "./permissions.js";
 import { Session, type TranscriptItem } from "./session.js";
 import type { WorktreeInfo } from "./worktree.js";
@@ -762,7 +763,7 @@ export class CliSession extends Session {
 		}
 		this.child = child;
 		const parse = this.adapter.parser();
-		let buf = "";
+		const lines = new LineSplitter();
 		let stderr = "";
 		let result: Extract<CliEvent, { type: "done" }> | undefined;
 		let lastError: string | undefined;
@@ -858,11 +859,7 @@ export class CliSession extends Session {
 
 		child.stdout!.setEncoding("utf8");
 		child.stdout!.on("data", (chunk: string) => {
-			buf += chunk;
-			let nl: number;
-			while ((nl = buf.indexOf("\n")) >= 0) {
-				const rawLine = buf.slice(0, nl);
-				buf = buf.slice(nl + 1);
+			for (const rawLine of lines.push(chunk)) {
 				// a plain-text CLI: what it prints is the reply
 				if (this.adapter.raw) {
 					handle({ type: "text_delta", text: `${rawLine.replace(/\r$/, "")}\n` });
@@ -898,10 +895,10 @@ export class CliSession extends Session {
 			const next = this.afterExit;
 			this.afterExit = undefined;
 			this.setThinking(false);
+			const buf = lines.rest();
 			if (this.adapter.raw) {
 				// the last line may not end with a newline; and no trailing blank lines in the reply
 				if (buf) handle({ type: "text_delta", text: buf });
-				buf = "";
 				const last = this.items.at(-1);
 				if (last?.kind === "agent" && last.streaming) last.text = last.text.trimEnd();
 			} else if (buf.trim().startsWith("{")) {
@@ -911,7 +908,6 @@ export class CliSession extends Session {
 				} catch {
 					// a cut-off line: nothing to read
 				}
-				buf = "";
 			}
 			this.endStreaming();
 			this.refreshStat(0);

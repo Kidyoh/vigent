@@ -28,6 +28,7 @@ import {
 	type TranscriptItem,
 	usageTokens,
 } from "./session.js";
+import { LineSplitter } from "./lines.js";
 import { flattenTree, type TreeGlyphs, type TreeNodeLike, type TreeRow } from "./tree.js";
 import type { WorktreeInfo } from "./worktree.js";
 
@@ -58,7 +59,7 @@ export class PiSession extends Session {
 	private child?: ChildProcess;
 	private pending = new Map<string, Pending>();
 	private seq = 0;
-	private buf = "";
+	private lines = new LineSplitter();
 	private stderr = "";
 	private sessionFile?: string;
 	private commandList: any[] = [];
@@ -100,7 +101,7 @@ export class PiSession extends Session {
 				return;
 			}
 			this.child = child;
-			this.buf = "";
+			this.lines = new LineSplitter();
 			this.stderr = "";
 			child.stdout!.setEncoding("utf8");
 			child.stdout!.on("data", (d: string) => this.onData(d));
@@ -195,11 +196,8 @@ export class PiSession extends Session {
 
 	/** pi's framing: JSON lines split on \n only (a JSON string may hold U+2028) */
 	private onData(d: string) {
-		this.buf += d;
-		let i: number;
-		while ((i = this.buf.indexOf("\n")) >= 0) {
-			const line = this.buf.slice(0, i).replace(/\r$/, "");
-			this.buf = this.buf.slice(i + 1);
+		for (const raw of this.lines.push(d)) {
+			const line = raw.replace(/\r$/, "");
 			if (!line.trim()) continue;
 			let msg: any;
 			try {
