@@ -111,6 +111,7 @@ export default function DocsPage() {
           <L>
             Press <K>i</K>, type what you want done, Enter. The agent starts in its own worktree on a branch named from the task (<S>fix/…</S>, <S>feat/…</S>).
             Press <K>i</K> again to follow up, <K>Esc</K> to go back to NORMAL. Start more with <HelpLink>:new</HelpLink>.
+            Links in a reply are clickable (Cmd-click in most terminals), even when they wrap.
           </L>
           <L />
 

@@ -24,6 +24,10 @@ Inside a git repository, press `i`, type what you want done, and press Enter. An
 
 Type `@` in a prompt and a file picker opens over it with the files in the agent's worktree (what git tracks plus new files, never what `.gitignore` hides). Type to narrow it, `Enter` writes `@src/cart.js`, `Esc` keeps a plain `@`, and `Backspace` takes the `@` back. Each engine gets the files its own way: Claude Code reads `@path` itself, OpenCode gets them with `-f`, and for Codex and pi vigent adds each file's contents under your prompt (text files up to 100 KB; the transcript notes any it left out). The transcript shows what you typed, with the mentions highlighted.
 
+### Links
+
+Links in a reply are clickable: bare `https://` addresses, `<https://…>` and `[label](url)`. vigent sends them as terminal hyperlinks (OSC 8), so a link stays one link when it wraps onto the next line. Click it the way your terminal opens links, usually Cmd-click on macOS. A labeled link also shows its address after the label, so you can see where it goes, and copy it in a terminal without hyperlinks. Only http and https become links. Inside tmux, turn hyperlinks on with `set -as terminal-features ',*:hyperlinks'` (tmux 3.4 or later).
+
 ### Templates
 
 For prompts you use often, `:new -t fix the cart total is off by one` starts an agent and sends it the `fix` template with your task filled in. Four are built in: `fix` (failing test first, then the fix), `test`, `review` (changes nothing) and `explain`. `:templates` (`Space T`, or `T` on the start screen) picks one. Add your own under `[templates.<name>]` in config.toml, each with an optional engine, model and effort ([docs/config.md](config.md#templates)).

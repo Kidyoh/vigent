@@ -481,6 +481,38 @@ test("markdown: numbered, nested and task lists, rules, quotes that wrap, inline
 	assert.match(styled, /\x1b\[9m/, "strikethrough");
 });
 
+test("markdown: links and bare URLs are clickable terminal hyperlinks", () => {
+	const P = new Painter(BUILTIN_THEMES.default);
+	const links = (text) => [...text.matchAll(/\x1b\]8;;([^\x1b]*)\x1b\\/g)].map((m) => m[1]);
+	const md = [
+		"see https://example.com/a_b_c. then",
+		"[docs](https://vigent.farming-labs.dev/docs) and <https://example.com/auto>",
+		"(https://en.wikipedia.org/wiki/Vim_(text_editor)) and `https://example.com/code`",
+		"no ftp://example.com or javascript:alert(1) links",
+	].join("\n");
+	const { lines } = renderMarkdown(md, 200, P);
+	assert.deepEqual(links(lines[0].text), ["https://example.com/a_b_c", ""], "a bare URL, without the sentence's period");
+	assert.deepEqual(links(lines[1].text), ["https://vigent.farming-labs.dev/docs", "", "https://example.com/auto", ""]);
+	assert.deepEqual(links(lines[2].text), ["https://en.wikipedia.org/wiki/Vim_(text_editor)", ""], "its own parentheses kept, the outer one left; code isn't a link");
+	assert.deepEqual(links(lines[3].text), [], "only http(s)");
+	assert.deepEqual(
+		lines.map((l) => l.plain),
+		[
+			"see https://example.com/a_b_c. then",
+			"docs (https://vigent.farming-labs.dev/docs) and https://example.com/auto",
+			"(https://en.wikipedia.org/wiki/Vim_(text_editor)) and https://example.com/code",
+			"no ftp://example.com or javascript:alert(1) links",
+		],
+		"what you copy has no escapes",
+	);
+	const long = renderMarkdown("go to https://example.com/a/very/long/path/that/wraps/onto/the/next/line", 30, P).lines;
+	assert.deepEqual(long[0].plain, "go to", "the URL starts on the next line");
+	assert.ok(long.length > 2, "and wraps");
+	for (const l of long.slice(1)) {
+		assert.deepEqual(links(l.text), ["https://example.com/a/very/long/path/that/wraps/onto/the/next/line", ""], "every piece opens the same link and closes it at its line's end");
+	}
+});
+
 test("markdown: text after **bold** or `code` keeps the theme's text color", () => {
 	const P = new Painter(BUILTIN_THEMES.default);
 	const [line] = renderMarkdown("before **bold** after", 80, P).lines;

@@ -1,7 +1,8 @@
 /**
  * Markdown for agent replies, in vim's highlight groups: headings (Title),
  * **bold**, *italic*, ~~strike~~, `code` and fenced code blocks (VigentCode),
- * links, bullet / numbered / task lists (nested), > quotes (Comment),
+ * links (clickable, as terminal hyperlinks), bullet / numbered / task lists
+ * (nested), > quotes (Comment),
  * --- rules and tables. Code blocks are numbered so VISUAL-mode `ib` and
  * `yib` can select them.
  */
@@ -26,17 +27,40 @@ const BOLD = "\x1b[1m";
 const ITALIC = "\x1b[3m";
 const UNDERLINE = "\x1b[4m";
 const STRIKE = "\x1b[9m";
+const LINK_END = "\x1b]8;;\x1b\\";
+
+/**
+ * `text` as a terminal hyperlink (OSC 8) to `url`, so a click opens it. Only
+ * http(s) URLs that parse become links; anything else is left as text.
+ */
+export function link(text: string, url: string): string {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return text;
+	}
+	if (!/^https?:$/.test(parsed.protocol) || !/^[\x21-\x7e]+$/.test(parsed.href)) return text;
+	return `\x1b]8;;${parsed.href}\x1b\\${text}${LINK_END}`;
+}
+
+/** A bare URL's end: not the sentence's punctuation, nor a `)` it didn't open. */
+function trimUrl(url: string): string {
+	let end = url.replace(/[.,;:!?*_~'"]+$/, "");
+	while (end.endsWith(")") && (end.match(/\(/g)?.length ?? 0) < (end.match(/\)/g)?.length ?? 0)) end = end.slice(0, -1).replace(/[.,;:!?*_~'"]+$/, "");
+	return end;
+}
 
 /**
  * Inline markdown in `base`'s color: `code`, **bold**, *italic*, ~~strike~~,
- * [links](url) and <autolinks>. After each styled piece the base color comes
- * back, so the rest of the line keeps it.
+ * [links](url), <autolinks> and bare URLs, which are clickable. After each
+ * styled piece the base color comes back, so the rest of the line keeps it.
  */
 export function inline(P: Painter, text: string, base = "Normal", urls = true): string {
 	const on = P.s(base);
 	let out = on;
 	const re =
-		/(\\[\\`*_~[\]()#>+\-.!|])|(`+)([^`]|[^`].*?[^`])\2(?!`)|\*\*([^*\s](?:.*?[^*\s])??)\*\*|__([^_\s](?:.*?[^_\s])??)__|~~([^~\s](?:.*?[^~\s])??)~~|\*([^*\s](?:.*?[^*\s])??)\*|(?<![\w])_([^_\s](?:.*?[^_\s])??)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>/g;
+		/(\\[\\`*_~[\]()#>+\-.!|])|(`+)([^`]|[^`].*?[^`])\2(?!`)|\*\*([^*\s](?:.*?[^*\s])??)\*\*|__([^_\s](?:.*?[^_\s])??)__|~~([^~\s](?:.*?[^~\s])??)~~|\*([^*\s](?:.*?[^*\s])??)\*|(?<![\w])_([^_\s](?:.*?[^_\s])??)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<(https?:\/\/[^>\s]+)>|(?<![\w/])(https?:\/\/[^\s<>`]+)/g;
 	let last = 0;
 	let m: RegExpExecArray | null;
 	while ((m = re.exec(text))) {
@@ -50,14 +74,19 @@ export function inline(P: Painter, text: string, base = "Normal", urls = true): 
 		else if (m[9]) {
 			const label = m[9];
 			const url = m[10];
-			out += P.s("Special") + UNDERLINE + label + RESET + (urls && url !== label && !url.startsWith("#") ? P.p("Comment", ` (${url})`) : "") + on;
-		} else if (m[11]) out += P.s("Special") + UNDERLINE + m[11] + RESET + on;
+			out += link(P.s("Special") + UNDERLINE + label + RESET, url) + (urls && url !== label && !url.startsWith("#") ? P.p("Comment", ` (${url})`) : "") + on;
+		} else if (m[11]) out += link(P.s("Special") + UNDERLINE + m[11] + RESET, m[11]) + on;
+		else if (m[12]) {
+			const url = trimUrl(m[12]);
+			last = re.lastIndex = m.index + url.length;
+			out += link(P.s("Special") + UNDERLINE + url + RESET, url) + on;
+		}
 	}
 	return out + text.slice(last) + RESET;
 }
 
 function strip(s: string): string {
-	return s.replace(/\x1b\[[0-9;]*m/g, "");
+	return s.replace(/\x1b\[[0-9;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 }
 
 // --- tables ---------------------------------------------------------------
