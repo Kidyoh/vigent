@@ -67,7 +67,7 @@ import { ICON_SETS, NERD, toolIcon, toolKind } from "./icons.js";
 import { MESSAGE_STYLES, resolveStyle, SEPARATOR_GLYPHS, SEPARATOR_STYLES, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
 import type { PiSession } from "./pi-session.js";
-import type { Session, SessionState } from "./session.js";
+import type { Session, SessionState, TranscriptItem } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
 import { completeCommandLine } from "./completion.js";
@@ -216,6 +216,67 @@ interface PaneLine {
 	block?: number;
 	/** a code block's language label (selected with the block, never copied) */
 	label?: boolean;
+}
+
+/**
+ * One transcript item's rendered lines and what they were rendered from. The
+ * lines are kept numbered for where the item was; `at` renumbers them (their
+ * item index and block ids) when items before it change, without redrawing.
+ */
+class ItemLines {
+	private kind: TranscriptItem["kind"];
+	private text: string;
+	private streaming: boolean;
+	private tool?: { name: string; summary: string; output: string; folded?: boolean };
+
+	constructor(
+		private ctx: string,
+		item: TranscriptItem,
+		private lines: PaneLine[],
+		/** how many block ids the item uses */
+		readonly blocks: number,
+		private n: number,
+		private base = 0,
+	) {
+		this.kind = item.kind;
+		this.text = item.text;
+		this.streaming = Boolean(item.streaming);
+		const t = item.tool;
+		if (t) this.tool = { name: t.name, summary: t.summary, output: t.output, folded: t.folded };
+	}
+
+	/** still what this item would render as, in this pane (width, theme, style) */
+	matches(ctx: string, item: TranscriptItem): boolean {
+		if (ctx !== this.ctx || item.kind !== this.kind || item.text !== this.text || Boolean(item.streaming) !== this.streaming) return false;
+		const t = item.tool;
+		const c = this.tool;
+		if (!t || !c) return !t && !c;
+		return t.name === c.name && t.summary === c.summary && t.output === c.output && t.folded === c.folded;
+	}
+
+	/** the lines, for the item at index `n` whose first block id is `base` */
+	at(n: number, base: number): PaneLine[] {
+		if (n !== this.n || base !== this.base) {
+			const shift = base - this.base;
+			this.lines = this.lines.map((l) => ({
+				...l,
+				...(l.item !== undefined ? { item: n } : {}),
+				...(l.block !== undefined ? { block: l.block + shift } : {}),
+			}));
+			this.n = n;
+			this.base = base;
+		}
+		return this.lines;
+	}
+}
+
+/**
+ * A line cut to `width` columns. Most lines already fit, and visibleWidth
+ * remembers lines it has measured, so the slow cut (escape code by escape
+ * code) runs only for a line that really is too wide.
+ */
+function fitWidth(line: string, width: number): string {
+	return visibleWidth(line) <= width ? line : truncateToWidth(line, width);
 }
 
 /** vim stops counting somewhere too; this keeps a mistyped number from looping for long */
@@ -3857,7 +3918,7 @@ export class App implements Component {
 		}
 		out.push(this.renderWildmenu(width) ?? this.renderStatusline(width));
 		out.push(this.renderCmdline(width));
-		return out.map((l) => truncateToWidth(l, width));
+		return out.map((l) => fitWidth(l, width));
 	}
 
 	/** A split's windows, side by side or stacked; every line comes back exactly as wide as the node. */
@@ -3865,7 +3926,7 @@ export class App implements Component {
 		const rect = rects.get(node)!;
 		if (!isSplit(node)) {
 			const fit = (l: string) => {
-				const cut = truncateToWidth(l, rect.w);
+				const cut = fitWidth(l, rect.w);
 				return cut + " ".repeat(Math.max(0, rect.w - visibleWidth(cut)));
 			};
 			return this.drawWindow(node, rect).map(fit);
@@ -4476,12 +4537,56 @@ export class App implements Component {
 		const I = this.icons;
 		const lines: PaneLine[] = [];
 		const normal = P.s("Normal");
+		// each item's lines are cached, so a streamed reply redraws only itself, not the whole conversation
+		const who = !s ? "agent" : this.demo ? s.model : (ENGINE_NAMES[s.engine] ?? s.engine);
+		const ctx = `${paneW}:${P.generation}:${this.ui.icons}:${JSON.stringify(style)}:${who}`;
+		let out: PaneLine[] = lines;
 		// a RESET inside a line would drop the theme background; restore it after each one
 		const push = (text: string, plain: string, meta: Omit<PaneLine, "text" | "plain"> = {}) =>
-			lines.push({ text: text.split(RESET).join(RESET + normal), plain, ...meta });
+			out.push({ text: text.split(RESET).join(RESET + normal), plain, ...meta });
+		// block numbers (code blocks, tool output) count through the whole conversation; nextBlock counts within an item
 		let nextBlock = 0;
+		let blocksBefore = 0;
 
 		(s?.items ?? []).forEach((item, n) => {
+			let c = this.itemLines.get(item);
+			if (!c || !c.matches(ctx, item)) {
+				out = [];
+				nextBlock = 0;
+				this.renderItem(item, n, paneW, push, () => nextBlock++, (k) => (nextBlock += k) - k, who);
+				c = new ItemLines(ctx, item, out, nextBlock, n);
+				this.itemLines.set(item, c);
+			}
+			for (const l of c.at(n, blocksBefore)) lines.push(l);
+			blocksBefore += c.blocks;
+		});
+		out = lines;
+		if (s?.thinking) {
+			push("", "");
+			push(P.p("Comment", "thinking…"), "thinking…");
+		}
+		if (this.paneCache.size >= 32) this.paneCache.clear(); // old widths, killed agents
+		this.paneCache.set(slot, { lines, key });
+		return lines;
+	}
+
+	/** rendered lines per transcript item (see buildPaneLines) */
+	private itemLines = new WeakMap<TranscriptItem, ItemLines>();
+
+	/** One transcript item's lines. `newBlock()` numbers a block; `blocks(k)` takes k numbers and returns the first. */
+	private renderItem(
+		item: TranscriptItem,
+		n: number,
+		paneW: number,
+		push: (text: string, plain: string, meta?: Omit<PaneLine, "text" | "plain">) => void,
+		newBlock: () => number,
+		blocks: (k: number) => number,
+		who: string,
+	): void {
+		const P = this.painter;
+		const I = this.icons;
+		const style = this.style;
+		{
 			switch (item.kind) {
 				case "user": {
 					push("", "");
@@ -4531,7 +4636,6 @@ export class App implements Component {
 					push("", "");
 					const text = printable(item.text) + (item.streaming ? ` ${I.cursor}` : "");
 					// labeled: a header naming the engine, the reply indented under it; bubbles: the name, then the reply
-					const who = !s ? "agent" : this.demo ? s.model : (ENGINE_NAMES[s.engine] ?? s.engine);
 					const indent = style.messages === "labeled" ? "  " : "";
 					if (style.messages === "labeled") {
 						const bar = this.ui.icons === "ascii" ? "| " : "▎ ";
@@ -4541,11 +4645,11 @@ export class App implements Component {
 						const mark = I.agent ?? I.open_agent;
 						push(P.p("Special", `${mark} `) + P.p("Title", who), `${mark} ${who}`, { item: n, start: true });
 					}
-					const md = renderMarkdown(text, paneW - indent.length, P, I.bullet, nextBlock, { ascii: this.ui.icons === "ascii" });
+					const md = renderMarkdown(text, paneW - indent.length, P, I.bullet, blocks(0), { ascii: this.ui.icons === "ascii" });
 					md.lines.forEach((l, i) =>
 						push(indent + P.s("Normal") + l.text + RESET, indent + l.plain, { item: n, start: style.messages === "plain" && i === 0, block: l.block, label: l.label }),
 					);
-					nextBlock += md.blocks;
+					blocks(md.blocks);
 					break;
 				}
 				case "tool": {
@@ -4561,7 +4665,7 @@ export class App implements Component {
 						{ item: n },
 					);
 					if (!t.folded && t.output) {
-						const block = nextBlock++;
+						const block = newBlock();
 						const outLines = printable(t.output).split("\n");
 						for (const ol of outLines.slice(0, 12)) {
 							for (const wl of wrapTextWithAnsi(ol, paneW - 4)) {
@@ -4580,14 +4684,7 @@ export class App implements Component {
 					break;
 				}
 			}
-		});
-		if (s?.thinking) {
-			push("", "");
-			push(P.p("Comment", "thinking…"), "thinking…");
 		}
-		if (this.paneCache.size >= 32) this.paneCache.clear(); // old widths, killed agents
-		this.paneCache.set(slot, { lines, key });
-		return lines;
 	}
 
 	/** mode and agent on the left, model, usage and agents on the right ([statusline] picks the parts) */
