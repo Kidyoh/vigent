@@ -38,6 +38,7 @@ export const EX_COMMANDS = [
 	"qall",
 	"queue",
 	"quit",
+	"race",
 	"resume",
 	"review",
 	"serve",
