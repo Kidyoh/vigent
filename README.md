@@ -27,7 +27,7 @@ Press `i`, type what you want done, and press Enter. An agent starts on it in it
 ## What it does
 
 - **Many agents, one screen.** A sidebar of agents, switch with `<Space>1`–`9` or `]s` / `[s`. Each one gets a bell or desktop notification when it finishes or needs you.
-- **Race your harnesses.** `:race <task>` gives the same task to every harness you're signed in to, a worktree each. Compare how long each took and what it changed, then `:race pick` keeps one and removes the rest.
+- **Race your harnesses.** `:race <task>` gives the same task to every harness you're signed in to, a worktree each, or to the models you name with `--models claude-opus-5-5,gpt-5.5`. Compare how long each took and what it changed, then `:race pick` keeps one and removes the rest.
 - **A worktree per agent.** Agents never touch your checkout or each other's files. With riftri, worktrees share copy-on-write storage, so ten agents cost about one checkout of disk.
 - **Review and land.** `:diff` (or side by side), `:review` to drop hunks you don't want, then `:merge` or `:pr`.
 - **Harnesses as installed, orchestrated.** vigent doesn't call models or run tools itself: it starts each harness in its worktree, reads the events it streams (replies, tool calls, usage), and handles everything around the loop: queues, permissions, approvals, restarts, hooks, review and merge. `:checkhealth` shows which harnesses are installed and signed in.

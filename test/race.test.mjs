@@ -8,7 +8,7 @@ import { App } from "../dist/app.js";
 import { completeCommandLine } from "../dist/completion.js";
 import { DEFAULT_UI } from "../dist/config.js";
 import { Keymap } from "../dist/keys.js";
-import { parseRaceArgs, racerLabels } from "../dist/race.js";
+import { completeRaceArg, parseRaceArgs, racerLabels, resolveRaceModels } from "../dist/race.js";
 import { Session } from "../dist/session.js";
 import { BUILTIN_THEMES, Painter } from "../dist/theme.js";
 import { createWorktree } from "../dist/worktree.js";
@@ -37,12 +37,16 @@ class Racer extends Session {
 
 const engine = (id, name, connected = true) => ({ id, name, installed: true, connected, detail: "" });
 
-function makeApp({ engines = [engine("claude", "Claude Code"), engine("codex", "Codex"), engine("gemini", "Gemini CLI", false)], worktreeFor } = {}) {
+// every racer gets a worktree of its own unless a test says otherwise
+const ownWorktree = (name) => ({ branch: `race/${name.replace(/ /g, "-")}` });
+
+function makeApp({ engines = [engine("claude", "Claude Code"), engine("codex", "Codex"), engine("gemini", "Gemini CLI", false)], worktreeFor = ownWorktree } = {}) {
 	const overlays = [];
 	const alerts = [];
 	const tui = { requestRender() {}, showOverlay: (c) => (overlays.push(c), { hide: () => overlays.splice(overlays.indexOf(c), 1) }) };
 	const app = new App(tui, { rows: 30, columns: 120, write() {} }, new Painter(BUILTIN_THEMES.default), { ...DEFAULT_UI }, new Keymap());
 	app.engines = engines;
+	app.workspace = { root: "/repo", config: { enabled: true, dir: "../{repo}-worktrees", branch: "{type}/{name}", backend: "git" } };
 	app.defaultEngine = () => "claude";
 	app.alert = (bytes) => alerts.push(bytes);
 	let clock = 1_000;
@@ -70,15 +74,52 @@ test(":race arguments: the task, --engines with engine:model, a template, and wh
 	assert.deepEqual(parseRaceArgs("x --engines=opencode:anthropic/claude:1,pi").racers, [{ engine: "opencode", model: "anthropic/claude:1" }, { engine: "pi" }]);
 	assert.match(parseRaceArgs("x --engines claude").error, /at least two/);
 	assert.match(parseRaceArgs("x --engines :opus,codex").error, /no engine/);
+	assert.deepEqual(parseRaceArgs("fix it --models claude-opus-5-5,gpt-5.5"), { task: "fix it", models: ["claude-opus-5-5", "gpt-5.5"] });
+	assert.deepEqual(parseRaceArgs("-m=gpt-5.5 fix it -e opencode"), { task: "fix it", racers: [{ engine: "opencode" }], models: ["gpt-5.5"] }, "one of each is two racers");
+	assert.match(parseRaceArgs("x --models gpt-5.5").error, /at least two/);
 });
 
-test("racers are told apart by engine, then by model, then by a number", () => {
+test("--models: each id runs on the engine whose list has it, and anything else is refused", () => {
+	const known = new Map([
+		["claude", ["claude-opus-5-5", "claude-sonnet-5-5", "opus"]],
+		["codex", ["gpt-5.5", "gpt-5.5-codex"]],
+		["gemini", ["pro", "flash"]],
+		["opencode", ["anthropic/claude-opus-5-5", "openai/gpt-5.5"]],
+		["pi", ["anthropic/claude-opus-5-5", "gpt-5.5"]],
+	]);
+	const blocked = (e) => (e === "gemini" ? "Gemini CLI, which isn't signed in" : undefined);
+	const resolve = (...ids) => resolveRaceModels(ids, known, blocked);
+	assert.deepEqual(resolve("claude-opus-5-5", "gpt-5.5", "opus").racers, [
+		{ engine: "claude", model: "claude-opus-5-5" },
+		{ engine: "codex", model: "gpt-5.5" },
+		{ engine: "claude", model: "opus" },
+	], "gpt-5.5 is Codex's own, though pi lists it too");
+	assert.deepEqual(resolve("opencode:anthropic/claude-opus-5-5", "codex:gpt-6-preview").racers, [
+		{ engine: "opencode", model: "anthropic/claude-opus-5-5" },
+		{ engine: "codex", model: "gpt-6-preview" },
+	], "engine:model names the engine, listed or not");
+	assert.equal(resolve("flash", "gpt-5.5").error, "flash runs on Gemini CLI, which isn't signed in · :checkhealth", "never moved to another engine");
+	assert.match(resolve("claude-opus-5.5").error, /no engine lists the model 'claude-opus-5\.5' \(did you mean 'claude-opus-5-5'\?\) · engine:model/);
+	assert.match(resolve("anthropic/claude-opus-5-5").error, /runs on opencode and pi: say which, as opencode:anthropic\/claude-opus-5-5 or pi:anthropic\/claude-opus-5-5/);
+});
+
+test("Tab in :race completes --engines and --models, the last item of the list", () => {
+	const sources = { agents: [], themes: [], engines: ["claude", "codex", "opencode"], models: ["claude-opus-5-5", "claude-sonnet-5-5", "gpt-5.5"] };
+	assert.deepEqual(completeCommandLine("race fix it --engines c", sources), { base: "race fix it --engines ", items: ["claude", "codex"] });
+	assert.deepEqual(completeCommandLine("race fix it --engines claude,o", sources), { base: "race fix it --engines claude,", items: ["opencode"] });
+	assert.deepEqual(completeCommandLine("race! fix it -m=claude-opus-5-5,claude-s", sources), { base: "race! fix it -m=claude-opus-5-5,", items: ["claude-sonnet-5-5"] });
+	assert.deepEqual(completeCommandLine("race fix it --mo", sources), { base: "race fix it ", items: ["--models"] });
+	assert.deepEqual(completeCommandLine("race fix it", sources).items, [], "the task itself isn't completed");
+	assert.deepEqual(completeRaceArg("x --models ", sources).items, sources.models);
+});
+
+test("racers are told apart by their exact model, else their engine, then by a number", () => {
 	const label = (...parts) => racerLabels(parts.map((p) => ({ engine: p.split(":")[0], ...(p.includes(":") ? { model: p.split(":")[1] } : {}) })));
 	assert.deepEqual(label("claude", "codex"), ["claude", "codex"]);
-	assert.deepEqual(label("claude:opus", "codex"), ["claude", "codex"]);
-	assert.deepEqual(label("claude:opus", "claude:sonnet", "codex"), ["claude opus", "claude sonnet", "codex"]);
+	assert.deepEqual(label("claude:claude-opus-5-5", "codex"), ["claude-opus-5-5", "codex"]);
+	assert.deepEqual(label("claude:opus", "claude:sonnet", "codex:gpt-5.5"), ["opus", "sonnet", "gpt-5.5"]);
 	assert.deepEqual(label("claude", "claude", "codex"), ["claude 1", "claude 2", "codex"]);
-	assert.deepEqual(label("claude:opus", "claude:opus", "claude"), ["claude opus 1", "claude opus 2", "claude"]);
+	assert.deepEqual(label("claude:gpt-5.5", "codex:gpt-5.5", "claude"), ["gpt-5.5 1", "gpt-5.5 2", "claude"]);
 });
 
 test(":race <task> starts an agent per signed-in engine, each with the same prompt", () => {
@@ -98,8 +139,8 @@ test(":race --engines picks the racers, with a model each, the same engine twice
 	const { app, made, ex } = makeApp();
 	ex("race the cart total is off by one --engines claude:opus,claude:sonnet,gemini -t fix");
 	assert.deepEqual(made.map((m) => [m.name, m.engine, m.model]), [
-		["cart total is off by claude opus", "claude", "opus"],
-		["cart total is off by claude sonnet", "claude", "sonnet"],
+		["cart total is off by opus", "claude", "opus"],
+		["cart total is off by sonnet", "claude", "sonnet"],
 		["cart total is off by gemini", "gemini", undefined],
 	], "an engine you name races even when it isn't signed in yet, like :new --engine");
 	assert.match(app.sessions[0].sent[0], /failing test/i, "the fix template's prompt");
@@ -125,6 +166,75 @@ test(":race says what it can't do: one engine, an unknown engine, a missing temp
 	ex("race pick");
 	assert.match(app.message, /no race to pick from/);
 	assert.equal(app.sessions.length, 0);
+});
+
+test(":race --models picks the engine from the model, and combines with --engines", async () => {
+	const lists = { claude: ["claude-opus-5-5", "claude-sonnet-5-5"], codex: ["gpt-5.5"], gemini: ["pro", "flash"], opencode: ["anthropic/claude-opus-5-5"] };
+	const settle = () => new Promise((r) => setImmediate(r));
+	const setUp = () => {
+		const t = makeApp({ engines: [engine("claude", "Claude Code"), engine("codex", "Codex"), engine("gemini", "Gemini CLI", false), engine("opencode", "OpenCode")] });
+		t.app.modelChoices = async (e) => [{ value: "default" }, ...(lists[e] ?? []).map((value) => ({ value }))];
+		return t;
+	};
+
+	const { app, made, ex } = setUp();
+	ex("race fix it --models claude-opus-5-5,gpt-5.5");
+	await settle();
+	assert.deepEqual(made.map((m) => [m.name, m.engine, m.model]), [
+		["fix it claude-opus-5-5", "claude", "claude-opus-5-5"],
+		["fix it gpt-5.5", "codex", "gpt-5.5"],
+	]);
+	assert.match(app.message, /^race: claude-opus-5-5, gpt-5\.5 on 'fix it'/);
+
+	const both = setUp();
+	both.ex("race fix it --engines opencode --models opus,opencode:anthropic/claude-opus-5-5");
+	await settle();
+	assert.deepEqual(both.made.map((m) => [m.name, m.engine, m.model]), [
+		["fix it opencode", "opencode", undefined],
+		["fix it opus", "claude", "opus"],
+		["fix it anthropic claude-opus-5-5", "opencode", "anthropic/claude-opus-5-5"],
+	], "an alias is still taken, and engine:model runs where you say");
+
+	const no = setUp();
+	no.ex("race fix it --models claude-opus-5-5,flash");
+	await settle();
+	assert.equal(no.app.message, "flash runs on Gemini CLI, which isn't signed in · :checkhealth");
+	no.ex("race fix it --models claude-opus-5.5,gpt-5.5");
+	await settle();
+	assert.match(no.app.message, /no engine lists the model 'claude-opus-5\.5' \(did you mean 'claude-opus-5-5'\?\)/);
+	assert.equal(no.app.sessions.length, 0, "nothing starts when one model can't run");
+});
+
+test("Tab after :race --models offers exact ids from the engines that are signed in, never aliases", async () => {
+	const { app, type } = makeApp();
+	app.modelChoices = async (e) => [{ value: "default" }, ...({ claude: ["claude-opus-5-5", "opus"], codex: ["gpt-5.5"], gemini: ["flash"] }[e] ?? []).map((value) => ({ value }))];
+	type(":", ..."race fix it --models ");
+	assert.deepEqual(app.completionSources(app.cmdBuf).models, [], "the lists are still loading");
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual(app.completionSources(app.cmdBuf).models, ["claude-opus-5-5", "gpt-5.5"], "gemini isn't signed in, and opus is an alias");
+	type(..."gp", "\t");
+	assert.equal(app.cmdBuf, "race fix it --models gpt-5.5");
+	assert.deepEqual(app.completionSources("race x --engines ").engines, ["claude", "codex"]);
+});
+
+test("a race refuses to start when the racers would share one folder", () => {
+	const off = makeApp();
+	off.app.workspace = { root: "/repo", config: { ...off.app.workspace.config, enabled: false } };
+	off.ex("race fix it");
+	assert.match(off.app.message, /^a race needs a worktree for each racer, and worktrees are off here \(\[worktree\] enabled = false/);
+	assert.equal(off.made.length, 0);
+
+	const noRepo = makeApp();
+	noRepo.app.workspace = { config: noRepo.app.workspace.config };
+	noRepo.ex("race fix it");
+	assert.match(noRepo.app.message, /isn't a git repo/);
+	assert.equal(noRepo.made.length, 0);
+
+	// a racer that comes back without a worktree of its own doesn't race
+	const { app, ex } = makeApp({ worktreeFor: (name) => (name.endsWith("codex") ? undefined : ownWorktree(name)) });
+	ex("race fix it --engines claude,codex,claude");
+	assert.deepEqual(app.sessions.map((s) => s.name), ["fix it claude 1", "fix it claude 2"]);
+	assert.match(app.message, /not started: codex: it got no worktree of its own/);
 });
 
 test("an engine that can't start is left out and named; the rest still race", () => {

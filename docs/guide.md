@@ -92,19 +92,25 @@ Type an extension's command (`/deploy`), a skill (`/skill:changelog`) or a promp
 
 ## Racing engines
 
-Not sure which engine handles a task best? `:race` gives the same task to several at once, each in its own worktree and branch, and you keep the result you like.
+Not sure which engine or model handles a task best? `:race` gives the same task to several at once, each in its own worktree and branch, and you keep the result you like.
 
 ```vim
-:race fix the flaky checkout test                 " every engine you're signed in to
-:race fix it --engines claude,codex               " only these
-:race fix it --engines claude:opus,claude:sonnet  " one engine, two models (engine:model)
-:race fix it --engines codex,codex,codex          " the same one three times: agents don't answer the same way twice
-:race the cart total is off by one -t fix         " send a template's prompt
-:race                                             " compare the racers
-:race pick                                        " keep the one you're on, remove the rest
+:race fix the flaky checkout test                    " every engine you're signed in to
+:race fix it --engines claude,codex                  " only these
+:race fix it --models claude-opus-5-5,gpt-5.5        " these models, each on the engine that runs it
+:race fix it --engines opencode --models gpt-5.5     " both: two racers
+:race fix it --engines codex,codex,codex             " the same one three times: agents don't answer the same way twice
+:race fix it --models opencode:anthropic/claude-opus-5-5,gpt-5.5   " engine:model picks the engine yourself
+:race the cart total is off by one -t fix            " send a template's prompt
+:race                                                " compare the racers
+:race pick                                           " keep the one you're on, remove the rest
 ```
 
-Each racer is an ordinary agent named after the task and its engine (`fix flaky checkout test codex` on `fix/flaky-checkout-test-codex`), so everything else works on it: follow-ups, `:diff`, `:review`, `:model`, `:kill`. An engine that can't start is left out and named in the message line, and the others race without it.
+`--models` (`-m`) takes exact model ids, the ones `:model` lists, and Tab completes them from the engines you're signed in to, as it completes `--engines` (`-e`). vigent finds the engine whose model list has the id, so `claude-opus-5-5` runs on Claude Code and `gpt-5.5` on Codex; aliases such as `opus` work too. It doesn't guess past that: an id no engine lists, one that more than one engine routes to (`anthropic/claude-opus-5-5` on OpenCode and pi), or one whose engine isn't signed in stops the race before anything starts, and the message line says what to type instead. A race never moves a model to another engine. `engine:model` runs a model on the engine you name, in `--models` or `--engines`, for one no list has.
+
+Each racer is an ordinary agent named after the task and its model, or its engine when you didn't pick a model (`fix flaky checkout test gpt-5.5` on `fix/flaky-checkout-test-gpt-5-5`), so everything else works on it: follow-ups, `:diff`, `:review`, `:model`, `:kill`. An engine that can't start is left out and named in the message line, and the others race without it.
+
+Racers never share a folder: a race needs a git repo with worktrees on, and refuses to start otherwise (`[worktree] enabled = false`), since agents in one checkout would overwrite each other's work.
 
 When every racer has stopped, the message line ranks them by time (`race over: codex 41.2s +12 −3 · claude 1m 05s +40 −8`) and the bell rings if you were looking elsewhere. **`:race`** opens the comparison: the racers with the first to finish on top, each with its state, time, lines and files changed, tokens and cost, and the start of its last reply. `j`/`k` and Enter open one; read its `:diff`, or `:review` it.
 

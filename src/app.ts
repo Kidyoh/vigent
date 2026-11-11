@@ -62,7 +62,7 @@ import { renderMarkdown } from "./markdown.js";
 import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { printable } from "./printable.js";
-import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
+import { CLAUDE_MODELS, EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon, toolKind } from "./icons.js";
 import { MESSAGE_STYLES, resolveStyle, SEPARATOR_GLYPHS, SEPARATOR_STYLES, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
@@ -70,8 +70,8 @@ import type { PiSession } from "./pi-session.js";
 import type { Session, SessionState, TranscriptItem } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
-import { completeCommandLine } from "./completion.js";
-import { parseRaceArgs, type Race, type Racer, raceOrder, raceOver, racerLabels } from "./race.js";
+import { type CompletionSources, completeCommandLine } from "./completion.js";
+import { parseRaceArgs, type Race, type Racer, raceOrder, raceOver, racerLabels, resolveRaceModels } from "./race.js";
 import { HistoryWalk, LineBuffer, LineEditor, remember } from "./line-edit.js";
 import {
 	DEFAULT_WORKTREE,
@@ -913,7 +913,7 @@ export class App implements Component {
 		if (!w) {
 			const [before, under, rest] = this.cmd.parts;
 			const after = this.cmd.pos < [...this.cmdBuf].length ? under + rest : "";
-			const { base, items } = completeCommandLine(before, { agents: this.sessions.map((x) => x.name), themes: listThemes() });
+			const { base, items } = completeCommandLine(before, this.completionSources(before));
 			if (!items.length) {
 				this.wild = undefined;
 				return;
@@ -931,6 +931,17 @@ export class App implements Component {
 		w.shown = this.cmdBuf;
 	}
 
+	/** What the command line completes from. `:race --models` loads the engines' model lists the first time. */
+	private completionSources(line: string): CompletionSources {
+		const ready = (this.engines ?? []).filter((e) => e.connected).map((e) => e.id);
+		const engines = ready.length ? ready : allEngineIds();
+		const wantsModels = /^\s*race!?\s.*(?:^|\s)(?:--models?|-m)[= ]/.test(line);
+		if (wantsModels) void this.raceModelIndex();
+		const aliases = new Set(CLAUDE_MODELS.map((m) => m.alias));
+		const models = wantsModels && this.loadedModels ? [...new Set(engines.flatMap((e) => this.loadedModels?.get(e) ?? []))].filter((m) => !aliases.has(m)) : [];
+		return { agents: this.sessions.map((x) => x.name), themes: listThemes(), engines, models };
+	}
+
 	/**
 	 * What fits the command line while you type, before any <Tab>: every match, and the
 	 * rest of the first one (what <Tab> puts in) when it starts with what's typed.
@@ -939,7 +950,7 @@ export class App implements Component {
 		if (this.mode !== "COMMAND" || this.lineNormal || !this.cmdBuf.trim() || this.cmd.pos < [...this.cmdBuf].length) return undefined;
 		if (this.wild && this.wild.shown === this.cmdBuf) return undefined; // <Tab> is going through them
 		if (this.typedCompletion?.line !== this.cmdBuf) {
-			const { base, items } = completeCommandLine(this.cmdBuf, { agents: this.sessions.map((x) => x.name), themes: listThemes() });
+			const { base, items } = completeCommandLine(this.cmdBuf, this.completionSources(this.cmdBuf));
 			const typed = this.cmdBuf.slice(base.length);
 			const first = items[0];
 			const rest = first && first.toLowerCase().startsWith(typed.toLowerCase()) ? first.slice(typed.length) : "";
@@ -2217,7 +2228,7 @@ export class App implements Component {
 	}
 
 	/** `:race` shows the race, `:race pick` keeps the focused racer, `:race <task>` starts one. */
-	private execRace(arg: string) {
+	private execRace(arg: string): Promise<void> | void {
 		if (!arg) return this.openRace();
 		if (arg === "pick") return this.pickRacer(false);
 		const parsed = parseRaceArgs(arg);
@@ -2230,8 +2241,49 @@ export class App implements Component {
 			if (needsTask(t) && !parsed.task) return this.setMessage(`template '${t.name}' needs a task: :race <what> -t ${t.name}`, "ErrorMsg");
 			prompt = fillTemplate(t, parsed.task);
 		}
-		if (!prompt) return this.setMessage("usage: :race <task> [--engines claude,codex]  ·  :race shows it  ·  :race pick keeps one", "Comment");
-		this.startRace(parsed.task || parsed.template || "race", prompt, parsed.racers);
+		if (!prompt) return this.setMessage("usage: :race <task> [--engines claude,codex] [--models claude-opus-5-5,gpt-5.5]  ·  :race shows it  ·  :race pick keeps one", "Comment");
+		const task = parsed.task || parsed.template || "race";
+		const models = parsed.models;
+		if (!models) {
+			this.startRace(task, prompt, parsed.racers);
+			return;
+		}
+		// which engine runs a model comes from the engines' own lists, which take a moment the first time
+		return this.raceModelIndex().then((index) => {
+			const known = new Map<string, string[]>(index);
+			known.set("claude", [...(known.get("claude") ?? []), ...CLAUDE_MODELS.map((m) => m.alias)]);
+			const r = resolveRaceModels(models, known, (engine) => {
+				const info = this.engines?.find((e) => e.id === engine);
+				if (!info || info.connected || info.checking) return undefined;
+				return `${info.name}, which isn't ${info.installed ? "signed in" : "installed"}`;
+			});
+			if ("error" in r) this.setMessage(r.error, "ErrorMsg");
+			else this.startRace(task, prompt, [...(parsed.racers ?? []), ...r.racers]);
+			this.tui.requestRender();
+		});
+	}
+
+	/** Each engine's model ids, for `:race --models`: loaded once, the first time they're needed. */
+	private modelIndex?: Promise<Map<EngineId, string[]>>;
+	private loadedModels?: Map<EngineId, string[]>;
+	private raceModelIndex(): Promise<Map<EngineId, string[]>> {
+		const ids = allEngineIds();
+		this.modelIndex ??= Promise.all(
+			ids.map((e) =>
+				// an engine that isn't installed can't list its models; Claude Code's and Gemini CLI's lists are fixed, so they still say whose a model is
+				(this.engines?.find((x) => x.id === e)?.installed === false && e !== "claude" && e !== "gemini" ? Promise.resolve([]) : this.modelChoices(e)).then(
+					(list) => list.map((c) => c.value).filter((v) => v !== "default"),
+					() => [] as string[],
+				),
+			),
+		).then((lists) => {
+			this.loadedModels = new Map(ids.map((e, i) => [e, lists[i] ?? []]));
+			// what Tab offered before the lists came in was empty
+			this.typedCompletion = undefined;
+			this.tui.requestRender();
+			return this.loadedModels;
+		});
+		return this.modelIndex;
 	}
 
 	/** Start one agent per racer on the same prompt, each in its own worktree. */
@@ -2254,15 +2306,30 @@ export class App implements Component {
 				return undefined;
 			}
 		}
+		// racers sharing a folder would overwrite each other's work, so each needs its own worktree
+		if (!this.demo && (!this.workspace.root || !this.workspace.config.enabled)) {
+			const why = this.workspace.root ? "worktrees are off here ([worktree] enabled = false in your config)" : "this folder isn't a git repo";
+			this.setMessage(`a race needs a worktree for each racer, and ${why}`, "ErrorMsg");
+			return undefined;
+		}
 		const labels = racerLabels(racers);
 		const base = agentNameFrom(task);
 		const race: Race = { id: this.nextRaceId++, task, startedAt: this.now(), racers: [], ran: new Set(), finishedAt: new Map(), announced: false };
 		const failed: string[] = [];
 		const first = this.sessions.length;
 		racers.forEach((r, i) => {
-			const s = this.startAgent(`${base} ${labels[i]}`, this.demo && !asked ? {} : { engine: r.engine, model: r.model });
+			// a model id like anthropic/claude-opus-5-5 keeps its slash in the race, not in the agent's name and branch
+			const s = this.startAgent(`${base} ${labels[i].replaceAll("/", " ")}`, this.demo && !asked ? {} : { engine: r.engine, model: r.model });
 			if (!s) {
 				failed.push(`${labels[i]}: ${this.message}`);
+				return;
+			}
+			if (!this.demo && !s.worktree) {
+				s.abort();
+				s.dispose();
+				this.sessions.splice(this.sessions.indexOf(s), 1);
+				this.dropFromWindows(s);
+				failed.push(`${labels[i]}: it got no worktree of its own`);
 				return;
 			}
 			this.raceLabel.set(s, labels[i]);
@@ -5146,7 +5213,7 @@ function describeRhs(rhs: Rhs[]): string {
 const EX_HELP: [string, string][] = [
 	[":new [task]", "start an agent in its own worktree"],
 	[":new -t <template> <task>", "start one from a template and send it (:templates picks)"],
-	[":race <task> [--engines a,b]", "the same task on every signed-in engine, a worktree each"],
+	[":race <task> [--engines a,b] [--models x,y]", "the same task on every signed-in engine, or the ones and models you name, a worktree each"],
 	[":race  /  :race pick", "compare the racers / keep the one you're on, remove the rest"],
 	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
 	[":new! [name]", "agent in this checkout, no worktree"],
