@@ -273,14 +273,22 @@ test("the app: :new, :worktrees, :worktree remove, :kill, :kill!, :new!", async 
 	assert.match(app.message, /has no worktree to diff/);
 });
 
-test("a new file's lines are counted like git diff counts them, from the bytes", () => {
-	const n = (text) => lineCount(Buffer.from(text));
-	assert.equal(n(""), 0);
-	assert.equal(n("one"), 1, "no newline at the end still counts");
-	assert.equal(n("one\n"), 1);
-	assert.equal(n("one\ntwo"), 2);
-	assert.equal(n("one\ntwo\n"), 2);
-	assert.equal(n("\n\n"), 2);
-	assert.equal(n("héllo\nwörld\n"), 2, "multi-byte text");
-	assert.equal(lineCount(Buffer.from([1, 0, 10, 2])), 0, "binary: no lines");
+test("a new file's lines are counted like git diff counts them, from the bytes", async () => {
+	const n = (...parts) => lineCount(parts.map((p) => Buffer.from(p)));
+	assert.equal(await n(""), 0);
+	assert.equal(await n("one"), 1, "no newline at the end still counts");
+	assert.equal(await n("one\n"), 1);
+	assert.equal(await n("one\ntwo"), 2);
+	assert.equal(await n("one\ntwo\n"), 2);
+	assert.equal(await n("\n\n"), 2);
+	assert.equal(await n("héllo\nwörld\n"), 2, "multi-byte text");
+	assert.equal(await lineCount([Buffer.from([1, 0, 10, 2])]), 0, "binary: no lines");
+	// read in chunks: a line split across two of them is one line, and the last chunk decides the ending
+	assert.equal(await n("on", "e\ntw", "o"), 2);
+	assert.equal(await n("one", "\n"), 1);
+	assert.equal(await n("one\n", ""), 1, "an empty chunk at the end changes nothing");
+	assert.equal(await n("text\n", "more", "\0"), 0, "a zero byte in a later chunk: still binary");
+	const big = path.join(tmp, "big.log");
+	fs.writeFileSync(big, "a line\n".repeat(100_000) + "no newline");
+	assert.equal(await lineCount(fs.createReadStream(big, { highWaterMark: 64 * 1024 })), 100_001, "a file read in many chunks");
 });

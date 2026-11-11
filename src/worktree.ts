@@ -377,8 +377,8 @@ export async function diffStat(wt: WorktreeInfo): Promise<DiffStat> {
 	for (const file of await untrackedFiles(wt.path)) {
 		stat.files++;
 		try {
-			// read in the background, one file at a time, so a worktree full of new files never freezes the screen
-			stat.added += lineCount(await fs.promises.readFile(path.join(wt.path, file)));
+			// read in the background, one file and one chunk at a time, so neither many new files nor one big one freezes the screen
+			stat.added += await lineCount(fs.createReadStream(path.join(wt.path, file), { highWaterMark: 64 * 1024 }));
 		} catch {
 			// unreadable: count the file, not its lines
 		}
@@ -386,12 +386,20 @@ export async function diffStat(wt: WorktreeInfo): Promise<DiffStat> {
 	return stat;
 }
 
-/** Lines in a new file, as git diff counts them (a last line without a newline counts too); 0 for a binary file. */
-export function lineCount(buf: Buffer): number {
-	if (buf.length === 0 || buf.includes(0)) return 0;
+/**
+ * Lines in a new file, as git diff counts them (a last line without a newline
+ * counts too); 0 for a binary file. Counted chunk by chunk as the file is read.
+ */
+export async function lineCount(chunks: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<number> {
 	let n = 0;
-	for (let i = buf.indexOf(10); i !== -1; i = buf.indexOf(10, i + 1)) n++;
-	return buf[buf.length - 1] === 10 ? n : n + 1;
+	let last = -1;
+	for await (const buf of chunks) {
+		if (buf.length === 0) continue;
+		if (buf.includes(0)) return 0;
+		for (let i = buf.indexOf(10); i !== -1; i = buf.indexOf(10, i + 1)) n++;
+		last = buf[buf.length - 1];
+	}
+	return last === -1 || last === 10 ? n : n + 1;
 }
 
 /** Unified diff of everything the agent changed, new files included. */
