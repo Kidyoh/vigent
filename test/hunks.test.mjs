@@ -30,6 +30,9 @@ function setup(name) {
 	const repo = path.join(tmp, name);
 	fs.mkdirSync(repo);
 	git(["init", "-q", "-b", "main"], repo);
+	// commitPending runs git with the process's own env: CI has no identity of its own
+	git(["config", "user.name", "T"], repo);
+	git(["config", "user.email", "t@e.com"], repo);
 	fs.writeFileSync(path.join(repo, "cart.js"), `${Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n")}\n`);
 	git(["add", "-A"], repo);
 	git(["commit", "-qm", "base"], repo);

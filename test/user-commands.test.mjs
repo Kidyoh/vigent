@@ -137,7 +137,8 @@ test("the real vigent: a [commands] shell command from config.toml", { timeout: 
 	const env = { ...process.env, XDG_CONFIG_HOME: path.join(tmp, "xdg"), XDG_STATE_HOME: path.join(tmp, "state-e2e"), TERM: "xterm-256color" };
 	const t = new Tty([], { cwd: repo, env, cols: 130, rows: 30 });
 	try {
-		await t.waitFor(/:help for keys|VIGENT|██/);
+		// started: the hint, the dashboard, or (no CLI signed in, as in CI) the demo's sidebar, whose notices can take the hint's line
+		await t.waitFor(/:help for keys|VIGENT|██|SESSIONS/);
 		await t.type(":Hello\r");
 		await t.waitFor(/:Hello: done in [0-9.]+s · hello from shop/, 20000); // ran in the repo, with VIGENT_REPO set
 	} finally {
