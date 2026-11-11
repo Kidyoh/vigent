@@ -37,6 +37,7 @@ export function ColorschemeFloat({
   const [index, setIndex] = useState(Math.max(0, NAMES.indexOf(current)));
   const [query, setQuery] = useState<string | null>(null); // null: not searching
   const list = useRef<HTMLUListElement>(null);
+  const root = useRef<HTMLDivElement>(null);
 
   const shown = useMemo(() => (query ? NAMES.filter((n) => fuzzy(n, query.toLowerCase())) : NAMES), [query]);
   const name = shown[index];
@@ -50,6 +51,23 @@ export function ColorschemeFloat({
   /** what the key handler reads, current on every render */
   const live = useRef({ shown, query, name, onKeep, onCancel });
   live.current = { shown, query, name, onKeep, onCancel };
+
+  // clicking outside the float dismisses it
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (root.current?.contains(target)) return;
+      if ((target as Element).closest?.(".scheme")) return;
+      live.current.onCancel();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -91,7 +109,13 @@ export function ColorschemeFloat({
   }, []);
 
   return (
-    <div className={className} role="dialog" aria-label="Colorschemes">
+    <div
+      ref={root}
+      className={className}
+      role="dialog"
+      aria-label="Colorschemes"
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="float-title">Colorschemes</div>
       <div className="float-prompt">{query !== null ? <span className="q">❯ {query}▏</span> : <span className="hint">❯ / to search</span>}</div>
       <ul ref={list} role="listbox" aria-label="Colorschemes">

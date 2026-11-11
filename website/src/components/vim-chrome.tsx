@@ -329,7 +329,7 @@ export function VimChrome({ file }: { file: string }) {
       const el = e.target as Element;
       if (el.closest?.("[data-yank]")) return yank(INSTALL);
       const scheme = el.closest?.("[data-colorscheme]");
-      if (scheme) return colorscheme(scheme.getAttribute("data-colorscheme") ?? undefined);
+      if (scheme && scheme !== document.documentElement) return colorscheme(scheme.getAttribute("data-colorscheme") ?? undefined);
       if (el.closest?.("a, button, input")) return;
       const l = el.closest?.("main.buffer .l:not(.tilde)");
       if (l) moveTo(lines().indexOf(l as HTMLElement), false);
