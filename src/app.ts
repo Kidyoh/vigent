@@ -277,7 +277,22 @@ class ItemLines {
  * code) runs only for a line that really is too wide.
  */
 function fitWidth(line: string, width: number): string {
-	return visibleWidth(line) <= width ? line : truncateToWidth(line, width);
+	const row = oneRow(line);
+	return visibleWidth(row) <= width ? row : truncateToWidth(row, width);
+}
+
+/** a control character that would move the terminal's cursor; ESC and BEL stay (colors, links, the cursor marker) */
+const CURSOR_MOVER = /[\x00-\x06\x08-\x1a\x1c-\x1f\x7f]/;
+
+/**
+ * A screen row as the terminal must get it: on one row. A newline would start
+ * another row and push every row after it down (the screen then scrolls and
+ * shows rows twice); a tab jumps to a tab stop vigent doesn't count. They
+ * become spaces, and other cursor movers go.
+ */
+function oneRow(line: string): string {
+	if (!CURSOR_MOVER.test(line)) return line;
+	return line.replace(/\r\n|[\n\r\t]/g, " ").replace(/[\x00-\x06\x08-\x1a\x1c-\x1f\x7f]/g, "");
 }
 
 /** vim stops counting somewhere too; this keeps a mistyped number from looping for long */
@@ -4192,7 +4207,8 @@ export class App implements Component {
 		}
 		out.push(this.renderWildmenu(width) ?? this.renderStatusline(width));
 		out.push(this.renderCmdline(width));
-		return out.map((l) => fitWidth(l, width));
+		// exactly the terminal's rows, each on one row and no wider than the screen: like vim, nothing ever scrolls
+		return out.slice(-this.terminal.rows).map((l) => fitWidth(l, width));
 	}
 
 	/** A split's windows, side by side or stacked; every line comes back exactly as wide as the node. */
@@ -4928,7 +4944,8 @@ export class App implements Component {
 				}
 				case "tool": {
 					const t = item.tool!;
-					const [name, summary] = [printable(t.name), printable(t.summary)];
+					// one row: a command can span lines (a heredoc, a script), and a newline here would break the screen
+					const [name, summary] = [printable(t.name), printable(t.summary)].map((x) => x.replace(/\s+/g, " ").trim());
 					const fold = t.folded ? I.folded : I.open;
 					const icon = this.toolGlyph(t.name);
 					// under a labeled reply, tool calls line up with its text
