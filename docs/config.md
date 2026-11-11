@@ -249,7 +249,13 @@ With `ask = true`, vigent asks you instead, in a picker that names the agent and
 - **always allow:** the same, and adds the rules to `allow` in config.toml, so every Claude Code agent may use them from then on.
 - **no** (or Esc): leaves it blocked.
 
-The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the tool's name for anything else. If an agent you aren't looking at asks, the bell rings. Codex doesn't need this, because it runs in a workspace-write sandbox. pi doesn't either: it has no permission gate unless an extension adds one (see [pi in the guide](guide.md#pi-extensions-skills-and-prompt-templates)).
+The rule is the program for a command (`gh pr view 12` → `Bash(gh:*)`) or the tool's name for anything else. If an agent you aren't looking at asks, the bell rings.
+
+It only asks when a rule would change something:
+
+- It asks only about rules that aren't in `allow` yet. When everything refused is allowed already, Claude Code wanted approval for that command whatever the rules say, so vigent says that instead of asking again.
+- In `bypassPermissions` it never asks: every rule already applies. What Claude Code still refuses there (it always asks before writing in `.git` or `.claude`, for one) is shown in the transcript.
+- `AskUserQuestion` and `ExitPlanMode` wait for you to answer, which `-p` can't do. vigent shows the question, or says the plan is ready, and you answer with your next prompt. Codex doesn't need this, because it runs in a workspace-write sandbox. pi doesn't either: it has no permission gate unless an extension adds one (see [pi in the guide](guide.md#pi-extensions-skills-and-prompt-templates)).
 
 `[engines.pi]` takes `model` (as `provider/model`, e.g. `openai/gpt-5`, or any pattern `pi --model` takes), `effort` (pi's thinking level) and `args`: extra arguments for `pi --mode rpc`, such as `["--no-extensions"]` or `["-e", "./my-extension.ts"]`. pi is your own install (`npm install -g @mariozechner/pi-coding-agent`); vigent keeps one `pi --mode rpc` running per agent and saves its conversation in the worktree.
 

@@ -249,7 +249,96 @@ test("the refused-tool message: what to allow (only what isn't yet), from the ne
 	s.send("again");
 	await settle(s);
 	info = s.items.filter((i) => i.kind === "info").map((i) => i.text);
-	assert.ok(info.some((t) => /^Bash\(gh:\*\) Bash\(jq:\*\) are allowed, and Claude Code still refused: .*bypassPermissions.*asking/.test(t)), info.join("\n"));
+	assert.ok(info.some((t) => /^Bash\(gh:\*\) Bash\(jq:\*\) are allowed, and Claude Code still refused: .*bypassPermissions/.test(t)), info.join("\n"));
 	s.dispose();
 });
 
+
+/** A fake Claude Code that refuses the same calls whatever it's run with, and logs its argv. */
+function stubbornClaude(name, denials) {
+	const dir = path.join(tmp, name);
+	fs.mkdirSync(dir, { recursive: true });
+	const log = path.join(dir, "argv.log");
+	const file = path.join(dir, "claude");
+	const result = { type: "result", subtype: "success", is_error: false, result: "couldn't", session_id: "s-7", permission_denials: denials };
+	fs.writeFileSync(file, `#!/usr/bin/env node\nrequire("fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");\nfor (const e of [${JSON.stringify(init)}, ${JSON.stringify(result)}]) console.log(JSON.stringify(e));\n`);
+	fs.chmodSync(file, 0o755);
+	return { bin: file, calls: () => fs.readFileSync(log, "utf8").trim().split("\n").map(JSON.parse) };
+}
+const infos = (s) => s.items.filter((i) => i.kind === "info").map((i) => i.text);
+
+test("with ask: always allow, then refused again anyway: it says so instead of asking about the same rules forever", async () => {
+	const fake = stubbornClaude("loop-always", [{ tool_name: "Bash", tool_use_id: "t", tool_input: { command: "gh pr merge 12" } }]);
+	let allow = [];
+	const s = new CliSession("f", "claude", undefined, { cwd: tmp, bin: fake.bin, ask: true, allow: () => allow, onAlwaysAllow: (r) => (allow = [...allow, ...r]) });
+	let asked = 0;
+	s.approver = async () => {
+		asked++;
+		return "always";
+	};
+	s.send("merge it");
+	await settle(s);
+	assert.equal(asked, 1, "asked once");
+	assert.deepEqual(allow, ["Bash(gh:*)"]);
+	assert.equal(fake.calls().length, 2, "the first run and the retry; no third");
+	assert.ok(infos(s).some((t) => /^Bash\(gh:\*\) is allowed, and Claude Code still refused/.test(t)), infos(s).join("\n"));
+	assert.equal(s.state, "idle");
+	s.dispose();
+});
+
+test("with ask: only what isn't allowed yet is asked about", async () => {
+	const fake = stubbornClaude("partly", [{ tool_name: "Bash", tool_use_id: "t", tool_input: { command: "gh run view 3 | jq .x" } }]);
+	const s = new CliSession("g", "claude", undefined, { cwd: tmp, bin: fake.bin, ask: true, allow: () => ["Bash(gh:*)"] });
+	const seen = [];
+	s.approver = async (_d, rules) => {
+		seen.push(rules);
+		return undefined;
+	};
+	s.send("look");
+	await settle(s);
+	assert.deepEqual(seen, [["Bash(jq:*)"]]);
+	s.dispose();
+});
+
+test("bypassPermissions: what Claude Code still refuses is said, never asked about", async () => {
+	const fake = stubbornClaude("bypass", [{ tool_name: "Write", tool_use_id: "t", tool_input: { file_path: ".git/hooks/pre-commit" } }]);
+	const s = new CliSession("h", "claude", undefined, { cwd: tmp, bin: fake.bin, ask: true, extraArgs: () => ["--permission-mode", "bypassPermissions"] });
+	let asked = 0;
+	s.approver = async () => {
+		asked++;
+		return "always";
+	};
+	s.send("add a hook");
+	await settle(s);
+	assert.equal(asked, 0);
+	assert.equal(fake.calls().length, 1);
+	assert.ok(infos(s).some((t) => t.startsWith("blocked by Claude Code's permissions: Write .git/hooks/pre-commit")), infos(s).join("\n"));
+	assert.ok(infos(s).some((t) => /refused this even with bypassPermissions/.test(t)), infos(s).join("\n"));
+	assert.ok(!infos(s).some((t) => t.startsWith("to allow it")), "no rule to add");
+	s.dispose();
+});
+
+test("AskUserQuestion and ExitPlanMode aren't permissions: the question is shown, nothing is asked or allowed", async () => {
+	const question = { questions: [{ question: "Which database?", header: "DB", options: [{ label: "Postgres" }, { label: "SQLite" }], multiSelect: false }] };
+	const fake = stubbornClaude("question", [{ tool_name: "AskUserQuestion", tool_use_id: "t", tool_input: question }]);
+	const s = new CliSession("i", "claude", undefined, { cwd: tmp, bin: fake.bin, ask: true });
+	let asked = 0;
+	s.approver = async () => {
+		asked++;
+		return "always";
+	};
+	s.send("set up storage");
+	await settle(s);
+	assert.equal(asked, 0);
+	assert.deepEqual(infos(s), ["Claude Code wanted to ask you: Which database? (Postgres / SQLite) · answer with i"]);
+	assert.equal(s.state, "idle");
+
+	const plan = stubbornClaude("plan", [{ tool_name: "ExitPlanMode", tool_use_id: "t", tool_input: { plan: "1. do it" } }]);
+	const p = new CliSession("j", "claude", undefined, { cwd: tmp, bin: plan.bin, ask: true, extraArgs: () => ["--permission-mode", "plan"] });
+	p.approver = async () => "always";
+	p.send("plan it");
+	await settle(p);
+	assert.deepEqual(infos(p), ["Claude Code has a plan ready and wants to start on it: set Mode to something other than plan in :permissions, then tell it to go ahead"]);
+	s.dispose();
+	p.dispose();
+});

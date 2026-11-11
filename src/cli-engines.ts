@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { expandPrompt } from "./attach.js";
 import { CUSTOM_ENGINES, type CustomEngine, ENGINE_BINS, ENGINE_NAMES, type EngineId } from "./engines.js";
+import { flagValue } from "./permissions.js";
 import { Session, type TranscriptItem } from "./session.js";
 import type { WorktreeInfo } from "./worktree.js";
 
@@ -935,31 +936,54 @@ export class CliSession extends Session {
 		});
 	}
 
+	/** Claude Code's --permission-mode for this agent's runs */
+	private permissionMode(): string {
+		const args = (typeof this.opts.extraArgs === "function" ? this.opts.extraArgs() : this.opts.extraArgs) ?? this.adapter.defaultArgs;
+		return flagValue(args, "--permission-mode") ?? "default";
+	}
+
 	/**
 	 * The CLI refused some tools. Say which; with [engines.claude] ask on, ask
 	 * whether to allow them and run again. True when it's now asking you.
+	 *
+	 * It only asks about rules that would change something: not ones already
+	 * allowed (Claude Code refused them anyway, so asking again would go round
+	 * forever), nothing in bypassPermissions (every rule is allowed there
+	 * already), and never about a tool that needs you at the keyboard.
 	 */
-	private blocked(denied: Denial[]): boolean {
+	private blocked(all: Denial[]): boolean {
+		// AskUserQuestion and ExitPlanMode need someone to answer them, which -p can't do; no rule changes that
+		const denied = all.filter((d) => {
+			if (!INTERACTIVE_TOOLS.has(d.name)) return true;
+			this.pushInfo(interactiveNote(this.engineName, d));
+			return false;
+		});
+		if (!denied.length) return false;
 		const what = [...new Set(denied.map((d) => this.relative(describeDenial(d))))];
 		const rules = [...new Set(denied.flatMap(allowRules))];
 		this.pushInfo(`blocked by ${this.engineName}'s permissions: ${what.join(" · ")}`);
+		if (this.engine !== "claude") return false;
+		if (this.permissionMode() === "bypassPermissions") {
+			this.pushInfo(
+				`${this.engineName} refused this even with bypassPermissions: it asks before a few things whatever the mode (writing in .git or .claude, for one), and it can't ask here. Do that part yourself, or ask the agent for another way.`,
+			);
+			return false;
+		}
+		const allowed = new Set(this.opts.allow?.() ?? []);
+		const missing = rules.filter((r) => !allowed.has(r));
+		if (!missing.length) {
+			// everything it refused is allowed already: Claude Code wants approval for this kind of command anyway
+			this.pushInfo(
+				`${rules.join(" ")} ${rules.length === 1 ? "is" : "are"} allowed, and ${this.engineName} still refused: it asks before some commands whatever the rules say. In :permissions, set Mode to bypassPermissions (anything, in its worktree), then ask it to try again.`,
+			);
+			return false;
+		}
 		if (!this.asksToAllow || !this.approver) {
-			if (this.engine === "claude") {
-				const allowed = new Set(this.opts.allow?.() ?? []);
-				const missing = rules.filter((r) => !allowed.has(r));
-				if (missing.length) {
-					this.pushInfo(`to allow it: :permissions allow ${missing.join(" ")}, then ask it to try again (it's saved, and applies from its next prompt; or turn on asking in :permissions)`);
-				} else {
-					// everything it refused is allowed already: Claude Code wants approval for this kind of command anyway
-					this.pushInfo(
-						`${rules.join(" ")} ${rules.length === 1 ? "is" : "are"} allowed, and Claude Code still refused: it asks before some commands whatever the rules say. In :permissions, set Mode to bypassPermissions (anything, in its worktree) or turn on asking, then ask it to try again.`,
-					);
-				}
-			}
+			this.pushInfo(`to allow it: :permissions allow ${missing.join(" ")}, then ask it to try again (it's saved, and applies from its next prompt; or turn on asking in :permissions)`);
 			return false;
 		}
 		this.setState("waiting");
-		this.approver(denied, rules).then(
+		this.approver(denied, missing).then(
 			(choice) => {
 				if (this.state !== "waiting") return; // aborted, or a new prompt was sent meanwhile
 				if (!choice) {
@@ -967,9 +991,9 @@ export class CliSession extends Session {
 					this.setState("idle");
 					return;
 				}
-				if (choice === "always") this.opts.onAlwaysAllow?.(rules);
-				this.pushInfo(`${choice === "always" ? "always allowed" : "allowed once"}: ${rules.join(", ")} · retrying`);
-				this.run(`You now have permission to use ${rules.join(", ")}. Retry what was blocked, then carry on with the task.`, rules);
+				if (choice === "always") this.opts.onAlwaysAllow?.(missing);
+				this.pushInfo(`${choice === "always" ? "always allowed" : "allowed once"}: ${missing.join(", ")} · retrying`);
+				this.run(`You now have permission to use ${rules.join(", ")}. Retry what was blocked, then carry on with the task.`, missing);
 			},
 			() => this.setState("idle"),
 		);
@@ -1052,6 +1076,22 @@ function safeRealpath(p: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** Claude Code's tools that wait for you to answer: refused in -p whatever the rules, so never asked about. */
+const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+
+/** What a refused AskUserQuestion wanted to know, or that a plan is ready; you answer with your next prompt. */
+export function interactiveNote(engine: string, d: Denial): string {
+	if (d.name === "ExitPlanMode") return `${engine} has a plan ready and wants to start on it: set Mode to something other than plan in :permissions, then tell it to go ahead`;
+	const qs = Array.isArray(d.input?.questions) ? d.input.questions : [];
+	const asked = qs
+		.map((q: any) => {
+			const opts = Array.isArray(q?.options) ? q.options.map((o: any) => o?.label).filter(Boolean) : [];
+			return `${String(q?.question ?? "").trim()}${opts.length ? ` (${opts.join(" / ")})` : ""}`;
+		})
+		.filter(Boolean);
+	return `${engine} wanted to ask you${asked.length ? `: ${asked.join(" · ")}` : " something"} · answer with i`;
 }
 
 /** A refused tool call, short: the command for Bash, the tool name and its target otherwise. */
