@@ -227,13 +227,23 @@ test("no agent CLI and no API key: the demo starts, and says so", { skip, timeou
 });
 
 // Installed the way a user gets it: the npm package, into a fresh prefix, run as `vigent`.
-// Packs the dist/ npm test just built (prepack would rebuild it under the other test files).
+// Packs the dist/ npm test just built, from a copy: packing a folder runs its `prepare` script
+// (npm run build) even with --ignore-scripts, and rebuilding the repo's own dist/ would rewrite
+// the modules the other test files are loading at the same time.
 const online = spawnSync("npm", ["ping"], { stdio: "ignore", timeout: 15000 }).status === 0;
 test("the packed npm package installs and runs as `vigent`", { skip: skip || (!online && "needs the npm registry"), timeout: 600000 }, () => {
 	const root = path.join(import.meta.dirname, "..");
+	const pkgDir = path.join(tmp, "package");
+	fs.mkdirSync(pkgDir);
+	const manifest = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+	for (const f of manifest.files) fs.cpSync(path.join(root, f), path.join(pkgDir, f), { recursive: true });
+	delete manifest.scripts.prepare;
+	fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify(manifest, null, 2));
 	const out = path.join(tmp, "pack");
 	fs.mkdirSync(out);
-	const tgz = execFileSync("npm", ["pack", "--silent", "--ignore-scripts", "--pack-destination", out], { cwd: root, encoding: "utf8" }).trim().split("\n").pop();
+	const built = fs.statSync(path.join(root, "dist", "main.js")).mtimeMs;
+	const tgz = execFileSync("npm", ["pack", "--silent", "--ignore-scripts", "--pack-destination", out], { cwd: pkgDir, encoding: "utf8" }).trim().split("\n").pop();
+	assert.equal(fs.statSync(path.join(root, "dist", "main.js")).mtimeMs, built, "packing leaves the repo's dist/ alone");
 	const prefix = path.join(tmp, "prefix");
 	execFileSync("npm", ["install", "--global", "--prefix", prefix, "--no-audit", "--no-fund", path.join(out, tgz)], { stdio: "ignore" });
 	const vigent = path.join(prefix, "bin", "vigent");
