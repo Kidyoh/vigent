@@ -22,6 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/farming-labs/vigent/main/install.sh
 
 That downloads the build for your machine (Linux x64 and arm64, glibc or musl, and macOS) from the latest release, checks it against the release's `SHA256SUMS`, puts `vigent` and `riftri` in `~/.vigent` and links `vigent` into `~/.local/bin`. It's about 50 MB to download and 100 MB on disk, because the JavaScript runtime is inside. `VIGENT_VERSION=0.9.3` installs that version; run it again to update.
 
+When the machine does have Node 20 or newer, the installer takes the small build instead: the same vigent as one JavaScript file your Node runs, about 2 MB to download with riftri. `VIGENT_BUILD=binary` asks for the binary anyway.
+
 The same binary, other ways:
 
 ```bash

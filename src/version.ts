@@ -7,7 +7,7 @@ import { STANDALONE, STANDALONE_VERSION } from "./standalone.js";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 export const VERSION: string = (() => {
-	// the standalone binary has no package.json beside it: its version was put in when it was built
+	// a standalone build has no package.json beside it: its version was put in when it was built
 	if (STANDALONE_VERSION !== undefined) return STANDALONE_VERSION;
 	try {
 		return JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version ?? "0";

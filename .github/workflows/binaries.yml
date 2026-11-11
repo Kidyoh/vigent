@@ -110,6 +110,8 @@ jobs:
           cd dist-bin
           grep " vigent-${{ matrix.target }}.tar.gz\$" SHA256SUMS | (sha256sum -c - 2>/dev/null || shasum -a 256 -c -)
           tar -xzf "vigent-${{ matrix.target }}.tar.gz"
+          # the small build for machines with Node, where there is one (not Windows, not baseline)
+          if [[ -f "vigent-${{ matrix.target }}-node.tar.gz" ]]; then tar -xzf "vigent-${{ matrix.target }}-node.tar.gz"; fi
 
       # --version, the commands, riftri beside it, an agent in a worktree with no node on PATH, and the installer
       - name: Test the binary
@@ -118,6 +120,14 @@ jobs:
           set -euo pipefail
           exe=""; [[ "${{ matrix.target }}" == windows-* ]] && exe=".exe"
           VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}/vigent$exe" node --test test/standalone.test.mjs
+
+      # the same checks on the one-file build, run by this runner's Node
+      - name: Test the small build
+        if: ${{ !startsWith(matrix.target, 'windows') && !endsWith(matrix.target, '-baseline') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}-node/vigent.mjs" node --test test/standalone.test.mjs
 
   check-musl:
     name: Check ${{ matrix.target }} (Alpine)
@@ -148,6 +158,11 @@ jobs:
             ~/.local/bin/vigent --version
             ~/.local/bin/vigent theme list | grep -q "^tokyonight"
             ~/.vigent/riftri --version
+            # with Node there, install.sh switches to the small build
+            apk add --no-cache nodejs >/dev/null
+            VIGENT_DOWNLOAD_BASE=file:///src/dist-bin sh /src/install.sh 2>&1 | tee /tmp/install.log
+            grep -q "downloading vigent-${{ matrix.target }}-node.tar.gz" /tmp/install.log
+            ~/.local/bin/vigent --version
           '
 
   image:

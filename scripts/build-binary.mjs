@@ -8,10 +8,18 @@
  *   dist-bin/vigent-<target>.tar.gz        both, with the README and LICENSE
  *   dist-bin/SHA256SUMS                    of every archive built so far
  *
+ * and, for machines that have Node 20 or newer, the small build: vigent as one
+ * JavaScript file their Node runs, a few MB with riftri (macOS and Linux)
+ *
+ *   dist-bin/vigent-<target>-node/vigent.mjs
+ *   dist-bin/vigent-<target>-node/riftri
+ *   dist-bin/vigent-<target>-node.tar.gz
+ *
  * usage:
  *   node scripts/build-binary.mjs                 this machine's target
  *   node scripts/build-binary.mjs linux-arm64     one target (Bun cross-compiles)
  *   node scripts/build-binary.mjs --all           every target
+ *   node scripts/build-binary.mjs --no-node       skip the small builds
  *   node scripts/build-binary.mjs --list          the target names
  *
  * Needs Bun (https://bun.sh) and a built dist/ (`npm run build`).
@@ -63,6 +71,53 @@ function riftriFor(pkg, exe) {
 	const tarball = run("npm", ["pack", `${pkg}@${version}`, "--silent"], { cwd: tmp, shell: process.platform === "win32" }).trim().split("\n").pop();
 	run("tar", ["-xzf", tarball], { cwd: tmp });
 	return path.join(tmp, "package", "bin", exe);
+}
+
+/** The targets with a small build: the JavaScript is the same everywhere, riftri isn't. No Windows (it would need a .cmd launcher) and no baseline (that's about the binary's runtime). */
+export function hasNodeBuild(target) {
+	return !target.startsWith("windows") && !target.endsWith("-baseline");
+}
+
+/** vigent as one JavaScript file (cached: every target gets the same one). */
+let bundled;
+function nodeBundle(version) {
+	if (bundled) return bundled;
+	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vigent-bundle-")), "vigent.mjs");
+	run("bun", [
+		"build",
+		path.join(root, "dist", "main.js"),
+		"--target=node",
+		"--format=esm",
+		"--minify",
+		"--define",
+		`VIGENT_STANDALONE_VERSION=${JSON.stringify(version)}`,
+		"--define",
+		'VIGENT_STANDALONE_KIND="node"',
+		"--outfile",
+		file,
+	], { stdio: ["ignore", "ignore", "inherit"] });
+	const text = fs.readFileSync(file, "utf8");
+	if (!text.startsWith("#!")) fs.writeFileSync(file, `#!/usr/bin/env node\n${text}`);
+	fs.chmodSync(file, 0o755);
+	return (bundled = file);
+}
+
+function buildNode(target) {
+	const t = TARGETS[target];
+	const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+	const name = `vigent-${target}-node`;
+	const dir = path.join(out, name);
+	fs.rmSync(dir, { recursive: true, force: true });
+	fs.mkdirSync(dir, { recursive: true });
+	fs.copyFileSync(nodeBundle(version), path.join(dir, "vigent.mjs"));
+	fs.chmodSync(path.join(dir, "vigent.mjs"), 0o755);
+	fs.copyFileSync(riftriFor(t.riftri, "riftri"), path.join(dir, "riftri"));
+	fs.chmodSync(path.join(dir, "riftri"), 0o755);
+	for (const f of ["README.md", "LICENSE"]) fs.copyFileSync(path.join(root, f), path.join(dir, f));
+	const archive = path.join(out, `${name}.tar.gz`);
+	fs.rmSync(archive, { force: true });
+	run("tar", ["-czf", archive, "-C", out, name]);
+	console.log(`${`${target} (node)`.padEnd(20)} vigent ${mb(fs.statSync(path.join(dir, "vigent.mjs")).size).padStart(9)}   archive ${mb(fs.statSync(archive).size).padStart(8)}`);
 }
 
 function build(target) {
@@ -119,7 +174,10 @@ function main(argv) {
 		throw new Error("building the binary needs Bun: https://bun.sh");
 	}
 	fs.mkdirSync(out, { recursive: true });
-	for (const t of targets) build(t);
+	for (const t of targets) {
+		build(t);
+		if (!argv.includes("--no-node") && hasNodeBuild(t)) buildNode(t);
+	}
 	writeSums();
 }
 
