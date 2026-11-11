@@ -27,15 +27,15 @@ function wearing(): string {
  */
 export function SitePicker() {
   const [open, setOpen] = useState(false);
-  const before = useRef("default");
+  const before = useRef(defaultThemeFor(""));
 
-  // arriving on the docs without a pick (also by a link from the home page, which skips the <head> script)
+  // arriving without a pick (also by a link from the home page, which skips the <head> script)
   useEffect(() => {
     if (document.querySelector(".screen")) return;
     try {
       if (localStorage.getItem(STORE)) return;
     } catch {
-      // storage off: still start the docs in their default
+      // storage off: still start in the site's default
     }
     applySiteTheme(defaultThemeFor(location.pathname));
   }, []);

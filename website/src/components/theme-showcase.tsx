@@ -1,7 +1,7 @@
 "use client";
 
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
-import { applySiteTheme, STORE } from "../lib/site-theme";
+import { applySiteTheme, SITE_DEFAULT, STORE } from "../lib/site-theme";
 import { type ThemeColors, THEMES } from "../lib/themes";
 import { ColorschemeFloat, swatch } from "./colorscheme-float";
 
@@ -40,9 +40,9 @@ function vars(t: ThemeColors): CSSProperties {
  * theme further down the page.
  */
 export function ThemeShowcase({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState("default");
+  const [theme, setTheme] = useState(SITE_DEFAULT);
   const [open, setOpen] = useState(false);
-  const before = useRef("default");
+  const before = useRef(SITE_DEFAULT);
   const box = useRef<HTMLDivElement>(null);
   /** where the page was when the picker opened (e.g. the Themes section), to come back to */
   const returnTo = useRef<number | null>(null);
@@ -59,7 +59,7 @@ export function ThemeShowcase({ children }: { children: ReactNode }) {
       const saved = localStorage.getItem(STORE);
       if (saved && THEMES[saved]) setTheme(saved);
     } catch {
-      // storage off: start on default
+      // storage off: start on the site's default
     }
     setReady(true);
   }, []);
