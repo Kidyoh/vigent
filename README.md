@@ -14,6 +14,14 @@ npm install -g @vigent/cli
 
 About 5 MB, most of it [riftri](https://riftri.dev)'s binary for lightweight worktrees. Needs Node.js 20+ and git. The command is `vigent`.
 
+On a machine without Node (a fresh VM, a container), install the standalone binary instead. It needs only git:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/farming-labs/vigent/main/install.sh | sh
+```
+
+That downloads the build for your machine (Linux x64 and arm64, glibc or musl, and macOS) from the latest release, checks it against the release's `SHA256SUMS`, puts `vigent` and `riftri` in `~/.vigent` and links `vigent` into `~/.local/bin`. It's about 50 MB to download and 100 MB on disk, because the JavaScript runtime is inside. `VIGENT_VERSION=0.9.3` installs that version; run it again to update.
+
 ## Quick start
 
 ```bash
@@ -104,4 +112,6 @@ npm test          # build and run the test suite
 npm run demo      # scripted agents
 ```
 
-To release: bump `version` in package.json, merge, and push a matching tag (`git tag v0.4.1 && git push origin v0.4.1`). The Release workflow tests the code and publishes it with the `NPM_TOKEN` secret.
+`npm run build:binary` builds the standalone binary for your machine into `dist-bin/` (it needs [Bun](https://bun.sh)); `node scripts/build-binary.mjs --all` builds every platform. To test one: `VIGENT_BINARY=dist-bin/vigent-linux-x64/vigent node --test test/standalone.test.mjs`.
+
+To release: bump `version` in package.json, merge, and push a matching tag (`git tag v0.4.1 && git push origin v0.4.1`). The Release workflow tests the code and publishes it with the `NPM_TOKEN` secret. The Binaries workflow builds the standalone binaries, checks each on its own platform and attaches them to the GitHub release.

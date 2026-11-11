@@ -15,6 +15,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
+import { bundledBinary, STANDALONE } from "./standalone.js";
 import * as path from "node:path";
 import { onPath } from "./engines.js";
 
@@ -51,13 +52,15 @@ let cachedBinary: { key: string; bin: string | undefined } | undefined;
 
 /**
  * The riftri executable: $RIFTRI_BINARY, the `riftri` npm package (installed
- * with vigent), or `riftri` on PATH. Undefined when there's none.
+ * with vigent) or, for the standalone binary, the `riftri` shipped beside it,
+ * or `riftri` on PATH. Undefined when there's none.
  */
 export function riftriBinary(env: NodeJS.ProcessEnv = process.env): string | undefined {
 	const key = `${env.RIFTRI_BINARY ?? ""}\0${env.PATH ?? ""}`;
 	if (cachedBinary?.key === key) return cachedBinary.bin;
 	let bin: string | undefined;
 	if (env.RIFTRI_BINARY) bin = fs.existsSync(env.RIFTRI_BINARY) ? env.RIFTRI_BINARY : undefined;
+	else if (STANDALONE) bin = bundledBinary("riftri") ?? (onPath("riftri", env) ? "riftri" : undefined);
 	else {
 		try {
 			// the package resolves and verifies the native binary for this platform

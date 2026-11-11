@@ -20,10 +20,11 @@ const PYTHON = (() => {
 export const CLI = path.join(import.meta.dirname, "..", "..", "dist", "cli.js");
 
 export class Tty {
-	constructor(args, { cwd, env, cols = 120, rows = 32 } = {}) {
+	/** `command` is what runs vigent: Node and the built CLI, or a standalone binary. */
+	constructor(args, { cwd, env, cols = 120, rows = 32, command = [process.execPath, CLI] } = {}) {
 		this.term = new Terminal({ cols, rows, allowProposedApi: true });
 		this.output = "";
-		this.child = spawn(PYTHON, ["-I", PTY, String(cols), String(rows), "--", process.execPath, CLI, ...args], {
+		this.child = spawn(PYTHON, ["-I", PTY, String(cols), String(rows), "--", ...command, ...args], {
 			cwd,
 			env,
 			stdio: ["pipe", "pipe", "pipe"],

@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { importTheme } from "./import.js";
+import { selfCommand, STANDALONE } from "./standalone.js";
 import { loadTheme, type Theme, themesDir } from "./theme.js";
 
 export const FOLLOW_EDITORS = ["nvim", "vim"] as const;
@@ -63,7 +64,9 @@ function read(file: string): string | undefined {
 export function refreshFollow(editor: FollowEditor, onChange: (theme: Theme) => void, cli = process.argv[1]): void {
 	const file = followFile(editor);
 	const before = read(file);
-	const child = spawn(process.execPath, [cli, "theme", "import", `--${editor}`, "--as", editor], { stdio: "ignore" });
+	// the standalone binary is the command itself; on Node it's node and the script
+	const self = selfCommand(["theme", "import", `--${editor}`, "--as", editor], STANDALONE, process.execPath, cli);
+	const child = spawn(self.command, self.args, { stdio: "ignore" });
 	child.on("error", () => {});
 	child.on("exit", (code) => {
 		if (code !== 0) return;

@@ -1,0 +1,172 @@
+# Build the standalone vigent binaries (no Node needed), check each on its own
+# platform, and attach them to the GitHub release.
+#
+# Runs on a version tag (with the npm release), by hand from the Actions tab,
+# and on pull requests that touch the build. Only a tag publishes.
+name: Binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/build-binary.mjs
+      - install.sh
+      - src/standalone.ts
+      - test/standalone.test.mjs
+      - .github/workflows/binaries.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build every target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install
+        run: npm ci
+
+      - name: Check the version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "tag $GITHUB_REF_NAME doesn't match package.json version $version" >&2
+            exit 1
+          fi
+
+      # Bun cross-compiles, so one runner builds them all; the sizes are in this step's log
+      - name: Build
+        run: node scripts/build-binary.mjs --all
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            dist-bin/*.tar.gz
+            dist-bin/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  check:
+    name: Check ${{ matrix.target }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-24.04 }
+          - { target: linux-x64-baseline, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: darwin-arm64, os: macos-14 }
+          # no Intel runner: the x64 build runs under Rosetta
+          - { target: darwin-x64, os: macos-14 }
+          # no pty on Windows: the version, the commands and riftri are checked
+          - { target: windows-x64, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # the test's own tools (the terminal emulator, the compiled helpers); the binary under test doesn't use them
+      - name: Install
+        run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-bin
+
+      - name: Unpack
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-bin
+          grep " vigent-${{ matrix.target }}.tar.gz\$" SHA256SUMS | (sha256sum -c - 2>/dev/null || shasum -a 256 -c -)
+          tar -xzf "vigent-${{ matrix.target }}.tar.gz"
+
+      # --version, the commands, riftri beside it, an agent in a worktree with no node on PATH, and install.sh
+      - name: Test the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=""; [[ "${{ matrix.target }}" == windows-* ]] && exe=".exe"
+          VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}/vigent$exe" node --test test/standalone.test.mjs
+
+  check-musl:
+    name: Check ${{ matrix.target }} (Alpine)
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64-musl, os: ubuntu-24.04 }
+          - { target: linux-arm64-musl, os: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-bin
+
+      # a bare Alpine with git: install.sh picks the musl archive by itself, then vigent and riftri run
+      - name: Install and run in Alpine
+        run: |
+          docker run --rm -v "$PWD:/src:ro" alpine:3 sh -euc '
+            apk add --no-cache git libstdc++ libgcc >/dev/null
+            VIGENT_DOWNLOAD_BASE=file:///src/dist-bin sh /src/install.sh 2>&1 | tee /tmp/install.log
+            grep -q "downloading vigent-${{ matrix.target }}.tar.gz" /tmp/install.log
+            ~/.local/bin/vigent --version
+            ~/.local/bin/vigent theme list | grep -q "^tokyonight"
+            ~/.vigent/riftri --version
+          '
+
+  release:
+    name: Attach to the release
+    if: github.ref_type == 'tag'
+    needs: [check, check-musl]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-bin
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist-bin/*.tar.gz dist-bin/SHA256SUMS --clobber
