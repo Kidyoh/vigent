@@ -10,7 +10,7 @@ import { THEMES } from "../lib/themes";
 export const dynamic = "force-static";
 
 export const metadata: Metadata = {
-  title: "vigent — a vim-native orchestrator for coding-agent harnesses",
+  title: "vigent — a vim-native orchestrator for your harnesses",
   description:
     "Run Claude Code, Codex, OpenCode and pi in parallel, each in its own copy-on-write worktree powered by riftri.",
 };
@@ -33,7 +33,7 @@ export default function HomePage() {
             </pre>
           </div>
           <div className="hero-copy">
-            <L className="eyebrow">an orchestrator for coding-agent harnesses</L>
+            <L className="eyebrow">vim native harness orchestrator</L>
             <div className="l">
               <h1 className="t lede">Run every coding agent at once, each in its own worktree.</h1>
             </div>
