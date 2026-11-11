@@ -342,8 +342,30 @@ async function main(): Promise<number | undefined> {
 		.then((engines) => app.setEngines(engines))
 		.catch(() => {});
 
+	/**
+	 * Permissions as they're saved now, read the way startup reads them. Another vigent may have
+	 * changed them since this one started, and saving this one's old copy would undo that.
+	 */
+	const savedPermissions = () => {
+		const saved = loadConfig().config;
+		if (projectFile && fs.existsSync(projectFile)) {
+			const content = fs.readFileSync(projectFile, "utf8");
+			loadConfig(projectFile, { base: saved, trusted: isTrusted(projectFile, content), label: PROJECT_CONFIG });
+		}
+		for (const id of new Set([...Object.keys(config.engines), ...Object.keys(saved.engines)]) as Set<EngineId>) {
+			const now = (config.engines[id] ??= {});
+			for (const k of ["args", "allow", "ask"] as const) {
+				const v = saved.engines[id]?.[k];
+				if (v === undefined) delete now[k];
+				else (now as Record<string, unknown>)[k] = v;
+			}
+		}
+	};
+	app.reloadPermissions = savedPermissions;
+
 	/** "always allow": add the rules to [engines.<id>] allow, here and in config.toml. Returns why it couldn't save. */
 	const alwaysAllow = (engine: Exclude<EngineId, "pi">, rules: string[]): string | undefined => {
+		savedPermissions();
 		const e = (config.engines[engine] ??= {});
 		e.allow = [...new Set([...(e.allow ?? []), ...rules])];
 		const file = configPath();

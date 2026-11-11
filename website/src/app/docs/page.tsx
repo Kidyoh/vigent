@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 const INDEX: [string, [string, string][]][] = [
   ["Start", [["start", "getting started"], ["first", "your first agent"]]],
   ["Harness", [["engines", "engines"], ["worktrees", "worktrees"], ["riftri", "riftri"], ["review", "review & land"]]],
-  ["Use", [["keys", "keys"], ["commands", "commands"], ["model", "model & effort"]]],
+  ["Use", [["keys", "keys"], ["commands", "commands"], ["model", "model & effort"], ["permissions", "permissions"]]],
   ["Make it yours", [["config", "config.toml"], ["themes", "themes & icons"]]],
 ];
 
@@ -32,6 +32,7 @@ const OUTLINE: OutlineSection[] = [
   { id: "keys", tag: "vigent-keys", title: "Keys" },
   { id: "commands", tag: "vigent-commands", title: "Commands" },
   { id: "model", tag: "vigent-model", title: "Model & effort" },
+  { id: "permissions", tag: "vigent-permissions", title: "Permissions" },
   { id: "config", tag: "vigent-config", title: "config.toml" },
   { id: "themes", tag: "vigent-themes", title: "Themes & icons" },
 ];
@@ -276,6 +277,28 @@ export default function DocsPage() {
             <HelpLink>:model</HelpLink> (<K>&lt;Space&gt;M</K>) lists every model by name and version (Claude Fable 5.1, GPT-5.5 Codex…) in one plain list,
             from every engine that's signed in. <HelpLink>:effort</HelpLink> (<K>&lt;Space&gt;R</K>) sets reasoning effort. Both apply from the next prompt and survive a restart. In every
             menu: <K>j</K>/<K>k</K> move, Enter picks, <K>q</K> closes, <K>/</K> searches.
+          </L>
+          <L />
+
+          <Heading id="permissions" title="PERMISSIONS" tag="vigent-permissions" />
+          <L>
+            Agents run headless, so one can't stop to ask before a command it isn't allowed. It refuses it, and vigent shows what was refused and the{" "}
+            <K>:permissions allow</K> line that would permit it.
+          </L>
+          <L>
+            <HelpLink>:permissions</HelpLink> is a panel of what each agent may do without asking: Claude Code's mode, asking when it's refused a tool, and its allow
+            rules; Codex's sandbox and network; Gemini CLI's approval mode; Cursor CLI's <K>--force</K>.
+          </L>
+          <Code>
+            <K>:permissions</K>                        <C>" the panel</C>
+            {"\n"}
+            <K>:permissions allow</K> <S>Bash(cargo:*)</S>   <C>" one more Claude Code rule</C>
+            {"\n"}
+            <K>:permissions remove</K> <S>Bash(cargo:*)</S>  <C>" and away again</C>
+          </Code>
+          <L>
+            Every change is saved to <S>config.toml</S> as you make it, so it stays set after a restart, and every agent uses it from its next prompt. With several
+            vigents open, each change starts from what's saved, so one never undoes another's.
           </L>
           <L />
 

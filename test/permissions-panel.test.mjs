@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,6 +10,7 @@ import { DEFAULT_UI, loadConfig } from "../dist/config.js";
 import { Keymap } from "../dist/keys.js";
 import { codexOption, flagValue, withCodexOption, withFlag, withSwitch } from "../dist/permissions.js";
 import { BUILTIN_THEMES, Painter } from "../dist/theme.js";
+import { Tty } from "./support/terminal.mjs";
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vigent-perms-")));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -117,4 +119,53 @@ test(":permissions allow <rule> / remove <rule>; :settings links to the panel", 
 	const settings = overlays.at(-1);
 	press(settings, "Permissions", "\r");
 	assert.match(strip(overlays.at(-1).render(120).join("\n")), /Ask when it's refused a tool/, "Enter on Permissions opens the panel");
+});
+
+test("two vigents open at once: a permission changed in one isn't undone by the other", { timeout: 60000 }, async () => {
+	const home = path.join(tmp, "two");
+	const repo = (name) => {
+		const dir = path.join(home, name);
+		fs.mkdirSync(dir, { recursive: true });
+		execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+		fs.writeFileSync(path.join(dir, "README.md"), "# x\n");
+		execFileSync("git", ["add", "."], { cwd: dir });
+		execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "init"], { cwd: dir });
+		return dir;
+	};
+	const xdg = path.join(home, "xdg");
+	const env = { ...process.env, XDG_CONFIG_HOME: xdg, XDG_STATE_HOME: path.join(home, "state"), RIFTRI_BINARY: path.join(home, "none"), TERM: "xterm-256color" };
+	const file = path.join(xdg, "vigent", "config.toml");
+	const saved = () => (fs.existsSync(file) ? loadConfig(file).config.engines.claude ?? {} : {});
+	const until = async (ok, what) => {
+		for (const end = Date.now() + 10000; Date.now() < end; ) {
+			if (ok(saved())) return;
+			await new Promise((r) => setTimeout(r, 50));
+		}
+		assert.fail(`config.toml never had ${what}: ${JSON.stringify(saved())}`);
+	};
+	// "old" opened first, so it read the config before "new" changed it
+	const old = new Tty([], { cwd: repo("old"), env, cols: 130, rows: 40 });
+	const now = new Tty([], { cwd: repo("new"), env, cols: 130, rows: 40 });
+	try {
+		await old.waitFor(/NORMAL/);
+		await now.waitFor(/NORMAL/);
+		await now.ex("permissions");
+		await now.waitFor(/Ask when it's refused a tool/);
+		await now.type("j\r"); // ask: on
+		await now.type("j\r"); // allow gh
+		await until((c) => c.ask === true && c.allow?.includes("Bash(gh:*)"), "ask and gh");
+
+		await old.ex("permissions allow Bash(cargo:*)");
+		await until((c) => c.allow?.includes("Bash(cargo:*)"), "cargo");
+		assert.deepEqual(saved(), { allow: ["Bash(gh:*)", "Bash(cargo:*)"], ask: true }, "the other vigent's rule and asking are kept");
+
+		await old.ex("permissions");
+		await old.waitFor(/Allow GitHub CLI \(gh\)\s+on/); // the panel shows what's saved now
+		await old.type("jjjj\r"); // allow npm
+		await until((c) => c.allow?.includes("Bash(npm:*)"), "npm");
+		assert.deepEqual(saved(), { allow: ["Bash(gh:*)", "Bash(cargo:*)", "Bash(npm:*)"], ask: true });
+	} finally {
+		old.kill();
+		now.kill();
+	}
 });

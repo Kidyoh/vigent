@@ -1679,6 +1679,8 @@ export class App implements Component {
 	hooks: Hooks = {};
 	/** [statusline] and [winbar]: what they show */
 	layout: Layout = defaultLayout();
+	/** reads the saved permissions into engineOptions again (set by the CLI; it knows where the config files are) */
+	reloadPermissions: () => void = () => {};
 	/** :trust (set by the CLI; it knows where the project's config is) */
 	trustProject: () => string = () => `no ${PROJECT_CONFIG} in this project`;
 	/** runs a hook (replaced in tests) */
@@ -2438,6 +2440,7 @@ export class App implements Component {
 	execPermissions(arg = "") {
 		const m = /^(allow|remove|unallow|deny)\s+(.+)$/.exec(arg.trim());
 		if (m) {
+			this.reloadPermissions();
 			// several rules may follow; a rule's own spaces stay inside its parentheses: Bash(npm run test:*)
 			const rules = m[2].match(/[^\s(]+(?:\([^)]*\))?/g) ?? [];
 			const allow = new Set(this.engineOptions.claude?.allow ?? []);
@@ -2458,6 +2461,7 @@ export class App implements Component {
 
 	openPermissions() {
 		this.seq.reset();
+		this.reloadPermissions();
 		const onOff = (b: boolean) => (b ? "on" : "off");
 		const cycle = <T,>(values: readonly T[], now: T, dir: 1 | -1) => values[(values.indexOf(now) + dir + values.length) % values.length];
 		const name = (id: EngineId) => {
@@ -2530,6 +2534,11 @@ export class App implements Component {
 				hint: "--force: edits and commands in its worktree (headless Cursor can't ask)",
 			},
 		];
+		// each change starts from what's saved now, so it never undoes one made in another vigent
+		for (const item of items) {
+			const change = item.change;
+			if (change) item.change = (d) => (this.reloadPermissions(), change(d));
+		}
 		let handle: { hide(): void } | undefined;
 		const float = new SettingsFloat(
 			this.painter,
