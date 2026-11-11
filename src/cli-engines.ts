@@ -38,6 +38,13 @@ export type CliEvent =
 	| { type: "error"; message: string }
 	/** tools the CLI's permission settings refused to run (Claude Code's permission_denials) */
 	| { type: "denied"; tools: Denial[] }
+	/**
+	 * The model ended its turn (Claude Code's end_turn), before the CLI exits:
+	 * Claude Code summarizes the turn for a few seconds after the reply.
+	 */
+	| { type: "turn_end" }
+	/** the model started a message, which after turn_end means the turn went on (a Stop hook) */
+	| { type: "turn_start" }
 	| { type: "done"; ok: boolean; error?: string };
 
 /** A tool call the CLI refused because its permission settings don't allow it. */
@@ -136,6 +143,10 @@ export const claudeAdapter: CliAdapter = {
 					} else if (ev.type === "content_block_stop" && thinkingBlock !== undefined && ev.index === thinkingBlock) {
 						thinkingBlock = undefined;
 						out.push({ type: "thinking", active: false });
+					} else if (ev.type === "message_delta" && ev.delta?.stop_reason === "end_turn") {
+						out.push({ type: "turn_end" });
+					} else if (ev.type === "message_start") {
+						out.push({ type: "turn_start" });
 					}
 					break;
 				}
@@ -566,6 +577,8 @@ export class CliSession extends Session {
 	private adapter: CliAdapter;
 	private child?: ChildProcess;
 	private aborted = false;
+	/** a prompt sent while the last run was finishing; it starts once that run exits */
+	private afterExit?: () => void;
 	/** the model the user asked for; undefined = the CLI's own default */
 	requestedModel?: string;
 	/** the next run forks resumeId; cleared when the new conversation reports its id */
@@ -707,6 +720,14 @@ export class CliSession extends Session {
 			});
 			return;
 		}
+		if (this.child) {
+			// the last run is finishing after its reply: two runs at once would both write the conversation
+			this.setState("running");
+			this.afterExit = () => {
+				if (this.state === "running") this.run(text, once);
+			};
+			return;
+		}
 		if (this.forkError) {
 			// never fall back to forking now: the original may have moved on since the split
 			this.fail(`${this.forkError}. Close this window (:q) and split again.`);
@@ -817,6 +838,20 @@ export class CliSession extends Session {
 				case "done":
 					result = ev;
 					break;
+				case "turn_end":
+					// done for you now; the CLI's result (usage, refused tools) still comes when it exits
+					if (this.aborted || this.state !== "running") break;
+					this.setThinking(false);
+					this.refreshStat(0);
+					this.finishing = true;
+					this.setState("idle");
+					break;
+				case "turn_start":
+					// the turn went on after its reply, unless you've sent the next prompt since
+					if (!this.finishing || this.afterExit) break;
+					this.finishing = false;
+					this.setState("running");
+					break;
 			}
 		};
 
@@ -858,6 +893,9 @@ export class CliSession extends Session {
 		child.on("close", (code, signal) => {
 			if (this.child !== child) return; // already failed to start
 			this.child = undefined;
+			this.finishing = false;
+			const next = this.afterExit;
+			this.afterExit = undefined;
 			this.setThinking(false);
 			if (this.adapter.raw) {
 				// the last line may not end with a newline; and no trailing blank lines in the reply
@@ -876,6 +914,8 @@ export class CliSession extends Session {
 			}
 			this.endStreaming();
 			this.refreshStat(0);
+			// a prompt sent while this run was finishing: it goes now, and supersedes what this run left to ask
+			if (next) return next();
 			if (this.aborted) {
 				this.setState("idle");
 				return;

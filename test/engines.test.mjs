@@ -202,6 +202,75 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(fixture("claude-tool.jsonl
 	s.dispose();
 });
 
+/** A stand-in Claude Code that does what the real one does after a reply: summarizes the turn for a while, then reports the result and exits. */
+function tailingClaude(name, { more = false } = {}) {
+	const log = path.join(tmp, `${name}.log`);
+	const bin = fakeBin(path.join(tmp, name), "claude", `
+const fs = require("fs");
+const log = ${JSON.stringify(log)};
+fs.appendFileSync(log, "start " + Date.now() + "\\n");
+const say = (o) => console.log(JSON.stringify(o));
+const reply = (text) => {
+	say({ type: "stream_event", event: { type: "message_start", message: {} } });
+	say({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } });
+	say({ type: "assistant", uuid: "m-" + text, message: { content: [{ type: "text", text }] } });
+	say({ type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "end_turn" } } });
+};
+say({ type: "system", subtype: "init", session_id: "s1", model: "m" });
+reply("ok");
+// a Stop hook can send the turn on after its reply
+if (${more}) setTimeout(() => reply("one more thing"), 300);
+setTimeout(() => {
+	say({ type: "system", subtype: "post_turn_summary", status_category: "completed" });
+	say({ type: "result", subtype: "success", is_error: false, session_id: "s1", usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.01 });
+	fs.appendFileSync(log, "exit " + Date.now() + "\\n");
+}, ${more} ? 600 : 800);`);
+	return { bin, events: () => fs.readFileSync(log, "utf8").trim().split("\n").map((l) => l.split(" ")) };
+}
+
+const until = async (ok) => {
+	while (!ok()) await new Promise((r) => setTimeout(r, 10));
+};
+
+test("Claude Code: the agent is done when its reply ends, not when the CLI exits after summarizing the turn", async () => {
+	const { bin, events } = tailingClaude("tail-bin");
+	const s = new CliSession("t", "claude", undefined, { cwd: tmp, bin });
+	s.send("hi");
+	await settle(s);
+	assert.equal(s.state, "idle");
+	assert.equal(s.items.at(-1).text, "ok");
+	assert.deepEqual(events().map(([k]) => k), ["start"], "done while Claude Code is still summarizing");
+	assert.equal(s.finishing, true);
+	assert.equal(s.tokens, 0, "its usage comes with the result, at the end");
+
+	// a prompt sent now waits for that run to exit, so two runs never share the conversation
+	s.send("next");
+	assert.equal(s.state, "running");
+	await settle(s);
+	const [first, exit, second] = events();
+	assert.deepEqual([first[0], exit[0], second?.[0]], ["start", "exit", "start"]);
+	assert.ok(Number(second[1]) >= Number(exit[1]), "the next run starts after the last one exited");
+	assert.equal(s.tokens, 15, "the first run's usage counted when it exited");
+	await until(() => !s.finishing);
+	assert.equal(s.tokens, 30);
+	assert.equal(s.state, "idle");
+	s.dispose();
+});
+
+test("Claude Code: a turn that goes on after its reply (a Stop hook) is running again until it really ends", async () => {
+	const { bin } = tailingClaude("more-bin", { more: true });
+	const s = new CliSession("t", "claude", undefined, { cwd: tmp, bin });
+	const states = [s.state];
+	s.onChange(() => states.at(-1) !== s.state && states.push(s.state));
+	s.send("hi");
+	await until(() => s.items.some((i) => i.text === "one more thing"));
+	await settle(s);
+	await until(() => !s.finishing);
+	assert.deepEqual(states, ["idle", "running", "idle", "running", "idle"]);
+	assert.deepEqual(s.items.filter((i) => i.kind === "agent").map((i) => i.text), ["ok", "one more thing"]);
+	s.dispose();
+});
+
 test("a CLI agent that fails says why; one that's stopped goes idle", async () => {
 	const dir = path.join(tmp, "fail-bin");
 	const codex = fakeBin(dir, "codex", `

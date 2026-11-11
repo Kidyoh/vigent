@@ -486,6 +486,7 @@ export class App implements Component {
 	/** the terminal window has focus (from focus reporting; assumed until told otherwise) */
 	terminalFocused = true;
 	private lastState = new WeakMap<Session, SessionState>();
+	private lastFinishing = new WeakMap<Session, boolean>();
 	/** where notifications go (replaced in tests) */
 	alert: (bytes: string) => void = (bytes) => this.terminal.write(bytes);
 
@@ -493,7 +494,10 @@ export class App implements Component {
 	private watchState(s: Session) {
 		const before = this.lastState.get(s);
 		this.lastState.set(s, s.state);
-		if (before === "running" && s.state !== "running") this.persist(s); // its usage totals, for after a restart
+		const wasFinishing = this.lastFinishing.get(s);
+		this.lastFinishing.set(s, s.finishing);
+		// its usage totals, for after a restart: again once a run that finished early has exited with them
+		if ((before === "running" && s.state !== "running") || (wasFinishing && !s.finishing)) this.persist(s);
 		if (before === "running" && (s.state === "idle" || s.state === "error" || s.state === "waiting")) this.agentFinishedHook(s);
 		if (before !== "running" || s.state === "running" || s.state === "paused") return;
 		const visible = this.onScreen(s) && this.terminalFocused;

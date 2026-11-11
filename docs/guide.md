@@ -142,6 +142,8 @@ Agents survive a restart: quit vigent, start it again in the same repo, and the 
 
 When an agent finishes, fails or needs you while you're looking at another one (or at another window), vigent rings the bell. In iTerm2, WezTerm, Ghostty and kitty it also sends a desktop notification, inside tmux too. The message line says which agent and the key to open it, and the agent gets a ◆ in the sidebar until you do. Set `notify` in `[ui]` (or `:settings`) to `"bell"`, `"desktop"` or `"off"`.
 
+A Claude Code agent is finished as soon as its reply ends. Claude Code itself keeps running for a few more seconds to summarize the turn, so a prompt you send in that time starts when it exits, and the turn's tokens and cost appear then.
+
 The statusline shows what the agent on screen has used, like `74.8k tok · $0.50`, and `:dash` adds up every agent. `:cost` lists each agent with its engine, tokens and cost, and the total. Costs are what each engine reports: Claude Code prices what it used at API rates even on a subscription, OpenCode prices each step, pi uses its model prices, and Codex reports tokens only. CLI agents keep their totals across restarts.
 
 ## From your phone

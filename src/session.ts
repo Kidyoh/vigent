@@ -116,6 +116,9 @@ export abstract class Session {
 	/** prompts waiting for the agent to finish its current run */
 	queue: string[] = [];
 
+	/** done for you, while its CLI still wraps up after the reply (Claude Code summarizes the turn); usage comes at the end */
+	finishing = false;
+
 	setState(s: SessionState) {
 		if (this.state === "paused" && s === "idle") return; // an aborted run settling while paused
 		this.state = s;
