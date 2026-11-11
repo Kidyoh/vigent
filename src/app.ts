@@ -3991,7 +3991,10 @@ export class App implements Component {
 	private renderWinbar(w: number, active = true): string {
 		const P = this.painter;
 		const name = active ? "WinBar" : "WinBarNC";
-		const bg = P.attr(name).bg ?? P.attr("Normal").bg;
+		const normalBg = P.attr("Normal").bg;
+		// with several windows each bar is a strip of its own, like a window's statusline in nvim, so a split shows where one ends
+		const own = P.attr(name).bg;
+		const bg = this.windows.count > 1 && (!own || own === normalBg) ? (P.attr("CursorLine").bg ?? P.attr("StatusLineNC").bg ?? own ?? normalBg) : (own ?? normalBg);
 		const s = this.focusedSession;
 		const part = (p: WinbarPart): { text: string; group: string } | undefined => {
 			const text = this.winbarPart(p);
@@ -4006,7 +4009,7 @@ export class App implements Component {
 		// with powerline shapes (a Nerd Font), the agent's name sits in a rounded pill
 		const seps = this.style.separators;
 		const pill = active && seps !== "none" && this.ui.icons === "nerd" ? SEPARATOR_GLYPHS[seps] : undefined;
-		const pillBg = P.attr("CursorLine").bg ?? P.attr("Visual").bg ?? bg;
+		const pillBg = [P.attr("CursorLine").bg, P.attr("Visual").bg].find((c) => c && c !== bg) ?? bg;
 		lefts.forEach((x, i) => {
 			if (pill && x.group === "WinBar") {
 				const [toRight, toLeft] = pill;

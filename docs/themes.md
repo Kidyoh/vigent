@@ -280,6 +280,8 @@ JSON works too (`midnight.json` with the same keys), and so does a plain `.vim` 
 
 Standard Neovim groups: `Normal`, `NormalFloat`, `FloatBorder`, `FloatTitle`, `StatusLine`, `StatusLineNC`, `WinBar`, `WinSeparator`, `CursorLine`, `CursorLineNr`, `LineNr`, `EndOfBuffer`, `NonText`, `Comment`, `Title`, `Keyword`, `Function`, `String`, `Search`, `Visual`, `Pmenu`, `PmenuSel`, `ErrorMsg`, `WarningMsg`, `ModeMsg`, `MsgArea`.
 
+With more than one window, each winbar takes `CursorLine`'s background so a split shows where each window starts. A theme that gives `WinBar` (or `WinBarNC`) a background of its own keeps it.
+
 Tree-plugin groups (picked up from imported themes): `NeoTreeNormal`, `NvimTreeNormal`, `NeoTreeIndentMarker`, `NvimTreeIndentMarker`.
 
 vigent's own groups:

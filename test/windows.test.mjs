@@ -439,3 +439,38 @@ test("a split keeps an agent's tabs, carriage returns and cursor codes inside it
 		assert.doesNotMatch(shown.join("\n"), /progress 10%/, "a progress bar shows where it ended up");
 	}
 });
+
+test("in a split every window's bar is a strip of its own, so you can see where each window starts; one window looks as it did", async () => {
+	const P = new Painter(BUILTIN_THEMES.default);
+	const [normal, bar] = [P.attr("Normal").bg, P.attr("CursorLine").bg];
+	assert.notEqual(normal, bar);
+	const barColors = async (app, columns, rows) => {
+		const term = new Terminal({ cols: columns, rows, allowProposedApi: true });
+		const out = app.render(columns);
+		await new Promise((r) => term.write(out.map((l, i) => `\x1b[${i + 1};1H${l}`).join(""), r));
+		const b = term.buffer.active;
+		const bg = (y, x) => "#" + b.getLine(y).getCell(x).getBgColor().toString(16).padStart(6, "0");
+		// a window's bar is the row naming its agent; its color is read at the window's right end, past the name
+		return out
+			.map((l, y) => [strip(l), y])
+			.filter(([l]) => /▸ (alpha|beta)/.test(l))
+			.flatMap(([l, y]) => [...l.matchAll(/▸ (alpha|beta)/g)].map((m) => [m[1], bg(y, Math.min(columns - 1, m.index + 40)), y]));
+	};
+	const one = makeApp(["alpha", "beta"], { rows: 30, columns: 120 });
+	assert.deepEqual(await barColors(one.app, 120, 30), [["alpha", normal, 0]], "one window: the bar is on the window's own background");
+	const stacked = makeApp(["alpha", "beta"], { rows: 30, columns: 120 });
+	stacked.ex("split 2");
+	const bars = await barColors(stacked.app, 120, 30);
+	assert.equal(bars.length, 2);
+	assert.deepEqual(bars.map(([n, c]) => [n, c]), [["alpha", bar], ["beta", bar]], ":split: both bars are strips");
+	assert.ok(bars[1][2] > bars[0][2] + 5, "the second bar is where the lower window starts");
+	const side = makeApp(["alpha", "beta"], { rows: 30, columns: 120 });
+	side.ex("vsplit 2");
+	assert.deepEqual((await barColors(side.app, 120, 30)).map(([n, c]) => [n, c]), [["alpha", bar], ["beta", bar]], ":vsplit too");
+	// a theme that colors its own winbar keeps that color
+	const own = makeApp(["alpha", "beta"], { rows: 30, columns: 120 });
+	const base = BUILTIN_THEMES.default;
+	own.app.painter = new Painter({ ...base, groups: { ...base.groups, WinBar: { ...base.groups.WinBar, bg: "#5f0000" }, WinBarNC: { bg: "#00005f" } } });
+	own.ex("split 2");
+	assert.deepEqual((await barColors(own.app, 120, 30)).map(([n, c]) => [n, c]), [["alpha", "#00005f"], ["beta", "#5f0000"]]);
+});
