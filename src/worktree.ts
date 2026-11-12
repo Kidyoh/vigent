@@ -18,7 +18,7 @@ import { execFile, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import { describeFailure, riftriAdd, riftriBinary, riftriGc, riftriOwnership, riftriRemove, RIFTRI_INSTALL, type WorktreeBackend } from "./riftri.js";
+import { describeFailure, riftriAdd, riftriAddAsync, riftriBinary, riftriGc, riftriOwnership, riftriRemove, RIFTRI_INSTALL, type WorktreeBackend } from "./riftri.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -177,6 +177,41 @@ export function worktreesDir(root: string, config: WorktreeConfig = DEFAULT_WORK
 // ---------------------------------------------------------------------------
 
 export function createWorktree(root: string, agentName: string, config: WorktreeConfig = DEFAULT_WORKTREE): WorktreeInfo {
+	const info = planWorktree(root, agentName, config);
+	try {
+		const backend = config.backend ?? "auto";
+		if (backend !== "git") {
+			if (!riftriBinary()) {
+				if (backend === "riftri") throw new Error(`[worktree] backend is "riftri", but riftri isn't installed: ${RIFTRI_INSTALL}`);
+			} else {
+				const r = riftriAdd(root, info.path!, info.branch, info.base!);
+				if (r.ok) return { ...info, riftri: r.report?.backend ?? "riftri" };
+				// riftri declined (unsupported volume, checkout or environment) and changed nothing: git is safe
+				if (!r.declined || backend === "riftri") throw new Error(`riftri worktree add failed: ${describeFailure(r)}`);
+				info.riftriSkipped = r.message;
+			}
+		}
+		try {
+			git(["worktree", "add", "-b", info.branch, info.path!, info.base!], root);
+		} catch (err) {
+			throw new Error(`git worktree add failed: ${gitError(err)}`);
+		}
+		return info;
+	} finally {
+		planned.delete(info.path!);
+	}
+}
+
+/** Folders picked by planWorktree whose worktree isn't made yet, so two new agents never pick the same one. */
+const planned = new Set<string>();
+/** Worktrees being made, one at a time per repo: git and riftri both write the repo's own records. */
+const making = new Map<string, Promise<unknown>>();
+
+/**
+ * Pick a new agent's branch and folder without making the worktree yet, so the
+ * agent can show up at once; addWorktree makes it.
+ */
+export function planWorktree(root: string, agentName: string, config: WorktreeConfig = DEFAULT_WORKTREE): WorktreeInfo {
 	const base = config.base || currentBranch(root);
 	const wanted = branchName(agentName, config.branch);
 	if (!isValidBranch(wanted, root)) throw new Error(`'${wanted}' is not a valid branch name (check [worktree] branch)`);
@@ -184,32 +219,54 @@ export function createWorktree(root: string, agentName: string, config: Worktree
 	const dir = worktreesDir(root, config);
 	let branch = wanted;
 	let folder = path.join(dir, wanted.replace(/\//g, "-"));
-	for (let n = 2; branchExists(branch, root) || fs.existsSync(folder); n++) {
+	for (let n = 2; planned.has(folder) || branchExists(branch, root) || fs.existsSync(folder); n++) {
 		branch = `${wanted}-${n}`;
 		folder = path.join(dir, branch.replace(/\//g, "-"));
 	}
 
 	fs.mkdirSync(dir, { recursive: true });
 	excludeIfInside(root, dir);
-	const info: WorktreeInfo = { branch, path: folder, base, stat: { files: 0, added: 0, removed: 0 } };
-	const backend = config.backend ?? "auto";
-	if (backend !== "git") {
-		if (!riftriBinary()) {
-			if (backend === "riftri") throw new Error(`[worktree] backend is "riftri", but riftri isn't installed: ${RIFTRI_INSTALL}`);
-		} else {
-			const r = riftriAdd(root, folder, branch, base);
-			if (r.ok) return { ...info, riftri: r.report?.backend ?? "riftri" };
-			// riftri declined (unsupported volume, checkout or environment) and changed nothing: git is safe
-			if (!r.declined || backend === "riftri") throw new Error(`riftri worktree add failed: ${describeFailure(r)}`);
-			info.riftriSkipped = r.message;
+	planned.add(folder);
+	return { branch, path: folder, base, stat: { files: 0, added: 0, removed: 0 } };
+}
+
+/**
+ * Make a planned worktree in the background: riftri when it can (copy-on-write),
+ * else git. Resolves to the worktree with how it was made; rejects with why it
+ * couldn't be, and then nothing was made.
+ */
+export function addWorktree(root: string, info: WorktreeInfo, config: WorktreeConfig = DEFAULT_WORKTREE): Promise<WorktreeInfo> {
+	const folder = info.path!;
+	const run = async (): Promise<WorktreeInfo> => {
+		const backend = config.backend ?? "auto";
+		const made: WorktreeInfo = { ...info };
+		if (backend !== "git") {
+			if (!riftriBinary()) {
+				if (backend === "riftri") throw new Error(`[worktree] backend is "riftri", but riftri isn't installed: ${RIFTRI_INSTALL}`);
+			} else {
+				const r = await riftriAddAsync(root, folder, info.branch, info.base!);
+				if (r.ok) return { ...made, riftri: r.report?.backend ?? "riftri" };
+				if (!r.declined || backend === "riftri") throw new Error(`riftri worktree add failed: ${describeFailure(r)}`);
+				made.riftriSkipped = r.message;
+			}
 		}
-	}
-	try {
-		git(["worktree", "add", "-b", branch, folder, base], root);
-	} catch (err) {
-		throw new Error(`git worktree add failed: ${gitError(err)}`);
-	}
-	return info;
+		try {
+			await execFileAsync("git", ["worktree", "add", "-b", info.branch, folder, info.base!], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+		} catch (err) {
+			throw new Error(`git worktree add failed: ${gitError(err)}`);
+		}
+		return made;
+	};
+	const turn = (making.get(root) ?? Promise.resolve()).then(run, run);
+	const settled = turn.then(
+		() => undefined,
+		() => undefined,
+	);
+	making.set(root, settled);
+	return turn.finally(() => {
+		planned.delete(folder);
+		if (making.get(root) === settled) making.delete(root);
+	});
 }
 
 /** A worktrees folder inside the repo goes in .git/info/exclude (local, never committed) so `git status` stays clean. */

@@ -12,7 +12,7 @@ import { staleBuild, VERSION_TEXT } from "./version.js";
 import { CliSession } from "./cli-engines.js";
 import { CUSTOM_ENGINES, defaultEngine, detectEngines, ENGINE_BINS, ENGINE_NAMES, type EngineId, isEngineId, onPath, piConnected, quickEngines, engineEnv } from "./engines.js";
 import { CONFIG_TEMPLATE, configPath, loadConfig, PROJECT_CONFIG } from "./config.js";
-import { isTrusted, trustFile } from "./trust.js";
+import { executeProjectTrust, isTrusted, trustFile } from "./trust.js";
 import { setTomlValue } from "./config-edit.js";
 import { createDemoSessions } from "./demo.js";
 import { buildKeymap, KEY_MODES } from "./keys.js";
@@ -24,7 +24,8 @@ import { BUILTIN_THEMES, listThemes, loadTheme, Painter, themesDir } from "./the
 import { themeNewTemplate } from "./theme-new.js";
 import {
 	branchName,
-	createWorktree,
+	addWorktree,
+	planWorktree,
 	findWorktree,
 	listWorktrees,
 	removeWorktree,
@@ -382,8 +383,9 @@ async function main(): Promise<number | undefined> {
 
 	/** A pi agent: your pi in RPC mode; its conversation is kept in the worktree's session folder. */
 	const piModel = modelArg && (!engineArg || engineArg === "pi") ? modelArg : (config.engines.pi?.model ?? config.model ?? "default");
-	const piSession = (name: string, m: string, o: { cwd: string; worktree?: WorktreeInfo; sessionDir?: string; effort?: string }) =>
-		new PiSession(name, m, { ...o, extraArgs: config.engines.pi?.args });
+	const piSession = (name: string, m: string, o: { cwd: string; worktree?: WorktreeInfo; sessionDir?: string; effort?: string; after?: Promise<unknown> }) =>
+		// the same object, not a copy: a worktree made in the background fills in sessionDir before pi starts
+		new PiSession(name, m, Object.assign(o, { extraArgs: config.engines.pi?.args }));
 
 	/** A Claude Code / Codex / OpenCode agent; its conversation id is saved so it survives a restart. */
 	const cliSession = (name: string, engine: Exclude<EngineId, "pi">, requested: string | undefined, cwd: string, wt?: WorktreeInfo, resumeId?: string, effort?: string, fork?: { at?: string }) =>
@@ -420,18 +422,13 @@ async function main(): Promise<number | undefined> {
 	app.styleConfig = config.style;
 	app.commands = config.commands;
 	// :trust: let this project's .vigent.toml run its commands, from now on
-	app.trustProject = () => {
-		if (!projectFile || !fs.existsSync(projectFile)) return `no ${PROJECT_CONFIG} in this project`;
-		const content = fs.readFileSync(projectFile, "utf8");
-		trustFile(projectFile, content);
-		const { gated } = loadConfig(projectFile, { trusted: false, label: PROJECT_CONFIG });
-		loadConfig(projectFile, { base: config, trusted: true, label: PROJECT_CONFIG });
-		app.hooks = config.hooks;
-		app.layout = config.layout;
-		app.styleConfig = config.style;
-		app.commands = config.commands;
-		return `trusted ${PROJECT_CONFIG}${gated.length ? `: ${gated.join(", ")} now run` : ""}`;
-	};
+	app.trustProject = () =>
+		executeProjectTrust({
+			app,
+			config,
+			projectFile,
+			reloadPermissions: savedPermissions,
+		});
 	for (const [id, opts] of Object.entries(config.engines)) {
 		if (opts?.model) app.newAgentModel[id as EngineId] = opts.model;
 		if (opts?.effort) app.newAgentEffort[id as EngineId] = opts.effort;
@@ -460,21 +457,28 @@ async function main(): Promise<number | undefined> {
 		// a CLI uses its own default model unless one is asked for
 		const requested = engine === "pi" ? undefined : (perAgent ?? config.engines[engine]?.model ?? (modelArg && engineArg === engine ? modelArg : undefined));
 		const m = engine === "pi" ? (perAgent ?? piModel) : (requested ?? "");
-		const wt = worktree && root ? createWorktree(root, name, config.worktree) : undefined;
-		if (wt?.path) {
-			saveAgentMeta(wt.path, {
-				name,
-				model: m,
-				base: wt.base,
-				createdAt: new Date().toISOString(),
-				...(engine === "pi" ? {} : { engine, ...(requested ? { requestedModel: requested } : {}) }),
-				...(effort ? { effort } : {}),
-			});
-		}
-		const cwd = wt?.path ?? process.cwd();
-		if (engine !== "pi") return cliSession(name, engine, requested, cwd, wt?.path ? wt : undefined, undefined, effort);
-		if (!wt?.path) return piSession(name, m, { cwd, effort });
-		return piSession(name, m, { cwd, worktree: wt, sessionDir: sessionDir(wt.path), effort });
+		// the branch and folder are picked now, so the agent shows up at once; the worktree is made in the background
+		const wt = worktree && root ? planWorktree(root, name, config.worktree) : undefined;
+		const pi: { cwd: string; worktree?: WorktreeInfo; sessionDir?: string; effort?: string; after?: Promise<unknown> } = { cwd: wt?.path ?? process.cwd(), worktree: wt, effort };
+		const setup =
+			wt?.path && root
+				? addWorktree(root, wt, config.worktree).then((made) => {
+						Object.assign(wt, made);
+						saveAgentMeta(wt.path!, {
+							name,
+							model: m,
+							base: wt.base,
+							createdAt: new Date().toISOString(),
+							...(engine === "pi" ? {} : { engine, ...(requested ? { requestedModel: requested } : {}) }),
+							...(effort ? { effort } : {}),
+						});
+						pi.sessionDir = sessionDir(wt.path!);
+					})
+				: undefined;
+		if (setup) pi.after = setup;
+		const s = engine !== "pi" ? cliSession(name, engine, requested, pi.cwd, wt, undefined, effort) : piSession(name, m, pi);
+		if (setup) s.setup = setup;
+		return s;
 	};
 	/** Saved on pi (agents from before vigent recorded engines are too), and pi isn't here. */
 	const stranded = (meta: AgentMeta) => (!meta.engine || !isEngineId(meta.engine) || meta.engine === "pi") && !onPath(PI_BIN);

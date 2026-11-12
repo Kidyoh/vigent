@@ -123,10 +123,10 @@ export function riftriSync<T = any>(args: string[], cwd: string, env: NodeJS.Pro
 }
 
 /** The same, without blocking the UI (doctor and status walk the disk). */
-export function riftriAsync<T = any>(args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env, bin = riftriBinary(env)): Promise<RiftriResult<T>> {
+export function riftriAsync<T = any>(args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env, bin = riftriBinary(env), timeoutMs = 2 * 60 * 1000): Promise<RiftriResult<T>> {
 	if (!bin) return Promise.resolve({ ok: false, exitCode: 127, message: "riftri isn't installed", declined: false });
 	return new Promise((resolve) => {
-		execFile(bin, ["--json-errors", ...args], { cwd, env, maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60 * 1000 }, (err, stdout, stderr) => {
+		execFile(bin, ["--json-errors", ...args], { cwd, env, maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs }, (err, stdout, stderr) => {
 			if (err) return resolve(failure({ ...err, status: (err as any).code, stderr }));
 			try {
 				resolve({ ok: true, report: parseReport(String(stdout)) });
@@ -157,6 +157,11 @@ export interface RiftriAddReport {
 /** `riftri worktree add <folder> -b <branch> <base>` */
 export function riftriAdd(root: string, folder: string, branch: string, base: string, env?: NodeJS.ProcessEnv): RiftriResult<RiftriAddReport> {
 	return riftriSync(["worktree", "add", folder, "-b", branch, base, "--json", "--no-progress"], root, env);
+}
+
+/** The same, without blocking the UI: a big checkout takes seconds to copy. */
+export function riftriAddAsync(root: string, folder: string, branch: string, base: string, env?: NodeJS.ProcessEnv): Promise<RiftriResult<RiftriAddReport>> {
+	return riftriAsync(["worktree", "add", folder, "-b", branch, base, "--json", "--no-progress"], root, env, undefined, 10 * 60 * 1000);
 }
 
 /** The repository's riftri state folder (<common git dir>/riftri), if riftri has ever been used here. */

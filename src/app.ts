@@ -62,7 +62,7 @@ import { renderMarkdown } from "./markdown.js";
 import { findHits, type Hit, nextHit, paintMatches } from "./search.js";
 import { ChoicePicker, type ChoicePickerOptions, PICKER_ICONS, type PickerChoice, ThemePicker } from "./picker.js";
 import { printable } from "./printable.js";
-import { EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
+import { CLAUDE_MODELS, EFFORTS, effortChoicesFor, modelChoices, modelLabel } from "./choices.js";
 import { ICON_SETS, NERD, toolIcon, toolKind } from "./icons.js";
 import { MESSAGE_STYLES, resolveStyle, SEPARATOR_GLYPHS, SEPARATOR_STYLES, SIDEBAR_STYLES, type Style, type StyleSpec, UNICODE_TOOL_ICONS } from "./style.js";
 import { mergeWorktree, openPullRequest } from "./review.js";
@@ -70,7 +70,8 @@ import type { PiSession } from "./pi-session.js";
 import type { Session, SessionState, TranscriptItem } from "./session.js";
 import { type Attr, BUILTIN_THEMES, extractPalette, listThemes, loadTheme, type Painter, RESET, sgr, type Theme, themeFileFor, themesDir } from "./theme.js";
 import { parseHighlightCommand } from "./vimcolors.js";
-import { completeCommandLine } from "./completion.js";
+import { type CompletionSources, completeCommandLine } from "./completion.js";
+import { parseRaceArgs, type Race, type Racer, raceOrder, raceOver, racerLabels, resolveRaceModels } from "./race.js";
 import { HistoryWalk, LineBuffer, LineEditor, remember } from "./line-edit.js";
 import {
 	DEFAULT_WORKTREE,
@@ -276,7 +277,22 @@ class ItemLines {
  * code) runs only for a line that really is too wide.
  */
 function fitWidth(line: string, width: number): string {
-	return visibleWidth(line) <= width ? line : truncateToWidth(line, width);
+	const row = oneRow(line);
+	return visibleWidth(row) <= width ? row : truncateToWidth(row, width);
+}
+
+/** a control character that would move the terminal's cursor; ESC and BEL stay (colors, links, the cursor marker) */
+const CURSOR_MOVER = /[\x00-\x06\x08-\x1a\x1c-\x1f\x7f]/;
+
+/**
+ * A screen row as the terminal must get it: on one row. A newline would start
+ * another row and push every row after it down (the screen then scrolls and
+ * shows rows twice); a tab jumps to a tab stop vigent doesn't count. They
+ * become spaces, and other cursor movers go.
+ */
+function oneRow(line: string): string {
+	if (!CURSOR_MOVER.test(line)) return line;
+	return line.replace(/\r\n|[\n\r\t]/g, " ").replace(/[\x00-\x06\x08-\x1a\x1c-\x1f\x7f]/g, "");
 }
 
 /** vim stops counting somewhere too; this keeps a mistyped number from looping for long */
@@ -523,6 +539,7 @@ export class App implements Component {
 		this.lastState.set(s, s.state);
 		s.onChange(() => {
 			this.watchState(s);
+			this.watchRace(s);
 			this.syncSpinner();
 			this.tui.requestRender();
 		});
@@ -911,7 +928,7 @@ export class App implements Component {
 		if (!w) {
 			const [before, under, rest] = this.cmd.parts;
 			const after = this.cmd.pos < [...this.cmdBuf].length ? under + rest : "";
-			const { base, items } = completeCommandLine(before, { agents: this.sessions.map((x) => x.name), themes: listThemes() });
+			const { base, items } = completeCommandLine(before, this.completionSources(before));
 			if (!items.length) {
 				this.wild = undefined;
 				return;
@@ -929,6 +946,17 @@ export class App implements Component {
 		w.shown = this.cmdBuf;
 	}
 
+	/** What the command line completes from. `:race --models` loads the engines' model lists the first time. */
+	private completionSources(line: string): CompletionSources {
+		const ready = (this.engines ?? []).filter((e) => e.connected).map((e) => e.id);
+		const engines = ready.length ? ready : allEngineIds();
+		const wantsModels = /^\s*race!?\s.*(?:^|\s)(?:--models?|-m)[= ]/.test(line);
+		if (wantsModels) void this.raceModelIndex();
+		const aliases = new Set(CLAUDE_MODELS.map((m) => m.alias));
+		const models = wantsModels && this.loadedModels ? [...new Set(engines.flatMap((e) => this.loadedModels?.get(e) ?? []))].filter((m) => !aliases.has(m)) : [];
+		return { agents: this.sessions.map((x) => x.name), themes: listThemes(), engines, models };
+	}
+
 	/**
 	 * What fits the command line while you type, before any <Tab>: every match, and the
 	 * rest of the first one (what <Tab> puts in) when it starts with what's typed.
@@ -937,7 +965,7 @@ export class App implements Component {
 		if (this.mode !== "COMMAND" || this.lineNormal || !this.cmdBuf.trim() || this.cmd.pos < [...this.cmdBuf].length) return undefined;
 		if (this.wild && this.wild.shown === this.cmdBuf) return undefined; // <Tab> is going through them
 		if (this.typedCompletion?.line !== this.cmdBuf) {
-			const { base, items } = completeCommandLine(this.cmdBuf, { agents: this.sessions.map((x) => x.name), themes: listThemes() });
+			const { base, items } = completeCommandLine(this.cmdBuf, this.completionSources(this.cmdBuf));
 			const typed = this.cmdBuf.slice(base.length);
 			const first = items[0];
 			const rest = first && first.toLowerCase().startsWith(typed.toLowerCase()) ? first.slice(typed.length) : "";
@@ -1578,6 +1606,13 @@ export class App implements Component {
 				this.startAgent(rest || `agent-${this.sessions.length + 1}`, { worktree: cmd === "new", model: modelFlag?.[1], engine: engineFlag?.[1] });
 				return;
 			}
+			case "race":
+				this.execRace(arg);
+				return;
+			case "race!":
+				if (/^pick$/.test(arg)) this.pickRacer(true);
+				else this.setMessage("only  :race! pick  takes a !", "ErrorMsg");
+				return;
 			case "templates":
 			case "template":
 			case "tpl": {
@@ -2190,6 +2225,265 @@ export class App implements Component {
 		return s;
 	}
 
+	// ------------------------------------------------------------------ :race
+
+	/** races started this time (a restart brings the racers back as plain agents) */
+	races: Race[] = [];
+	private nextRaceId = 1;
+	/** what each racer is called in its race: its engine, with the model or a number when that isn't enough */
+	private raceLabel = new WeakMap<Session, string>();
+	/** time, replaced in tests */
+	now: () => number = () => Date.now();
+
+	/** The race an agent is in, without the racers you've killed since. */
+	private raceOf(s: Session | undefined): Race | undefined {
+		for (const r of this.races) r.racers = r.racers.filter((x) => this.sessions.includes(x));
+		this.races = this.races.filter((r) => r.racers.length > 0);
+		return s ? this.races.find((r) => r.racers.includes(s)) : this.races[this.races.length - 1];
+	}
+
+	/** `:race` shows the race, `:race pick` keeps the focused racer, `:race <task>` starts one. */
+	private execRace(arg: string): Promise<void> | void {
+		if (!arg) return this.openRace();
+		if (arg === "pick") return this.pickRacer(false);
+		const parsed = parseRaceArgs(arg);
+		if (parsed.error) return this.setMessage(parsed.error, "ErrorMsg");
+		let prompt = parsed.task;
+		if (parsed.template) {
+			const all = this.allTemplates();
+			const t = all.find((x) => x.name === parsed.template);
+			if (!t) return this.setMessage(`no template '${parsed.template}'${didYouMean(parsed.template, all.map((x) => x.name))} · :templates lists them`, "ErrorMsg");
+			if (needsTask(t) && !parsed.task) return this.setMessage(`template '${t.name}' needs a task: :race <what> -t ${t.name}`, "ErrorMsg");
+			prompt = fillTemplate(t, parsed.task);
+		}
+		if (!prompt) return this.setMessage("usage: :race <task> [--engines claude,codex] [--models claude-opus-5-5,gpt-5.5]  ·  :race shows it  ·  :race pick keeps one", "Comment");
+		const task = parsed.task || parsed.template || "race";
+		const models = parsed.models;
+		if (!models) {
+			this.startRace(task, prompt, parsed.racers);
+			return;
+		}
+		// which engine runs a model comes from the engines' own lists, which take a moment the first time
+		return this.raceModelIndex().then((index) => {
+			const known = new Map<string, string[]>(index);
+			known.set("claude", [...(known.get("claude") ?? []), ...CLAUDE_MODELS.map((m) => m.alias)]);
+			const r = resolveRaceModels(models, known, (engine) => {
+				const info = this.engines?.find((e) => e.id === engine);
+				if (!info || info.connected || info.checking) return undefined;
+				return `${info.name}, which isn't ${info.installed ? "signed in" : "installed"}`;
+			});
+			if ("error" in r) this.setMessage(r.error, "ErrorMsg");
+			else this.startRace(task, prompt, [...(parsed.racers ?? []), ...r.racers]);
+			this.tui.requestRender();
+		});
+	}
+
+	/** Each engine's model ids, for `:race --models`: loaded once, the first time they're needed. */
+	private modelIndex?: Promise<Map<EngineId, string[]>>;
+	private loadedModels?: Map<EngineId, string[]>;
+	private raceModelIndex(): Promise<Map<EngineId, string[]>> {
+		const ids = allEngineIds();
+		this.modelIndex ??= Promise.all(
+			ids.map((e) =>
+				// an engine that isn't installed can't list its models; Claude Code's and Gemini CLI's lists are fixed, so they still say whose a model is
+				(this.engines?.find((x) => x.id === e)?.installed === false && e !== "claude" && e !== "gemini" ? Promise.resolve([]) : this.modelChoices(e)).then(
+					(list) => list.map((c) => c.value).filter((v) => v !== "default"),
+					() => [] as string[],
+				),
+			),
+		).then((lists) => {
+			this.loadedModels = new Map(ids.map((e, i) => [e, lists[i] ?? []]));
+			// what Tab offered before the lists came in was empty
+			this.typedCompletion = undefined;
+			this.tui.requestRender();
+			return this.loadedModels;
+		});
+		return this.modelIndex;
+	}
+
+	/** Start one agent per racer on the same prompt, each in its own worktree. */
+	startRace(task: string, prompt: string, asked?: Racer[]): Race | undefined {
+		// scripted agents have no engine to pick, so --demo races three of them
+		const racers: Racer[] = asked ?? (this.demo ? ["claude", "codex", "gemini"] : (this.engines ?? []).filter((e) => e.connected).map((e) => e.id)).map((engine) => ({ engine }));
+		if (racers.length < 2) {
+			const only = racers[0]?.engine;
+			this.setMessage(
+				only
+					? `only ${ENGINE_NAMES[only as EngineId] ?? only} is signed in: race it against itself with --engines ${only},${only}, or connect another (:checkhealth)`
+					: this.noEngineReady(),
+				"ErrorMsg",
+			);
+			return undefined;
+		}
+		for (const r of racers) {
+			if (!isEngineId(r.engine)) {
+				this.setMessage(`unknown engine '${r.engine}'${didYouMean(r.engine, allEngineIds())} · :checkhealth lists them`, "ErrorMsg");
+				return undefined;
+			}
+		}
+		// racers sharing a folder would overwrite each other's work, so each needs its own worktree
+		if (!this.demo && (!this.workspace.root || !this.workspace.config.enabled)) {
+			const why = this.workspace.root ? "worktrees are off here ([worktree] enabled = false in your config)" : "this folder isn't a git repo";
+			this.setMessage(`a race needs a worktree for each racer, and ${why}`, "ErrorMsg");
+			return undefined;
+		}
+		const labels = racerLabels(racers);
+		const base = agentNameFrom(task);
+		const race: Race = { id: this.nextRaceId++, task, startedAt: this.now(), racers: [], ran: new Set(), finishedAt: new Map(), announced: false };
+		const failed: string[] = [];
+		const first = this.sessions.length;
+		racers.forEach((r, i) => {
+			// a model id like anthropic/claude-opus-5-5 keeps its slash in the race, not in the agent's name and branch
+			const s = this.startAgent(`${base} ${labels[i].replaceAll("/", " ")}`, this.demo && !asked ? {} : { engine: r.engine, model: r.model });
+			if (!s) {
+				failed.push(`${labels[i]}: ${this.message}`);
+				return;
+			}
+			if (!this.demo && !s.worktree) {
+				this.forgetAgent(s);
+				failed.push(`${labels[i]}: it got no worktree of its own`);
+				return;
+			}
+			this.raceLabel.set(s, labels[i]);
+			race.racers.push(s);
+		});
+		if (race.racers.length === 0) return undefined; // startAgent said why
+		this.races.push(race);
+		// every racer starts when the last worktree is made, so the times compare like for like
+		const setups = race.racers.map((s) => s.setup).filter((p) => p !== undefined);
+		const go = () => {
+			race.startedAt = this.now();
+			for (const s of race.racers) if (this.sessions.includes(s)) s.submit(prompt);
+			this.tui.requestRender();
+		};
+		if (setups.length) void Promise.allSettled(setups).then(go);
+		else go();
+		this.focusSession(first);
+		const names = race.racers.map((s) => this.raceLabel.get(s)).join(", ");
+		if (race.racers.length < 2) this.setMessage(`only ${names} could start, so it runs alone · ${failed.join(" · ")}`, "WarningMsg");
+		else this.setMessage(`race: ${names} on '${base}'${failed.length ? ` · not started: ${failed.join(" · ")}` : ""} · :race compares them`, failed.length ? "WarningMsg" : "ModeMsg");
+		return race;
+	}
+
+	/** A racer stopped: note when, and say so once every racer has. */
+	private watchRace(s: Session) {
+		if (this.races.length === 0 || s.state === "paused") return;
+		const race = this.races.find((r) => r.racers.includes(s));
+		if (!race || race.finishedAt.has(s)) return;
+		if (s.state === "running") {
+			race.ran.add(s);
+			return;
+		}
+		// a racer that hasn't started on its prompt yet (its worktree is being set up) hasn't finished; one that couldn't start has
+		if (!race.ran.has(s) && s.state !== "error") return;
+		race.finishedAt.set(s, this.now());
+		if (race.announced || !raceOver(race)) return;
+		race.announced = true;
+		const I = this.icons;
+		const results = raceOrder(race).map((x) => {
+			const st = x.worksIn?.stat;
+			const changes = x.state === "error" ? " failed" : st && (st.added || st.removed) ? ` +${st.added} ${I.minus}${st.removed}` : "";
+			return `${this.raceLabel.get(x)} ${took((race.finishedAt.get(x) ?? race.startedAt) - race.startedAt)}${changes}`;
+		});
+		this.setMessage(`race over: ${results.join(" · ")} · :race compares them`, "ModeMsg");
+		if (!this.terminalFocused || race.racers.some((x) => !this.onScreen(x))) this.alert(alertSequence("vigent: the race is over", this.ui.notify));
+	}
+
+	/** `:race`: the racers side by side, first to finish first; Enter opens one. */
+	openRace() {
+		const race = this.raceOf(this.focusedSession) ?? this.raceOf(undefined);
+		if (!race) {
+			this.setMessage("no race yet (:race <task> runs it on every engine you're signed in to)", "Comment");
+			return;
+		}
+		const I = this.icons;
+		const lines: FloatLine[] = [];
+		const rows: number[] = [];
+		const order = raceOrder(race);
+		const cell = (t: string, w: number) => truncateToWidth(t, w - 1, "…").padEnd(w);
+		const stateGroup = (st: string) => (st === "running" ? "String" : st === "waiting" ? "WarningMsg" : st === "error" ? "ErrorMsg" : "Comment");
+		lines.push([["Comment", "task  "], ["NormalFloat", truncateToWidth(plainPreview(race.task), 96, "…")]]);
+		lines.push([]);
+		lines.push([["Comment", `   ${cell("racer", 26)}${cell("state", 10)}${cell("time", 10)}${cell("changes", 22)}usage`]]);
+		order.forEach((s, i) => {
+			const done = race.finishedAt.get(s);
+			const st = s.worksIn?.stat;
+			const changed = st && (st.added || st.removed || st.files);
+			const glyph = s.state === "running" ? this.spinner() : I.state[s.state];
+			const last = [...s.items].reverse().find((x) => x.kind === "agent");
+			rows.push(lines.length);
+			lines.push([
+				["LineNr", `${done === undefined ? " " : i + 1} `],
+				[stateGroup(s.state), `${glyph}`],
+				["Title", ` ${cell(this.raceLabel.get(s) ?? s.name, 25)}`],
+				[stateGroup(s.state), cell(done === undefined && s.state !== "running" ? "starting" : s.state === "idle" ? "done" : s.state, 10)],
+				[done === undefined ? "Comment" : "NormalFloat", cell(took((done ?? this.now()) - race.startedAt), 10)],
+				...(changed
+					? ([["Added", `+${st.added} `], ["Removed", `${I.minus}${st.removed} `], ["Comment", cell(`${st.files} file${st.files === 1 ? "" : "s"}`, Math.max(1, 22 - `+${st.added} ${I.minus}${st.removed} `.length))]] as [string, string][])
+					: ([["Comment", cell("no changes", 22)]] as [string, string][])),
+				["Comment", s.tokens ? formatUsage(s) : ""],
+			]);
+			lines.push([["NormalFloat", "     "], ["Comment", last ? truncateToWidth(plainPreview(last.text), 96, "…") : "(no reply yet)"]]);
+		});
+		lines.push([]);
+		const running = race.racers.filter((s) => !race.finishedAt.has(s)).length;
+		lines.push([
+			["Comment", running ? `${running} of ${race.racers.length} still running · ` : `${race.racers.length} racers, all done · `],
+			["Comment", "j/k move · Enter open · then :diff, :review · "],
+			["Special", ":race pick"],
+			["Comment", " keeps the one you're on"],
+		]);
+		const focused = this.focusedSession ? order.indexOf(this.focusedSession) : -1;
+		this.openFloat(`Race · ${truncateToWidth(agentNameFrom(race.task), 40, "…")}`, lines, Math.min(112, this.terminal.columns - 4), {
+			selectable: rows,
+			onSelect: (lineIdx) => this.focusSession(this.sessions.indexOf(order[rows.indexOf(lineIdx)])),
+			initial: rows[Math.max(0, focused)],
+		});
+	}
+
+	/** `:race pick`: keep the focused racer; the others go, with their worktrees and branches. */
+	private pickRacer(sure: boolean) {
+		const winner = this.focusedSession;
+		const race = this.raceOf(winner);
+		if (!winner || !race) {
+			this.setMessage(this.raceOf(undefined) ? "this agent isn't in a race: open the racer to keep (:race lists them), then :race pick" : "no race to pick from (:race <task> starts one)", "ErrorMsg");
+			return;
+		}
+		// a loser's forks work in its worktree, so they go with it
+		const losers = this.sessions.filter((s) => s !== winner && (race.racers.includes(s) || (s.forkOf && s.forkOf !== winner && race.racers.includes(s.forkOf))));
+		const drop = () => {
+			const kept: string[] = [];
+			for (const s of losers) {
+				s.abort();
+				s.dispose();
+				this.sessions.splice(this.sessions.indexOf(s), 1);
+				this.dropFromWindows(s);
+				const wt = s.worktree;
+				if (!wt?.path || !this.workspace.root || this.settingUp.has(s)) continue; // one still being made is removed once it is
+				// you said yes to losing their changes, so uncommitted work doesn't stop the removal
+				const r = removeWorktree(this.workspace.root, { path: wt.path, branch: wt.branch, base: wt.base }, true);
+				if (!r.removed) kept.push(`${wt.branch}: ${r.message}`);
+				else if (wt.riftri) this.refreshStorage();
+			}
+			this.races = this.races.filter((r) => r !== race);
+			this.focusIdx = Math.max(0, this.sessions.indexOf(winner));
+			this.altIdx = Math.min(this.altIdx, this.sessions.length - 1);
+			this.server?.sync();
+			const n = losers.length;
+			if (kept.length) this.setMessage(`kept '${winner.name}' · couldn't remove ${kept.join(" · ")}`, "ErrorMsg");
+			else this.setMessage(`kept '${winner.name}' · removed the other ${n === 1 ? "racer" : `${n} racers`} · :merge or :pr lands it`, "WarningMsg");
+			this.tui.requestRender();
+		};
+		if (losers.length === 0) {
+			this.races = this.races.filter((r) => r !== race);
+			this.setMessage(`'${winner.name}' is the only racer left · :merge or :pr lands it`, "Comment");
+			return;
+		}
+		if (sure) return drop();
+		const n = losers.length;
+		this.ask(`keep '${winner.name}' and remove the other ${n === 1 ? "racer" : `${n} racers`}, with their worktrees and changes? (y/n)`, drop);
+	}
+
 	/** `:templates`: pick one; the command line then takes the task. */
 	openTemplatePicker() {
 		const items = this.allTemplates().map((t) => {
@@ -2721,15 +3015,47 @@ export class App implements Component {
 			const s = this.newSession(name, { worktree: withWorktree, model, engine, ...(effort ? { effort } : {}) });
 			this.addSession(s);
 			const wt = s.worktree;
-			if (wt?.riftri) this.refreshStorage();
-			if (wt?.path && this.hooks.worktree_created) this.setUpWorktree(s);
 			const by = s.engine !== "pi" ? ` · ${ENGINE_NAMES[s.engine]}` : "";
-			if (wt?.path) {
-				const how = wt.riftri ? " · lightweight copy" : wt.riftriSkipped ? " · full copy (:checkhealth says why)" : "";
-				this.setMessage(
-					`'${name}'${by} on ${wt.branch} in ${this.shortPath(wt.path)}${wt.base ? ` (from ${wt.base})` : ""}${how}`,
-					wt.riftriSkipped ? "WarningMsg" : "ModeMsg",
+			const made = () => {
+				if (wt?.riftri) this.refreshStorage();
+				if (wt?.path && this.hooks.worktree_created) this.setUpWorktree(s);
+				const how = wt?.riftri ? " · lightweight copy" : wt?.riftriSkipped ? " · full copy (:checkhealth says why)" : "";
+				return {
+					text: `'${name}'${by} on ${wt?.branch} in ${this.shortPath(wt?.path ?? "")}${wt?.base ? ` (from ${wt.base})` : ""}${how}`,
+					hl: wt?.riftriSkipped ? "WarningMsg" : "ModeMsg",
+				};
+			};
+			if (s.setup && wt?.path) {
+				// a big checkout takes seconds to copy: the agent shows up now and its prompts wait for the worktree
+				const making = `'${name}'${by} on ${wt.branch} · making its worktree…`;
+				s.hold("making worktree");
+				this.settingUp.add(s);
+				this.setMessage(making, "Comment");
+				s.setup.then(
+					() => {
+						this.settingUp.delete(s);
+						if (!this.sessions.includes(s)) {
+							// killed while it was being made: nothing ran in it yet, so it goes too
+							if (this.workspace.root) removeWorktree(this.workspace.root, { path: wt.path!, branch: wt.branch, base: wt.base }, true);
+							return;
+						}
+						const m = made();
+						// worktree_created holds it again until the hook has run; without one, its prompts go now
+						if (!(this.hooks.worktree_created)) s.release();
+						if (this.message === making) this.setMessage(m.text, m.hl);
+						this.tui.requestRender();
+					},
+					(err: Error) => {
+						this.settingUp.delete(s);
+						if (!this.sessions.includes(s)) return;
+						this.forgetAgent(s);
+						this.setMessage(`'${name}' couldn't start: ${err.message}`, "ErrorMsg");
+						this.tui.requestRender();
+					},
 				);
+			} else if (wt?.path) {
+				const m = made();
+				this.setMessage(m.text, m.hl);
 			} else if (wt) {
 				this.setMessage(`'${name}'${by} on ${wt.branch}`, "ModeMsg");
 			} else {
@@ -2741,6 +3067,23 @@ export class App implements Component {
 			this.setMessage(String(err?.message ?? err), "ErrorMsg");
 			return undefined;
 		}
+	}
+
+	/** agents whose worktree is still being made */
+	private settingUp = new Set<Session>();
+
+	/** Take an agent out of vigent (it couldn't start): stop it, drop it from windows and races. */
+	private forgetAgent(s: Session) {
+		s.abort();
+		s.dispose();
+		const i = this.sessions.indexOf(s);
+		if (i >= 0) this.sessions.splice(i, 1);
+		if (this.sessions.length === 0) this.sidebarFocused = false;
+		this.focusIdx = Math.max(0, Math.min(this.focusIdx, this.sessions.length - 1));
+		this.altIdx = Math.min(this.altIdx, this.sessions.length - 1);
+		this.dropFromWindows(s);
+		for (const r of this.races) r.racers = r.racers.filter((x) => x !== s);
+		this.server?.sync();
 	}
 
 	/** "no engine is signed in: run claude auth login or codex login, or for pi export ANTHROPIC_API_KEY=… · :checkhealth" */
@@ -3199,6 +3542,10 @@ export class App implements Component {
 		const wt = s.worktree;
 		if (!wt?.path || !this.workspace.root) {
 			this.setMessage(`killed '${s.name}'`, "WarningMsg");
+			return;
+		}
+		if (this.settingUp.has(s)) {
+			this.setMessage(`killed '${s.name}' · its worktree is removed as soon as it's made`, "WarningMsg");
 			return;
 		}
 		if (!removeTree) {
@@ -3918,7 +4265,8 @@ export class App implements Component {
 		}
 		out.push(this.renderWildmenu(width) ?? this.renderStatusline(width));
 		out.push(this.renderCmdline(width));
-		return out.map((l) => fitWidth(l, width));
+		// exactly the terminal's rows, each on one row and no wider than the screen: like vim, nothing ever scrolls
+		return out.slice(-this.terminal.rows).map((l) => fitWidth(l, width));
 	}
 
 	/** A split's windows, side by side or stacked; every line comes back exactly as wide as the node. */
@@ -4654,7 +5002,8 @@ export class App implements Component {
 				}
 				case "tool": {
 					const t = item.tool!;
-					const [name, summary] = [printable(t.name), printable(t.summary)];
+					// one row: a command can span lines (a heredoc, a script), and a newline here would break the screen
+					const [name, summary] = [printable(t.name), printable(t.summary)].map((x) => x.replace(/\s+/g, " ").trim());
 					const fold = t.folded ? I.folded : I.open;
 					const icon = this.toolGlyph(t.name);
 					// under a labeled reply, tool calls line up with its text
@@ -4939,6 +5288,8 @@ function describeRhs(rhs: Rhs[]): string {
 const EX_HELP: [string, string][] = [
 	[":new [task]", "start an agent in its own worktree"],
 	[":new -t <template> <task>", "start one from a template and send it (:templates picks)"],
+	[":race <task> [--engines a,b] [--models x,y]", "the same task on every signed-in engine, or the ones and models you name, a worktree each"],
+	[":race  /  :race pick", "compare the racers / keep the one you're on, remove the rest"],
 	[":kill  /  :kill!", "stop the agent (keep / remove its worktree)"],
 	[":new! [name]", "agent in this checkout, no worktree"],
 	[":diff  /  :diff split", "the agent's changes, unified / side by side (s switches)"],

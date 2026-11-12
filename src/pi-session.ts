@@ -46,6 +46,8 @@ export interface PiSessionOptions {
 	env?: NodeJS.ProcessEnv;
 	/** extra arguments for pi ([engines.pi] args) */
 	extraArgs?: string[];
+	/** pi starts once this settles: the worktree being made, since pi runs in it */
+	after?: Promise<unknown>;
 }
 
 interface Pending {
@@ -75,7 +77,7 @@ export class PiSession extends Session {
 		super(name, model, opts.worktree);
 		this.cwd = opts.cwd;
 		this.effort = opts.effort;
-		this.ready = this.start();
+		this.ready = opts.after ? opts.after.then(() => this.start()) : this.start();
 		this.ready.catch(() => {}); // reported where it's awaited, and in the transcript
 	}
 

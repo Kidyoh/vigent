@@ -60,6 +60,9 @@ export abstract class Session {
 		public worktree?: WorktreeInfo,
 	) {}
 
+	/** its worktree being made in the background; the agent is held until it's there, and rejects with why it couldn't be */
+	setup?: Promise<void>;
+
 	/** the agent this one was forked from by a split; the worktree stays that agent's to save to and remove */
 	forkOf?: Session;
 

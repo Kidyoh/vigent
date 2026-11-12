@@ -90,6 +90,8 @@ Alternate full-screen views (like vim "windows" you toggle into):
 
 ```
 :new <task> [--model id]                spawn an agent in its own worktree (:new! = no worktree)
+:race <task> [--engines a,b] [--models x,y]   the same task on several engines or models, a worktree each
+:race   :race pick                      compare the racers / keep the focused one, remove the rest
 :kill   :kill!    :pause     :resume    stop (keep / remove worktree), hold, continue
 :diff [split]     :merge [--no-squash]  :pr          review and land the work (squash by default)
 :attach <branch>                        reopen an agent in a kept worktree
