@@ -42,13 +42,22 @@ dist-bin/SHA256SUMS                      one "<sha256>  <archive>" line each
 1. In `.github/workflows/binaries.yml`, replace the Build job's steps with the Rust build, leaving `dist-bin/vigent-<target>/vigent` for each target, then run `node scripts/package-binaries.mjs`. The job can become a matrix; the later jobs only need the one `binaries` artifact with the archives and `SHA256SUMS`.
 2. Add the tag trigger (`push: { tags: ["v*"] }`).
 3. Set the repository variable `PUBLISH_BINARIES` to `true`.
-4. Delete `scripts/build-binary.mjs` and `src/standalone.ts` (and its three uses, in `version.ts`, `riftri.ts` and `follow.ts`): they only serve the stand-in.
+4. Delete `scripts/build-binary.mjs`, `src/standalone.ts` (and its three uses, in `version.ts`, `riftri.ts` and `follow.ts`) and `test/standalone-stand-in.test.mjs`: they only serve the stand-in.
 
-`test/standalone.test.mjs` is the check the binary has to pass. It only runs the binary, so it doesn't matter what built it:
+The publish jobs also check that `scripts/build-binary.mjs` is gone, so the stand-in can't be released even if the workflow is started by hand on a tag with `PUBLISH_BINARIES` set.
+
+`test/standalone.test.mjs` is the check the binary has to pass. It only runs the binary and imports nothing from `dist/`, so it doesn't matter what built it:
 
 - `--version` prints `vigent <version in package.json>`, and `--help` and `theme list` work
 - with no `node` on PATH, started through a symlink, in a real git repository with a stand-in `claude`: an agent runs in its own worktree, and `:checkhealth` finds riftri without one on PATH
 - `install.sh` (or `install.ps1`) refuses a download that doesn't match `SHA256SUMS`, installs, and installs again over itself
+
+What that asks of the Rust build, beyond working:
+
+- **the version comes from `package.json`**: read it at build time (or bump `Cargo.toml` with it), since the test compares the two
+- **the same screen text**: the pty test waits for what the TypeScript vigent prints (`● Claude Code  default`, `Enter starts an agent on Claude Code`, `▸ Write`, `│ done`, the `:checkhealth` worktree section)
+- **`vigent worktree remove <branch> --force`**: the test cleans up with it and doesn't check the result, so without it worktrees are left behind quietly
+- **riftri inside**: with `riftri-core` linked in, `:checkhealth` reports riftri as available though no `riftri` file ships
 
 ## The pieces
 
@@ -61,9 +70,9 @@ dist-bin/SHA256SUMS                      one "<sha256>  <archive>" line each
 | `docker/Dockerfile` | the binary with git on debian-slim, for `ghcr.io/farming-labs/vigent` |
 | `.github/workflows/binaries.yml` | builds, checks each target on its own platform (musl in Alpine), builds and runs the image; with publishing on, attaches the archives to the release, pushes the image, commits the formula |
 | `test/standalone.test.mjs` | the checks above, run with `VIGENT_BINARY=<path>` |
-| `scripts/build-binary.mjs`, `src/standalone.ts` | the stand-in build, to delete |
+| `scripts/build-binary.mjs`, `src/standalone.ts`, `test/standalone-stand-in.test.mjs` | the stand-in build and its tests, to delete |
 
-The workflow's jobs, in order: **build** → **check** (Linux x64, x64 baseline, arm64, macOS arm64, macOS x64 under Rosetta, Windows), **check-musl** (Alpine, x64 and arm64) and **image** → **release** → **image-push** and **homebrew**. The last three need a tag and `PUBLISH_BINARIES`.
+The workflow's jobs, in order: **build** → **check** (Linux x64, x64 baseline, arm64, macOS arm64 and macOS x64 under Rosetta on `macos-latest`, Windows), **check-musl** (Alpine, x64 and arm64) and **image** → **release** → **image-push** and **homebrew**. The last three need a tag and `PUBLISH_BINARIES`.
 
 ## How people will install it
 
