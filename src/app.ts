@@ -1408,7 +1408,9 @@ export class App implements Component {
 			}
 			if (text && s) {
 				const waiting = s.submit(text);
-				if (waiting > 0) this.setMessage(`queued: '${s.name}' gets it after the current run (${waiting} waiting)`, "Comment");
+				// a held agent has no current run: it's waiting for its worktree (made in the background, or a setup hook)
+				const after = s.holdReason ? "once its worktree is ready" : "after the current run";
+				if (waiting > 0) this.setMessage(`queued: '${s.name}' gets it ${after} (${waiting} waiting)`, "Comment");
 				this.scrollOffset = 0;
 			}
 		} else if (this.mode === "COMMAND") {

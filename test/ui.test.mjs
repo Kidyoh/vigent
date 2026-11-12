@@ -281,6 +281,19 @@ test(":w saves the transcript as Markdown", () => {
 	}
 });
 
+test("a prompt for an agent whose worktree is still being made waits for the worktree, and says so", async () => {
+	const s = new TestSession("worker", "m");
+	const { app, type } = makeApp({ sessions: [s] });
+	s.hold("making worktree");
+	type("i", ..."first", "\r");
+	assert.deepEqual(s.sent, [], "held until the worktree is there");
+	assert.match(app.message, /queued: 'worker' gets it once its worktree is ready \(1 waiting\)/);
+	assert.doesNotMatch(app.message, /current run/, "nothing is running yet");
+	s.release();
+	await new Promise((r) => setTimeout(r, 5));
+	assert.deepEqual(s.sent, ["first"]);
+});
+
 test("prompts queue while the agent runs; :pause holds them, :resume continues", async () => {
 	const s = new TestSession("worker", "m");
 	const { app, type, ex, screen } = makeApp({ sessions: [s] });
