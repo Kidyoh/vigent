@@ -27,6 +27,7 @@ on:
       - docker/**
       - src/standalone.ts
       - test/standalone.test.mjs
+      - test/standalone-stand-in.test.mjs
       - .github/workflows/binaries.yml
 
 permissions:
@@ -41,6 +42,9 @@ jobs:
     name: Build every target
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      # "true" while the Build job is the Bun stand-in: the publish jobs refuse to run
+      stand_in: ${{ steps.kind.outputs.stand_in }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +75,13 @@ jobs:
       - name: Build and pack
         run: node scripts/build-binary.mjs --all
 
+      # The Rust build drops scripts/build-binary.mjs (docs/binaries.md, step 4), which turns publishing on
+      - name: Which build this is
+        id: kind
+        shell: bash
+        run: |
+          if [[ -f scripts/build-binary.mjs ]]; then echo "stand_in=true" >> "$GITHUB_OUTPUT"; else echo "stand_in=false" >> "$GITHUB_OUTPUT"; fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: binaries
@@ -92,9 +103,10 @@ jobs:
           - { target: linux-x64, os: ubuntu-24.04 }
           - { target: linux-x64-baseline, os: ubuntu-24.04 }
           - { target: linux-arm64, os: ubuntu-24.04-arm }
-          - { target: darwin-arm64, os: macos-14 }
+          # macos-14 jobs never got a runner (queued, then cancelled), so the current image
+          - { target: darwin-arm64, os: macos-latest }
           # no Intel runner: the x64 build runs under Rosetta
-          - { target: darwin-x64, os: macos-14 }
+          - { target: darwin-x64, os: macos-latest }
           # no pty on Windows: the version, the commands, riftri and install.ps1 are checked
           - { target: windows-x64, os: windows-latest }
     steps:
@@ -200,8 +212,9 @@ jobs:
 
   release:
     name: Attach to the release
-    if: github.ref_type == 'tag' && vars.PUBLISH_BINARIES == 'true'
-    needs: [check, check-musl, image]
+    # never the Bun stand-in, even when the workflow is started by hand on a tag with PUBLISH_BINARIES set
+    if: github.ref_type == 'tag' && vars.PUBLISH_BINARIES == 'true' && needs.build.outputs.stand_in != 'true'
+    needs: [build, check, check-musl, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
