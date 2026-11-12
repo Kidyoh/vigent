@@ -18,10 +18,12 @@ const PYTHON = (() => {
 	}
 })();
 export const CLI = path.join(import.meta.dirname, "..", "..", "dist", "cli.js");
+/** VIGENT_TTY_BINARY=<binary> runs every pty test against a standalone binary instead of Node and dist/. */
+const DEFAULT_COMMAND = process.env.VIGENT_TTY_BINARY ? [path.resolve(process.env.VIGENT_TTY_BINARY)] : [process.execPath, CLI];
 
 export class Tty {
 	/** `command` is what runs vigent: Node and the built CLI, or a standalone binary. */
-	constructor(args, { cwd, env, cols = 120, rows = 32, command = [process.execPath, CLI] } = {}) {
+	constructor(args, { cwd, env, cols = 120, rows = 32, command = DEFAULT_COMMAND } = {}) {
 		this.term = new Terminal({ cols, rows, allowProposedApi: true });
 		this.output = "";
 		this.child = spawn(PYTHON, ["-I", PTY, String(cols), String(rows), "--", ...command, ...args], {

@@ -52,6 +52,12 @@ The publish jobs also check that `scripts/build-binary.mjs` is gone, so the stan
 - with no `node` on PATH, started through a symlink, in a real git repository with a stand-in `claude`: an agent runs in its own worktree, and `:checkhealth` finds riftri without one on PATH
 - `install.sh` (or `install.ps1`) refuses a download that doesn't match `SHA256SUMS`, installs, and installs again over itself
 
+The rest of the suite is the parity check: `VIGENT_TTY_BINARY=<binary>` makes every pty test (navigation, config, layout, permissions, worktrees, engines) drive that binary instead of Node and `dist/`, and the Binaries workflow runs the whole suite that way on Linux x64:
+
+```bash
+VIGENT_TTY_BINARY=dist-bin/vigent-linux-x64/vigent VIGENT_BINARY=dist-bin/vigent-linux-x64/vigent node --test test/*.test.mjs
+```
+
 What that asks of the Rust build, beyond working:
 
 - **the version comes from `package.json`**: read it at build time (or bump `Cargo.toml` with it), since the test compares the two

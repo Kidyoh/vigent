@@ -141,6 +141,16 @@ jobs:
           exe=""; [[ "${{ matrix.target }}" == windows-* ]] && exe=".exe"
           VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}/vigent$exe" node --test test/standalone.test.mjs
 
+      # the whole suite with every pty test driving the binary instead of Node: navigation, config,
+      # layout, permissions, worktrees, engines. The parity check the Rust build has to pass too.
+      - name: Every pty test through the binary
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$PWD/dist-bin/vigent-${{ matrix.target }}/vigent"
+          VIGENT_TTY_BINARY="$bin" VIGENT_BINARY="$bin" node --test test/*.test.mjs
+
   check-musl:
     name: Check ${{ matrix.target }} (Alpine)
     needs: build
