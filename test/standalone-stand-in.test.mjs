@@ -1,8 +1,8 @@
 /**
- * The stand-in build's own code (src/standalone.ts): finding the folder the
- * binary is in and running itself again. Only the Bun stand-in uses it; delete
- * this file together with src/standalone.ts once the Rust build replaces it.
- * test/standalone.test.mjs is the check any build has to pass.
+ * The Bun build's own code (src/standalone.ts): finding the folder the binary
+ * is in and running itself again. Only the optional Bun build uses it (the
+ * binary that ships is the Rust one). test/standalone.test.mjs is the check
+ * any build has to pass.
  */
 import assert from "node:assert/strict";
 import * as fs from "node:fs";

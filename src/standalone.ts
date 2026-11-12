@@ -1,8 +1,7 @@
 /**
- * The standalone binary: vigent compiled together with a JavaScript runtime
- * (scripts/build-binary.mjs). It's the stand-in until the Rust port has a
- * binary of its own, and exists so the release pipeline can be checked against
- * something real. There's no package.json or node_modules next to it, so what
+ * The optional Bun build: this TypeScript compiled together with Bun's
+ * runtime (scripts/build-binary-bun.mjs). The binary that ships is the Rust one
+ * (crates/vigent). There's no package.json or node_modules next to it, so what
  * the npm install reads from those is put in when it's built, or sits beside
  * the executable.
  */

@@ -2,26 +2,33 @@
 # platform, and publish them: archives and SHA256SUMS on the GitHub release, the
 # container image on ghcr.io, the Homebrew formula on the default branch.
 #
-# Today the Build job is a stand-in (scripts/build-binary.mjs: the TypeScript
-# with Bun's runtime inside, 85-110 MB), there so that every step after it runs
-# against a real binary. Those binaries aren't for release, so nothing is
-# published and the workflow doesn't run on tags.
+# The binary is the Rust port (crates/vigent, #168): one small file per
+# platform, riftri linked in, built natively on each platform's runner. Run by
+# hand with "bun" ticked, it builds the TypeScript with Bun's runtime inside
+# instead (scripts/build-binary-bun.mjs, 85-110 MB): that build is never
+# published, and it's the one the whole pty suite runs through.
 #
-# When the Rust port (#168) has a build:
-#   1. replace the Build job's steps so they leave dist-bin/vigent-<target>/vigent
-#      (vigent.exe on Windows) for each target, then run scripts/package-binaries.mjs
-#   2. add the tag trigger below:   push: { tags: ["v*"] }
-#   3. set the repository variable PUBLISH_BINARIES to "true"
-# The checks, the installers, the formula and the image stay as they are.
+# Nothing is published yet. To release the Rust binaries with each version:
+#   1. add the tag trigger below:   push: { tags: ["v*"] }
+#   2. set the repository variable PUBLISH_BINARIES to "true"
 name: Binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      bun:
+        description: "Build the TypeScript with Bun's runtime instead of the Rust binary (85-110 MB; never published)"
+        type: boolean
+        default: false
   pull_request:
     paths:
+      - crates/**
       - scripts/build-binary.mjs
+      - scripts/build-binary-bun.mjs
+      - scripts/export-themes.mjs
       - scripts/package-binaries.mjs
       - scripts/homebrew-formula.mjs
+      - src/builtin-themes.ts
       - install.sh
       - install.ps1
       - docker/**
@@ -38,13 +45,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
-    name: Build every target
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    outputs:
-      # "true" while the Build job is the Bun stand-in: the publish jobs refuse to run
-      stand_in: ${{ steps.kind.outputs.stand_in }}
+  rust:
+    name: Rust ${{ matrix.name }}
+    if: ${{ !inputs.bun }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86-64 Rust doesn't need AVX2: the baseline target is the same build
+          - { name: linux-x64, os: ubuntu-24.04, targets: "linux-x64 linux-x64-baseline", triple: x86_64-unknown-linux-gnu, test: true }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, targets: linux-arm64, triple: aarch64-unknown-linux-gnu }
+          - { name: linux-x64-musl, os: ubuntu-24.04, targets: linux-x64-musl, triple: x86_64-unknown-linux-musl }
+          - { name: linux-arm64-musl, os: ubuntu-24.04-arm, targets: linux-arm64-musl, triple: aarch64-unknown-linux-musl }
+          - { name: darwin-arm64, os: macos-latest, targets: darwin-arm64, triple: aarch64-apple-darwin }
+          - { name: darwin-x64, os: macos-latest, targets: darwin-x64, triple: x86_64-apple-darwin }
+          - { name: windows-x64, os: windows-latest, targets: windows-x64, triple: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v4
 
@@ -52,12 +69,54 @@ jobs:
         with:
           node-version: 22
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
+      - name: Rust
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add ${{ matrix.triple }}
 
-      - name: Install
-        run: npm ci
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/vigent
+          key: ${{ matrix.triple }}
+
+      # the crate's own tests, and its themes still the TypeScript ones
+      - name: Test
+        if: matrix.test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          node scripts/export-themes.mjs --check
+          (cd crates/vigent && cargo test --locked)
+
+      - name: Build
+        shell: bash
+        run: node scripts/build-binary.mjs --no-pack ${{ matrix.targets }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-${{ matrix.name }}
+          path: dist-bin/
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Pack every target
+    needs: rust
+    if: ${{ always() && (needs.rust.result == 'success' || (inputs.bun && needs.rust.result == 'skipped')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      # "true" for the Bun build: the publish jobs refuse to run
+      stand_in: ${{ steps.kind.outputs.stand_in }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Check the version
         if: github.ref_type == 'tag'
@@ -70,17 +129,39 @@ jobs:
             exit 1
           fi
 
-      # The stand-in build: Bun cross-compiles every target on one runner, then
-      # scripts/package-binaries.mjs packs them. The sizes are in this step's log.
-      - name: Build and pack
-        run: node scripts/build-binary.mjs --all
+      - uses: actions/download-artifact@v4
+        if: ${{ !inputs.bun }}
+        with:
+          pattern: rust-*
+          path: dist-bin
+          merge-multiple: true
 
-      # The Rust build drops scripts/build-binary.mjs (docs/binaries.md, step 4), which turns publishing on
+      # artifacts don't keep the executable bit; the archives must have it
+      - name: Pack the Rust builds
+        if: ${{ !inputs.bun }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod 755 dist-bin/vigent-*/vigent 2>/dev/null || true
+          node scripts/package-binaries.mjs
+          test "$(ls dist-bin/*.tar.gz | wc -l)" -eq "$(node scripts/package-binaries.mjs --list | wc -l)"
+
+      - uses: oven-sh/setup-bun@v2
+        if: ${{ inputs.bun }}
+        with:
+          bun-version: 1.4.4
+
+      # the Bun build: it cross-compiles every target on this one runner
+      - name: Build and pack with Bun
+        if: ${{ inputs.bun }}
+        run: |
+          npm ci
+          node scripts/build-binary-bun.mjs --all
+
       - name: Which build this is
         id: kind
         shell: bash
-        run: |
-          if [[ -f scripts/build-binary.mjs ]]; then echo "stand_in=true" >> "$GITHUB_OUTPUT"; else echo "stand_in=false" >> "$GITHUB_OUTPUT"; fi
+        run: echo "stand_in=${{ inputs.bun && 'true' || 'false' }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -94,6 +175,8 @@ jobs:
   check:
     name: Check ${{ matrix.target }}
     needs: build
+    # the Bun build skips the rust job; that mustn't skip these
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -142,9 +225,10 @@ jobs:
           VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}/vigent$exe" node --test test/standalone.test.mjs
 
       # the whole suite with every pty test driving the binary instead of Node: navigation, config,
-      # layout, permissions, worktrees, engines. The parity check the Rust build has to pass too.
+      # layout, permissions, worktrees, every engine. The Bun build passes it; it's the Rust port's
+      # finish line (#168, milestone 5), so it runs for the Bun build until then.
       - name: Every pty test through the binary
-        if: matrix.target == 'linux-x64'
+        if: matrix.target == 'linux-x64' && needs.build.outputs.stand_in == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -154,6 +238,8 @@ jobs:
   check-musl:
     name: Check ${{ matrix.target }} (Alpine)
     needs: build
+    # the Bun build skips the rust job; that mustn't skip these
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -185,6 +271,8 @@ jobs:
   image:
     name: Container image
     needs: build
+    # the Bun build skips the rust job; that mustn't skip these
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

@@ -37,7 +37,8 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc && node -e \"require('fs').cpSync('src/vendor', 'dist/vendor', { recursive: true, filter: (f) => !f.endsWith('.d.ts') })\"",
-    "build:binary": "npm run build && node scripts/build-binary.mjs",
+    "build:binary": "node scripts/build-binary.mjs",
+    "build:binary:bun": "npm run build && node scripts/build-binary-bun.mjs",
     "prepare": "npm run build",
     "start": "node dist/cli.js",
     "demo": "node dist/cli.js --demo",

@@ -106,4 +106,4 @@ npm test          # build and run the test suite
 npm run demo      # scripted agents
 ```
 
-To release: bump `version` in package.json, merge, and push a matching tag (`git tag v0.4.1 && git push origin v0.4.1`). The Release workflow tests the code and publishes it with the `NPM_TOKEN` secret. The pipeline for a standalone binary (no Node needed) is in [docs/binaries.md](docs/binaries.md); it publishes nothing until the Rust port has a build.
+To release: bump `version` in package.json, merge, and push a matching tag (`git tag v0.4.1 && git push origin v0.4.1`). The Release workflow tests the code and publishes it with the `NPM_TOKEN` secret. The standalone binary (no Node needed) is the Rust port in `crates/vigent`, 1.5 MB with riftri inside; [docs/binaries.md](docs/binaries.md) has how it's built and checked. Nothing is published yet.
