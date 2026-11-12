@@ -1,18 +1,13 @@
 #!/bin/sh
-# Install the standalone vigent: one binary with its runtime inside, so the
-# machine needs git but no Node.
+# Install the standalone vigent: a binary that needs git on the machine, and no
+# Node.
 #
 #   curl -fsSL https://raw.githubusercontent.com/farming-labs/vigent/main/install.sh | sh
 #
 # It downloads the archive for this machine from the GitHub release, checks it
-# against the release's SHA256SUMS, puts vigent and riftri in ~/.vigent and
-# links `vigent` into ~/.local/bin.
+# against the release's SHA256SUMS, puts it in ~/.vigent and links `vigent`
+# into ~/.local/bin.
 #
-# A machine that already has Node 20 or newer gets the small build instead: the
-# same vigent as one JavaScript file that Node runs, about 2 MB to download
-# where the binary is about 50.
-#
-#   VIGENT_BUILD=binary      the binary, even with Node here (or: node, to insist on the small build)
 #   VIGENT_VERSION=0.9.3     install that version instead of the latest
 #   VIGENT_INSTALL=<dir>     where the files go (default ~/.vigent)
 #   VIGENT_BIN_DIR=<dir>     where the `vigent` link goes (default ~/.local/bin)
@@ -73,30 +68,9 @@ sha256() {
 	fi
 }
 
-# Node 20 or newer on PATH?
-node_ok() {
-	have node && [ "$(node -p 'Number(process.versions.node.split(".")[0]) >= 20' 2>/dev/null || true)" = true ]
-}
-
 have tar || fail "needs tar"
 target="${VIGENT_TARGET:-$(detect_target)}"
-case "${VIGENT_BUILD:-auto}" in
-	binary) build=binary ;;
-	node) node_ok || fail "VIGENT_BUILD=node needs Node 20 or newer on your PATH"; build=node ;;
-	auto) if node_ok; then build=node; else build=binary; fi ;;
-	*) fail "VIGENT_BUILD is binary or node, not '$VIGENT_BUILD'" ;;
-esac
-if [ "$build" = node ]; then
-	# the JavaScript is the same on an older CPU; -baseline is about the binary's runtime
-	name="vigent-${target%-baseline}-node"
-	program="vigent.mjs"
-	other="vigent"
-else
-	name="vigent-$target"
-	program="vigent"
-	other="vigent.mjs"
-fi
-archive="$name.tar.gz"
+archive="vigent-$target.tar.gz"
 if [ -n "${VIGENT_DOWNLOAD_BASE:-}" ]; then base="$VIGENT_DOWNLOAD_BASE"
 elif [ -n "${VIGENT_VERSION:-}" ]; then base="https://github.com/$REPO/releases/download/v${VIGENT_VERSION#v}"
 else base="https://github.com/$REPO/releases/latest/download"
@@ -115,29 +89,26 @@ got="$(sha256 "$tmp/$archive")"
 [ "$want" = "$got" ] || fail "checksum mismatch for $archive (expected $want, got $got); nothing was installed"
 
 tar -xzf "$tmp/$archive" -C "$tmp"
-[ -f "$tmp/$name/$program" ] || fail "$archive has no $program in it"
+[ -f "$tmp/vigent-$target/vigent" ] || fail "$archive has no vigent in it"
 
 mkdir -p "$INSTALL" "$BIN_DIR"
-for f in "$program" riftri README.md LICENSE; do
-	[ -f "$tmp/$name/$f" ] || continue
+for f in vigent riftri README.md LICENSE; do
+	[ -f "$tmp/vigent-$target/$f" ] || continue
 	# over a running vigent too: the old file is replaced, not written into
-	cp "$tmp/$name/$f" "$INSTALL/.$f.new"
+	cp "$tmp/vigent-$target/$f" "$INSTALL/.$f.new"
 	mv -f "$INSTALL/.$f.new" "$INSTALL/$f"
 done
-chmod 755 "$INSTALL/$program"
+chmod 755 "$INSTALL/vigent"
 [ -f "$INSTALL/riftri" ] && chmod 755 "$INSTALL/riftri"
-# the other build, from an earlier install, would only go stale
-rm -f "$INSTALL/$other"
-ln -sf "$INSTALL/$program" "$BIN_DIR/vigent"
+ln -sf "$INSTALL/vigent" "$BIN_DIR/vigent"
 
-if ! version="$("$INSTALL/$program" --version 2>&1)"; then
+if ! version="$("$INSTALL/vigent" --version 2>&1)"; then
 	case "$target" in
 		*musl) fail "installed in $INSTALL, but vigent doesn't start; on Alpine it needs: apk add libstdc++ libgcc" ;;
 		*) fail "installed in $INSTALL, but vigent doesn't start: $version" ;;
 	esac
 fi
 say "installed $version in $INSTALL"
-[ "$build" = node ] && say "this is the small build, run by your Node $(node -p process.versions.node); VIGENT_BUILD=binary installs the one that needs no Node"
 have git || say "note: vigent needs git, and it isn't on your PATH"
 case ":$PATH:" in
 	*":$BIN_DIR:"*) say "run: vigent" ;;

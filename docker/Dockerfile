@@ -4,8 +4,8 @@
 #   FROM ghcr.io/farming-labs/vigent
 #   RUN ...install claude, codex, ...
 #
-# Built by the Binaries workflow, which puts each platform's vigent and riftri
-# in <arch>/ (amd64, arm64) of the build context.
+# Built by the Binaries workflow, which unpacks each platform's archive into
+# <arch>/ (amd64, arm64) of the build context.
 FROM debian:bookworm-slim
 
 ARG TARGETARCH
@@ -16,7 +16,7 @@ RUN apt-get update \
 	# a repository mounted from the host belongs to another user; without this git refuses to open it
 	&& git config --system --add safe.directory '*'
 
-COPY ${TARGETARCH}/vigent ${TARGETARCH}/riftri /opt/vigent/
+COPY ${TARGETARCH}/ /opt/vigent/
 RUN ln -s /opt/vigent/vigent /usr/local/bin/vigent
 
 ENV TERM=xterm-256color

@@ -1,11 +1,11 @@
-# Install the standalone vigent on Windows: one executable with its runtime
-# inside, so the machine needs git but no Node.
+# Install the standalone vigent on Windows: an executable that needs git on the
+# machine, and no Node.
 #
 #   irm https://raw.githubusercontent.com/farming-labs/vigent/main/install.ps1 | iex
 #
 # It downloads the archive from the GitHub release, checks it against the
-# release's SHA256SUMS, puts vigent.exe and riftri.exe in
-# %LOCALAPPDATA%\vigent and adds that folder to your PATH.
+# release's SHA256SUMS, puts vigent.exe in %LOCALAPPDATA%\vigent and adds that
+# folder to your PATH.
 #
 #   $env:VIGENT_VERSION = "0.9.3"      install that version instead of the latest
 #   $env:VIGENT_INSTALL = "<folder>"   where the files go

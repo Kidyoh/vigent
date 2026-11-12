@@ -14,29 +14,6 @@ npm install -g @vigent/cli
 
 About 5 MB, most of it [riftri](https://riftri.dev)'s binary for lightweight worktrees. Needs Node.js 20+ and git. The command is `vigent`.
 
-On a machine without Node (a fresh VM, a container), install the standalone binary instead. It needs only git:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/farming-labs/vigent/main/install.sh | sh
-```
-
-That downloads the build for your machine (Linux x64 and arm64, glibc or musl, and macOS) from the latest release, checks it against the release's `SHA256SUMS`, puts `vigent` and `riftri` in `~/.vigent` and links `vigent` into `~/.local/bin`. It's about 50 MB to download and 100 MB on disk, because the JavaScript runtime is inside. `VIGENT_VERSION=0.9.3` installs that version; run it again to update.
-
-When the machine does have Node 20 or newer, the installer takes the small build instead: the same vigent as one JavaScript file your Node runs, about 2 MB to download with riftri. `VIGENT_BUILD=binary` asks for the binary anyway.
-
-The same binary, other ways:
-
-```bash
-brew tap farming-labs/vigent https://github.com/farming-labs/vigent && brew install vigent   # Homebrew, macOS and Linux
-docker run --rm -it -v "$PWD:/work" ghcr.io/farming-labs/vigent                              # a container with vigent and git
-```
-
-```powershell
-irm https://raw.githubusercontent.com/farming-labs/vigent/main/install.ps1 | iex             # Windows (PowerShell)
-```
-
-The container has no agent CLIs in it: build your own image `FROM ghcr.io/farming-labs/vigent` and add the ones you use. On macOS the binary isn't signed; installed with `curl` or Homebrew it runs as it is, while one downloaded in a browser has to be allowed in System Settings first.
-
 ## Quick start
 
 ```bash
@@ -127,6 +104,4 @@ npm test          # build and run the test suite
 npm run demo      # scripted agents
 ```
 
-`npm run build:binary` builds the standalone binary for your machine into `dist-bin/` (it needs [Bun](https://bun.sh)); `node scripts/build-binary.mjs --all` builds every platform. To test one: `VIGENT_BINARY=dist-bin/vigent-linux-x64/vigent node --test test/standalone.test.mjs`.
-
-To release: bump `version` in package.json, merge, and push a matching tag (`git tag v0.4.1 && git push origin v0.4.1`). The Release workflow tests the code and publishes it with the `NPM_TOKEN` secret. The Binaries workflow builds the standalone binaries, checks each on its own platform, attaches them to the GitHub release, then pushes the container image to ghcr.io and commits the new `Formula/vigent.rb`.
+To release: bump `version` in package.json, merge, and push a matching tag (`git tag v0.4.1 && git push origin v0.4.1`). The Release workflow tests the code and publishes it with the `NPM_TOKEN` secret. The pipeline for a standalone binary (no Node needed) is in [docs/binaries.md](docs/binaries.md); it publishes nothing until the Rust port has a build.

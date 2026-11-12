@@ -1,17 +1,26 @@
 # Build the standalone vigent binaries (no Node needed), check each on its own
-# platform, and attach them to the GitHub release.
+# platform, and publish them: archives and SHA256SUMS on the GitHub release, the
+# container image on ghcr.io, the Homebrew formula on the default branch.
 #
-# Runs on a version tag (with the npm release), by hand from the Actions tab,
-# and on pull requests that touch the build. Only a tag publishes.
+# Today the Build job is a stand-in (scripts/build-binary.mjs: the TypeScript
+# with Bun's runtime inside, 85-110 MB), there so that every step after it runs
+# against a real binary. Those binaries aren't for release, so nothing is
+# published and the workflow doesn't run on tags.
+#
+# When the Rust port (#168) has a build:
+#   1. replace the Build job's steps so they leave dist-bin/vigent-<target>/vigent
+#      (vigent.exe on Windows) for each target, then run scripts/package-binaries.mjs
+#   2. add the tag trigger below:   push: { tags: ["v*"] }
+#   3. set the repository variable PUBLISH_BINARIES to "true"
+# The checks, the installers, the formula and the image stay as they are.
 name: Binaries
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
   pull_request:
     paths:
       - scripts/build-binary.mjs
+      - scripts/package-binaries.mjs
       - scripts/homebrew-formula.mjs
       - install.sh
       - install.ps1
@@ -57,8 +66,9 @@ jobs:
             exit 1
           fi
 
-      # Bun cross-compiles, so one runner builds them all; the sizes are in this step's log
-      - name: Build
+      # The stand-in build: Bun cross-compiles every target on one runner, then
+      # scripts/package-binaries.mjs packs them. The sizes are in this step's log.
+      - name: Build and pack
         run: node scripts/build-binary.mjs --all
 
       - uses: actions/upload-artifact@v4
@@ -110,24 +120,14 @@ jobs:
           cd dist-bin
           grep " vigent-${{ matrix.target }}.tar.gz\$" SHA256SUMS | (sha256sum -c - 2>/dev/null || shasum -a 256 -c -)
           tar -xzf "vigent-${{ matrix.target }}.tar.gz"
-          # the small build for machines with Node, where there is one (not Windows, not baseline)
-          if [[ -f "vigent-${{ matrix.target }}-node.tar.gz" ]]; then tar -xzf "vigent-${{ matrix.target }}-node.tar.gz"; fi
 
-      # --version, the commands, riftri beside it, an agent in a worktree with no node on PATH, and the installer
+      # --version, the commands, an agent in a riftri worktree with no node on PATH, and the installer
       - name: Test the binary
         shell: bash
         run: |
           set -euo pipefail
           exe=""; [[ "${{ matrix.target }}" == windows-* ]] && exe=".exe"
           VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}/vigent$exe" node --test test/standalone.test.mjs
-
-      # the same checks on the one-file build, run by this runner's Node
-      - name: Test the small build
-        if: ${{ !startsWith(matrix.target, 'windows') && !endsWith(matrix.target, '-baseline') }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          VIGENT_BINARY="dist-bin/vigent-${{ matrix.target }}-node/vigent.mjs" node --test test/standalone.test.mjs
 
   check-musl:
     name: Check ${{ matrix.target }} (Alpine)
@@ -157,12 +157,7 @@ jobs:
             grep -q "downloading vigent-${{ matrix.target }}.tar.gz" /tmp/install.log
             ~/.local/bin/vigent --version
             ~/.local/bin/vigent theme list | grep -q "^tokyonight"
-            ~/.vigent/riftri --version
-            # with Node there, install.sh switches to the small build
-            apk add --no-cache nodejs >/dev/null
-            VIGENT_DOWNLOAD_BASE=file:///src/dist-bin sh /src/install.sh 2>&1 | tee /tmp/install.log
-            grep -q "downloading vigent-${{ matrix.target }}-node.tar.gz" /tmp/install.log
-            ~/.local/bin/vigent --version
+            if [ -f ~/.vigent/riftri ]; then ~/.vigent/riftri --version; fi
           '
 
   image:
@@ -178,7 +173,7 @@ jobs:
           name: binaries
           path: dist-bin
 
-      # the build context: each platform's vigent and riftri under Docker's name for it;
+      # the build context: each platform's archive, unpacked under Docker's name for it;
       # amd64 gets the baseline build, so the image also runs on VMs without AVX2
       - name: Lay out the context
         shell: bash
@@ -187,8 +182,8 @@ jobs:
           mkdir -p context/amd64 context/arm64 unpacked
           tar -xzf dist-bin/vigent-linux-x64-baseline.tar.gz -C unpacked
           tar -xzf dist-bin/vigent-linux-arm64.tar.gz -C unpacked
-          cp unpacked/vigent-linux-x64-baseline/{vigent,riftri} context/amd64/
-          cp unpacked/vigent-linux-arm64/{vigent,riftri} context/arm64/
+          cp -R unpacked/vigent-linux-x64-baseline/. context/amd64/
+          cp -R unpacked/vigent-linux-arm64/. context/arm64/
 
       - uses: docker/setup-buildx-action@v3
 
@@ -200,11 +195,12 @@ jobs:
           version="$(node -p 'require("./package.json").version')"
           test "$(docker run --rm vigent:check --version)" = "vigent $version"
           docker run --rm vigent:check theme list | grep -q '^tokyonight'
-          docker run --rm --entrypoint /opt/vigent/riftri vigent:check --version
+          # a riftri shipped as its own file runs too (a build with riftri inside has none)
+          if [[ -f context/amd64/riftri ]]; then docker run --rm --entrypoint /opt/vigent/riftri vigent:check --version; fi
 
   release:
     name: Attach to the release
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && vars.PUBLISH_BINARIES == 'true'
     needs: [check, check-musl, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -229,7 +225,7 @@ jobs:
   # After the release has its archives: a failed push here doesn't hold them back.
   image-push:
     name: Push the container image
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && vars.PUBLISH_BINARIES == 'true'
     needs: release
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -251,8 +247,8 @@ jobs:
           mkdir -p context/amd64 context/arm64 unpacked
           tar -xzf dist-bin/vigent-linux-x64-baseline.tar.gz -C unpacked
           tar -xzf dist-bin/vigent-linux-arm64.tar.gz -C unpacked
-          cp unpacked/vigent-linux-x64-baseline/{vigent,riftri} context/amd64/
-          cp unpacked/vigent-linux-arm64/{vigent,riftri} context/arm64/
+          cp -R unpacked/vigent-linux-x64-baseline/. context/amd64/
+          cp -R unpacked/vigent-linux-arm64/. context/arm64/
 
       # the arm64 image's apt-get runs emulated
       - uses: docker/setup-qemu-action@v3
@@ -275,7 +271,7 @@ jobs:
   # rewritten for each release with the new archives' checksums.
   homebrew:
     name: Update the Homebrew formula
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && vars.PUBLISH_BINARIES == 'true'
     needs: release
     runs-on: ubuntu-24.04
     timeout-minutes: 10

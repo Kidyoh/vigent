@@ -2,7 +2,7 @@
 /**
  * Write the Homebrew formula for a release: the standalone binaries for macOS
  * and Linux, at the version in package.json, with the checksums from
- * dist-bin/SHA256SUMS (what scripts/build-binary.mjs wrote).
+ * dist-bin/SHA256SUMS (what scripts/package-binaries.mjs wrote).
  *
  *   node scripts/homebrew-formula.mjs               print it
  *   node scripts/homebrew-formula.mjs Formula/vigent.rb   write it there
@@ -56,8 +56,9 @@ ${from("linux-x64")}
   end
 
   def install
-    # riftri stays beside vigent, where vigent looks for it
-    libexec.install "vigent", "riftri"
+    libexec.install "vigent"
+    # a riftri shipped as its own file stays beside vigent, where vigent looks for it
+    libexec.install "riftri" if File.exist?("riftri")
     bin.install_symlink libexec/"vigent"
   end
 
