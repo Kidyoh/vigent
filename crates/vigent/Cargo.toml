@@ -1,0 +1,31 @@
+[package]
+name = "vigent"
+description = "vigent as one native binary: a vim-native orchestrator for coding-agent harnesses, each agent in its own riftri worktree"
+# the version that ships is package.json's; build.rs puts it in, so this one isn't used
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "vigent"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
+riftri-core = { git = "https://github.com/assistant-ui/riftri", tag = "v0.6.8" }
+serde_json = "1"
+unicode-width = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
+# small: it's one file people download
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
