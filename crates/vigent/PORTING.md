@@ -45,7 +45,9 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `tui.rs` | `src/tui.ts` | terminal setup, the loop (draw, key/paste, messages, tick), signals | shared |
 | `app.rs` | `src/app.ts` | `App`: modes, sessions, focus, input lines, message line, keymap + sequencer, per-area state; `Msg` | shared (keep small) |
 | `session.rs` | `src/session.ts`, `CliSession` in `src/cli-engines.ts` | one agent: states, queue, hold/release, pause/resume, abort, transcript items, folding engine events | Sessions |
-| `records.rs` | `src/agents.ts` | the agent record in `.git/worktrees/<n>/vigent/agent.json` (stub: format + load/save) | Sessions (Restore) |
+| `records.rs` | `src/agents.ts` | the agent record in `.git/worktrees/<n>/vigent/agent.json`: format (unknown keys kept), load/save/update, `set_detached`, `restorable`, `reopenable` (riftri views repaired first), `iso_now` | Sessions (Restore) |
+| `agents.rs` | `App.startAgent`, `killFocused`, `execAttach`, `execWorktree`, `execQueue`, `watchState`, hooks in `src/app.ts`; `reopen`, `movedOffPi`, `persist`, `forkSession` in `src/cli.ts`; `src/notify.ts`, `src/hooks.ts`, `src/templates.ts` | `impl App` for agents' lives: start (worktree in the background, record saved when it's made), restore at startup, `:kill`/`:attach`/`:worktrees`, queue/pause/resume, forks for splits (`fork_session`, `add_session`), notifications (bell, OSC 9, ◆, focus reporting), `worktree_created`/`agent_finished` hooks, templates, y/n questions (`ask`); its state is `App::agents` | Sessions |
+| `race.rs` | `src/race.ts`, `App.execRace`/`startRace`/`watchRace`/`openRace`/`pickRacer` | `:race` | Sessions |
 | `engines/mod.rs` | `src/cli-engines.ts`, `src/engines.ts`, `src/choices.ts` | `Adapter` trait, `RunOpts`, `Ev`, `EngineInfo`, `KNOWN`, `ADAPTERS` registry, `efforts()`, detection | Engines |
 | `engines/claude.rs` | `claudeAdapter`, `detectClaude` | Claude Code | Engines |
 | `engines/run.rs` | `CliSession.send` | spawns one turn of any adapter, reads its lines on threads | Engines |
@@ -55,7 +57,7 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `config.rs` | `src/config.ts`, `templates.ts`, `commands.ts`, `layout.ts`, `style.ts`, `hooks.ts` (names) | every section into structs, warnings, gating, project layering | Config |
 | `toml.rs` | smol-toml | TOML reader into `Val` (ordered tables) | Config |
 | `theme.rs`, `themes.txt` | `src/theme.ts`, `src/builtin-themes.ts` | built-in themes (themes.txt is written by `scripts/export-themes.mjs`) | Config |
-| `worktree.rs` | `src/worktree.ts`, `src/riftri.ts` | plan/make/list/remove worktrees, diff stat | Sessions |
+| `worktree.rs` | `src/worktree.ts`, `src/riftri.ts` | plan/make/list/find/remove worktrees with `[worktree]` config, `RIFTRI_BINARY`, branch deletion when merged, riftri ownership/backends/views/gc/health, diff stat from the fork point | Sessions |
 | `names.rs` | `agentNameFrom`, `slugify`, `branchName` | names | Sessions |
 | `health.rs` | `App.openHealth` | `:checkhealth` | Engines (engines part), Sessions (worktrees part) |
 | `help.rs` | `App.openHelp` | `:help` | Config |
@@ -134,10 +136,6 @@ area consumes yet (remove your flag from that list when you wire it).
 
 ## Differences to know about
 
-- Rust's `:new <task>` names the agent after the task *and sends it as the
-  first prompt*; TypeScript's `:new <name>` only starts an agent by that name.
-  Sessions area: match TypeScript (check `test/e2e.test.mjs` and the help text).
-- `:new!` (an agent in your checkout) says `E477: No ! allowed` for now.
 - `:theme` with no name shows the theme name; TypeScript opens the picker.
 - Claude detection is the milestone-1 version (version + `auth status`); port
   `detectClaude`'s API-key fallbacks and `detail` strings.
@@ -146,26 +144,47 @@ area consumes yet (remove your flag from that list when you wire it).
 - `:checkhealth`, `:help`, the sidebar and the start screen keep milestone-1
   wording ("next milestone", "milestone 2 adds the rest"); replace it with the
   TypeScript text as engines land.
+- Sessions area, what other areas hook into:
+  - Windows: a split on the same agent calls `app.fork_session(slot)` (an
+    `Err` is the message to show; refuse first while it's running, as
+    `splitWindow` does) and adds the fork with `app.add_session(fork, true)`.
+    `App::on_screen(slot)` is the focused agent only; make it count every
+    window of a split (notifications and races read it). The race and queue
+    lists, `:worktrees` and `:templates` are plain floats until pickers exist
+    (Enter doesn't open/start one yet). `ask()` shows its y/n question as the
+    message; the TypeScript draws it on the command line with a cursor.
+  - Engines: `:model`/`:effort` call `app.persist(slot)` so a restart keeps
+    them. pi agents (no engine on record, or `pi`) reopen with pi's
+    `error: pi isn't installed` and the hint when pi isn't on PATH; a pi
+    session should replace that, read `records::session_dir`, and give `:tree`
+    its rows (src/tree.ts is not ported). `movedOffPi` uses
+    `App::new_agent_engine()`, so "the engine that's signed in" depends on
+    detection of Codex etc. `--engine` sets `config.engine` (what
+    `new_agent_engine` reads); `--engine pi` is accepted so pi's agents reopen.
+  - Serve: `:usage`/`:cost` read `Session::tokens`/`cost` (restored from the
+    record) and `session::total_usage`/`format_usage`.
+- Kill keeps the slot (`Session::closed`): `App::open()` is the list the
+  TypeScript's `sessions` array is; forks name their original by slot (`fork_of`).
 
 ## Pty tests and where they stand
 
-Through the Rust binary, these pass today: all of `standalone`, and the
-non-binary parts of the others. These fail and are the areas' targets:
+Through the Rust binary, these pass today: all of `standalone`,
+`worktree-background`, `reopen-without-pi` 1, 3 and 4, and the non-binary
+parts of the others. These fail and are the areas' targets:
 
 | Test | Area |
 |---|---|
 | custom-engines 7: the real vigent runs a custom engine from config.toml | Engines |
-| e2e 2: first run ... follows up, and comes back after a restart | Sessions (Restore), Engines |
+| e2e 2: first run ... follows up, and comes back after a restart (all but `:effort`/`:model` pass: the restart part does, run without those lines) | Engines |
 | e2e 3: @ in a prompt: pick a file | Windows (line editor, attach picker) |
 | e2e 5: no agent CLI and no API key: the demo starts | Serve (demo) |
-| fork 5: a split forks once | Windows (splits), Sessions (fork) |
+| fork 5: a split forks once (Sessions' `fork_session` is there; needs `<C-w>v` and the Claude parser's `Message` event) | Windows (splits), Engines |
 | layout 6: sidebar on the right and a statusline of your own | Windows |
 | permissions-panel 4: two vigents open at once | Engines |
 | pi-live 1: vigent --engine pi | Engines |
 | project-config 12: untrusted .vigent.toml, :trust, vigent trust | Config |
-| reopen-without-pi 1-4 | Sessions (Restore), Engines |
+| reopen-without-pi 2: moves to the engine that's signed in (1, 3, 4 pass; 2 needs Codex detection) | Engines |
 | user-commands 5: a [commands] shell command from config.toml | Config |
-| worktree-background 2: keys while a worktree is made, the prompt waits | Sessions |
 
 ## Parity checklist
 
@@ -175,7 +194,7 @@ non-binary parts of the others. These fail and are the areas' targets:
 
 - [x] `vigent --version` / `-v` / `version` (no stale-build warning: a binary has no clone) — **Config**
 - [x] `vigent --help` / `-h` (Rust's own text; TypeScript's lists every subcommand) — **Config**
-- [~] `vigent [folder]` — **Sessions**
+- [x] `vigent [folder]` — **Sessions**
 - [x] `--theme <name>` — **Config**
 - [~] `--engine <id>`: unknown engine exits 1 as in TypeScript; a known engine this build can't run exits 1 too; `claude` runs — **Engines**
 - [ ] `--model <id>` — **Engines**
@@ -185,15 +204,15 @@ non-binary parts of the others. These fail and are the areas' targets:
 - [ ] `vigent theme path` — **Config**
 - [ ] `vigent theme new <name> [--from <theme>] [--palette] [--transparent|--no-transparent]` — **Config**
 - [ ] `vigent theme import [name|file] [--as <name>] [--vim|--nvim] [--light|--dark] [--clean]` — **Config**
-- [x] `vigent worktree list` (`worktrees`, `wt`) — **Sessions**
-- [x] `vigent worktree remove|rm <branch> [--force]` — **Sessions**
-- [ ] `vigent worktree prune` — **Sessions**
-- [ ] `vigent worktree gc` — **Sessions**
+- [x] `vigent worktree list` (`worktrees`, `wt`; backend names, detached worktrees) — **Sessions**
+- [x] `vigent worktree remove|rm <branch> [--force]` (finds by branch, folder, path or agent name; deletes a merged branch) — **Sessions**
+- [x] `vigent worktree prune` — **Sessions**
+- [x] `vigent worktree gc` — **Sessions**
 - [ ] `vigent config init` (writes `CONFIG_TEMPLATE`) — **Config**
 - [ ] `vigent config check` — **Config**
 - [ ] `vigent trust` — **Config**
 - [~] startup: config + project config + keymap warnings on the message line (`app.notify`) — **Config**
-- [ ] startup: reopen agents whose worktrees remain (`reopenableAgents`, riftri views first), engine fallback when pi is gone — **Sessions**
+- [x] startup: reopen agents whose worktrees remain (`reopenableAgents`, riftri views first), engine fallback when pi is gone (picks what `new_agent_engine` says: Codex etc. need Engines' detection) — **Sessions**
 - [ ] startup: `theme = "nvim"|"vim"` follows your editor (`src/follow.ts`) — **Config**
 
 ### Ex commands (`App.exec` in `src/app.ts`)
@@ -209,15 +228,15 @@ Core / windows and buffers:
 - [ ] `:marks`, `:jumps`, `:his` `:history` — **Windows**
 
 Sessions:
-- [~] `:new <task>`, `:new!`, `--model`, `--engine`/`-e`, `--template`/`-t` — **Sessions**
-- [~] `:kill` `:kill!` `:bdelete` `:bd` — **Sessions**
-- [ ] `:queue [prompt]` — **Sessions**
-- [ ] `:pause`, `:resume` (session.rs has pause/resume/hold/release) — **Sessions**
-- [ ] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` — **Sessions**
-- [ ] `:templates` `:template` `:tpl [name]` — **Sessions**
-- [ ] `:tree` (and fork from a point) — **Sessions**
-- [ ] `:worktrees` `:worktree` `:wt`, `:worktree remove[!] <branch>` — **Sessions**
-- [ ] `:attach <branch>` — **Sessions**
+- [x] `:new <name>`, `:new!`, `--model`, `--engine`/`-e`, `--template`/`-t` — **Sessions**
+- [x] `:kill` `:kill!` `:bdelete` `:bd` — **Sessions**
+- [x] `:queue [prompt]` (the list is a float, not a picker) — **Sessions**
+- [x] `:pause`, `:resume` — **Sessions**
+- [~] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` (`:race` is a float: no Enter to open a racer; Tab completion is Windows'; `--models` reads `Adapter::models`) — **Sessions**
+- [~] `:templates` `:template` `:tpl [name]` (no name: a float listing them, not a picker) — **Sessions**
+- [~] `:tree` (and fork from a point): what CLI agents say; the tree itself is pi's (src/tree.ts, with the pi session) — **Sessions** with **Engines**
+- [x] `:worktrees` `:worktree` `:wt`, `:worktree remove[!] <branch>` — **Sessions**
+- [x] `:attach <branch>` — **Sessions**
 
 Engines:
 - [~] `:checkhealth` `:che` `:engines` (Rust also keeps `:health`) — **Engines**
@@ -258,17 +277,17 @@ Normal mode:
 - [ ] `/` mode.search, `?` mode.search_back, `n` `N`, `<Esc>` search.clear — **Windows**
 - [ ] `v` `V` mode.visual and all of VISUAL (`j k <C-d> <C-u> <C-f> <C-b> H M L gg G y ib o zz zt zb <Esc> v V`) — **Windows**
 - [x] `j` `k` `<Down>` `<Up>` `<C-e>` `<C-y>` `<C-n>` `<C-p>` `<C-d>` `<C-u>` `<C-f>` `<C-b>` `<PageDown>` `<PageUp>` `gg` `G` — **Windows**
-- [x] `]s` `[s` `gt` `gT`; [ ] `<C-^>` session.alternate; [x] `<leader>1`…`<leader>9` — **Sessions**
+- [x] `]s` `[s` `gt` `gT`; [x] `<C-^>` session.alternate; [x] `<leader>1`…`<leader>9` — **Sessions**
 - [ ] counts (`3gt`, `5j`, `<C-w>` with a count) — **Windows**
 - [ ] `za` `zR` `zM` `zr` `zm` folds — **Windows**
 - [ ] `{` `}` message.prev/next, `zz` `zt` `zb`, `<C-o>` `<Tab>` jumps, `<C-g>`, `gv` — **Windows**
 - [ ] `yy` yank.reply, `yib` yank.block (OSC 52 clipboard, `src/clipboard.ts`) — **Windows**
-- [ ] `dd` session.kill (asks first: CONFIRM) — **Sessions**
+- [x] `dd` session.kill (asks first) — **Sessions**
 - [x] `<C-c>` session.abort — **Sessions**
 - [ ] `<C-h>` `<BS>` `<C-l>` `<C-j>` `<C-k>`, all `<C-w>…` window keys, `<leader>|` `<leader>-` — **Windows**
 - [ ] `<leader>e` sidebar.focus and the sidebar's own keys (j k Enter Esc l o d a p w …) — **Windows**
 - [ ] `<leader>n` `:new `, `<leader>q` `:queue ` (open the command line: works), `<leader>d` `:diff`, `<leader>m` `:merge`, `<leader>p` `:pr`, `<leader>D` `:dash`, `<leader>s` `:settings`, `<leader>r` `:review`, `<leader>T` `:templates`, `<leader>M` `:model`, `<leader>R` `:effort`, `<leader>E` `:engine` — each command's area
-- [ ] `<leader>t` theme.picker — **Config**; `<leader>u` session.tree — **Sessions**
+- [ ] `<leader>t` theme.picker — **Config**; [~] `<leader>u` session.tree (as `:tree`) — **Sessions**
 - [x] `ZZ` `ZQ` app.quit / app.quit_force, `q` app.quit_hint — core
 - [~] start screen keys: [x] `i` `n` `c` `?` `q`; [ ] `T` `t` `s` `m` `e` `E` — each area
 - [ ] which-key hint after `<leader>` (`[ui] whichkey`) — **Windows**
@@ -290,14 +309,14 @@ below means it's also *used*.
 - [ ] `model` (pi's model) — **Engines**
 - [ ] `engine` (`auto`, a built-in, or a custom one) — **Engines**
 - [x] `leader` / `mapleader` — **Config**
-- [ ] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `termguicolors`, `transparent`, `whichkey` — **Windows** (`[x]` `timeoutlen`); `notify` — **Serve**
+- [ ] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `termguicolors`, `transparent`, `whichkey` — **Windows** (`[x]` `timeoutlen`); [x] `notify` — **Sessions**
 - [ ] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow`, `ask` — **Engines**
 - [ ] `[engines.<id>]` with `command`: `name`, `output`, `model_args`, `models`, `resume_args` — **Engines**
 - [x] `[keys]`, `[keys.normal|insert|visual|command]` — **Config**
 - [ ] `[highlights]` (tables, `:hi` strings, links) — **Config**
-- [ ] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
-- [ ] `[templates.<name>]` `prompt`, `description`, `engine`, `model`, `effort`, `worktree` (+ built-ins fix, test, review, explain) — **Sessions**
-- [ ] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions**; `before_merge` — **Review**
+- [x] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
+- [x] `[templates.<name>]` `prompt`, `description`, `engine`, `model`, `effort`, `worktree` (+ built-ins fix, test, review, explain) — **Sessions**
+- [x] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions** (`agents::run_hook`); [ ] `before_merge` — **Review**
 - [ ] `[statusline]` / `[winbar]` `left`, `right` — **Windows**
 - [ ] `[commands]` — **Config**
 - [ ] `[style]` `sidebar`, `messages`, `tool_icons`, `separators`, `user_label`, `[style.icons]`, `[style.nerd_icons]` — **Windows**
@@ -317,21 +336,21 @@ below means it's also *used*.
 - [ ] `defaultEngine` (auto: first signed-in CLI, else pi with a key) — **Engines**
 - [ ] model and effort choices (`src/choices.ts`) — **Engines**
 - [ ] Claude Code permission denials: ask to allow once/always, retry (`askToAllow`), `:permissions` panel and its file — **Engines**
-- [ ] fork a conversation (`--fork-session`, `--resume-session-at`) — **Sessions** with **Engines**
+- [~] fork a conversation (`--fork-session`, `--resume-session-at`): `App::fork_session`, `last_claude_message`, fork runs once then keeps its own id; the split is **Windows**', the Claude `Message` event **Engines**' — **Sessions** with **Engines**
 
 ### Sessions, Review, Windows, Serve features beyond commands and keys
 
 - [x] an agent per worktree (riftri, git fallback), made in the background; prompts wait — **Sessions**
 - [x] queue while running, drain after the CLI exits — **Sessions**
-- [x] waiting state when an agent finishes while you look elsewhere — **Sessions**
-- [ ] agent records saved and reopened (`records.rs` has the format) — **Sessions**
-- [ ] `:kill` marks the record detached; `:attach` reopens — **Sessions**
-- [ ] races (`src/race.ts`) — **Sessions**
-- [ ] conversation tree (`src/tree.ts`) — **Sessions**
-- [ ] riftri storage health in `:checkhealth` (`riftriHealth`) — **Sessions**
+- [x] an agent that finishes while you look elsewhere is unread (◆) until you open it; `waiting` is "needs you", as in TypeScript — **Sessions**
+- [x] agent records saved (made, conversation id, totals and settings at the end of each run) and reopened; usage totals survive a restart — **Sessions**
+- [x] `:kill` marks the record detached; `:attach` reopens — **Sessions**
+- [x] races (`src/race.ts`): racers start when every worktree is made, the race-over message ranks them, the bell for unseen ones — **Sessions**
+- [ ] conversation tree (`src/tree.ts`): pi's, waits for the pi session — **Sessions** with **Engines**
+- [x] riftri storage health in `:checkhealth` (`riftriHealth`) and the `:worktrees` footer — **Sessions**
 - [ ] diff view, hunk review, merge, PR, transcript export — **Review**
 - [ ] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`), icons (`src/icons.ts`), styles (`src/style.ts`), pickers (`src/picker.ts`), confirm prompts — **Windows**
-- [ ] desktop notification / bell when an agent finishes elsewhere, focus reporting (`src/notify.ts`) — **Serve**
+- [x] desktop notification / bell when an agent finishes elsewhere, focus reporting, `[ui] notify` (`src/notify.ts`, in agents.rs) — **Sessions**
 - [ ] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`) — **Serve**
 - [ ] demo sessions (`src/demo.ts`, `DemoSession`) — **Serve**
 - [ ] usage float (`:usage`) — **Serve**
