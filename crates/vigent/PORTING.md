@@ -34,7 +34,10 @@ Size matters: std over crates, no async runtime, no HTTP framework. The
 release profile is size-tuned. After the foundation the binary is 1,797,880
 bytes (1.5 MB before; the config loader, the keymap and a hand-written TOML
 reader account for the rest. `toml_edit` would have added ~170 KB, and
-`src/config-edit.ts` edits line by line anyway).
+`src/config-edit.ts` edits line by line anyway). The Windows area (splits,
+line editor, search, VISUAL, markdown, pickers, which-key, the TypeScript's
+screen layout) takes it to 2,199,752 bytes; its only new dependency is
+`libc` (already linked, for the statusline clock's local time).
 
 ## Module map
 
