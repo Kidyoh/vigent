@@ -112,6 +112,8 @@ pub struct Session {
     pub pi: Option<Box<engines::pi::Pi>>,
     /// tools the CLI refused, to ask you about ([engines.claude] ask)
     pub ask: Option<engines::permissions::Ask>,
+    /// each tool call's output, by its id (shown when its fold is open: za, zR)
+    pub tool_output: std::collections::HashMap<String, String>,
 }
 
 /// 74800 -> "74.8k tok" (src/app.ts formatTokens)
@@ -223,6 +225,7 @@ impl Session {
             launch: Default::default(),
             pi: None,
             ask: None,
+            tool_output: Default::default(),
         }
     }
 
@@ -451,7 +454,9 @@ impl Session {
                         None => self.items.push(Item::Tool { id, name, summary }),
                     }
                 }
-                Ev::ToolResult { .. } => {}
+                Ev::ToolResult { id, output } => {
+                    self.tool_output.insert(id, output);
+                }
                 Ev::Thinking(on) => self.thinking = on,
                 Ev::Usage { tokens, cost } => {
                     self.tokens += tokens;

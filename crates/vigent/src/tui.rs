@@ -58,14 +58,24 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
 
     // ratatui::init restores the terminal on a panic too
     let mut terminal = ratatui::init();
-    // focus reports let a notification skip the agent you're looking at
+    // the alternate screen (ratatui::init), pastes as text, and focus reports (a notification skips the agent you're looking at)
     let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableFocusChange);
     let mut code = 0;
     while !app.quit && !stop.load(Ordering::Relaxed) {
-        if let Err(e) = terminal.draw(|f| crate::ui::draw(f, &mut app)) {
-            eprintln!("vigent: {e}");
-            code = 1;
-            break;
+        if std::mem::take(&mut app.windows.redraw) {
+            let _ = terminal.clear();
+        }
+        match terminal.draw(|f| crate::ui::draw(f, &mut app)) {
+            Ok(frame) => {
+                if !app.windows.links.is_empty() {
+                    crate::ui::write_links(&app, frame.buffer, &mut std::io::stdout());
+                }
+            }
+            Err(e) => {
+                eprintln!("vigent: {e}");
+                code = 1;
+                break;
+            }
         }
         match event::poll(Duration::from_millis(40)) {
             Ok(true) => match event::read() {

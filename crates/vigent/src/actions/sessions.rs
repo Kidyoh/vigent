@@ -35,8 +35,11 @@ fn goto(app: &mut App, arg: Option<&str>) {
 
 /// <C-^>: the agent you were on before.
 fn alternate(app: &mut App, _: Option<&str>) {
+    // through focus_agent: an agent shown in another window means going to that window
     let alt = app.agents.alt;
-    app.focus_slot(alt);
+    if let Some(n) = app.open().iter().position(|&i| i == alt) {
+        app.focus_agent(n);
+    }
 }
 
 /// dd: kill the focused agent, once you've said yes.

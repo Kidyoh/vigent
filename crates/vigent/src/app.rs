@@ -153,41 +153,21 @@ impl App {
     // -----------------------------------------------------------------
 
     pub fn key(&mut self, k: KeyEvent) {
-        if self.answer(&k) {
-            return;
-        }
         // the Review area's windows (:diff, :review, :dash, :cost, the race list)
         if crate::review::key(self, &k) {
             return;
         }
+        // the Engines area's :model / :effort / :engine list
         if self.engines.picker.is_some() {
             return engines::picker::key(self, k);
         }
-        if self.float.is_some() {
-            return crate::ui::floats::key(self, k);
-        }
-        let Some(token) = keys::token_from_event(&k) else { return };
-        if self.dashboard_key(&token) {
+        // the Windows area reads every key first: pickers, questions, the start screen, the sidebar, counts, marks
+        if crate::actions::windows::key(self, &k) {
             return;
         }
-        for t in self.split_escape(token) {
-            self.feed(t);
+        if self.float.is_some() {
+            crate::ui::floats::key(self, k);
         }
-    }
-
-    /// Esc followed quickly by a key arrives as one Alt-key sequence (<M-j>):
-    /// an Alt key nothing is mapped to is read as Esc and then the key, which
-    /// is what was typed (src/app.ts splitEscape). A busy machine makes this common.
-    fn split_escape(&self, token: String) -> Vec<String> {
-        let Some(rest) = token.strip_prefix("<M-").and_then(|r| r.strip_suffix('>')) else { return vec![token] };
-        let mut keys = self.seq.pending.clone();
-        keys.push(token.clone());
-        let r = self.keymap.lookup(self.mode.keys(), &keys, false);
-        if r.exact.is_some() || r.prefix {
-            return vec![token];
-        }
-        let key = if rest.chars().count() == 1 { rest.to_string() } else { format!("<{rest}>") };
-        vec!["<Esc>".into(), key]
     }
 
     /// A key through the keymap: run what it's bound to (or wait for more keys).
@@ -207,6 +187,13 @@ impl App {
     }
 
     fn run_binding(&mut self, binding: Option<Binding>, keys: &[String]) {
+        // a count (5j, 3gt): how vim reads one for a built-in action
+        let count = crate::actions::windows::take_count(self);
+        if count > 0
+            && let Some((name, arg)) = binding.as_ref().and_then(|b| crate::actions::windows::single_action(&b.rhs))
+        {
+            return crate::actions::windows::run_counted(self, &name, arg.as_deref(), count);
+        }
         match binding {
             // unmapped: in INSERT and on the command line, keys type themselves
             None => {
@@ -245,42 +232,12 @@ impl App {
     }
 
     fn type_text(&mut self, text: &str) {
-        match self.mode {
-            Mode::Insert => self.input.push_str(text),
-            Mode::Command | Mode::Search => self.cmd.push_str(text),
-            _ => {}
-        }
-    }
-
-    /// The start screen's one-key actions, while no agent is open (src/app.ts dashboardKey).
-    fn dashboard_key(&mut self, token: &str) -> bool {
-        if self.focused().is_some() || self.mode != Mode::Normal || !self.seq.pending.is_empty() {
-            return false;
-        }
-        match token {
-            "n" => {
-                self.mode = Mode::Command;
-                self.cmd = "new ".into();
-            }
-            "c" => crate::health::open(self),
-            "T" => self.list_templates(),
-            "?" => crate::help::open(self),
-            "q" => crate::commands::exec(self, "q"),
-            "m" => engines::select::open_model_picker(self),
-            "e" => engines::select::open_effort_picker(self),
-            "E" => engines::select::open_engine_picker(self),
-            // Config area: t (themes), s (settings)
-            _ => return false,
-        }
-        true
+        // at the line's cursor (the Windows area's line editor)
+        crate::actions::windows::type_text(self, text);
     }
 
     pub fn paste(&mut self, text: &str) {
-        match self.mode {
-            Mode::Insert => self.input.push_str(text),
-            Mode::Command => self.cmd.push_str(&text.replace('\n', " ")),
-            _ => {}
-        }
+        crate::actions::windows::paste(self, text);
     }
 
     pub fn scroll_by(&mut self, up: isize) {
@@ -299,6 +256,10 @@ impl App {
     /// Focus the n-th open agent (0-based, as the sidebar numbers them from 1).
     pub fn focus_agent(&mut self, n: usize) {
         let Some(&i) = self.open().get(n) else { return };
+        // an agent shown in another window: go to that window (Windows area)
+        if crate::actions::windows::before_focus(self, i) {
+            return;
+        }
         self.focus_slot(i);
     }
 
@@ -389,6 +350,7 @@ impl App {
     /// Every frame: pending keys that timed out, and finished CLIs (the next
     /// queued prompt goes once the last one has exited).
     pub fn tick(&mut self) {
+        crate::actions::windows::tick(self);
         let step = self.seq.tick(&self.keymap, self.mode.keys());
         self.run_step(step);
         for i in 0..self.sessions.len() {

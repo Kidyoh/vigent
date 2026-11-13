@@ -32,8 +32,6 @@ pub struct Agents {
     pub alt: usize,
     /// the terminal window has focus (focus reporting; assumed until told otherwise)
     pub terminal_focused: bool,
-    /// a y/n question on the message line (dd): what `y` does
-    pub confirm: Option<Confirm>,
     /// notifications, kept here instead of written to the terminal (tests)
     pub alerts: Option<Vec<String>>,
     /// the message shown while a worktree is made, replaced once it's there (unless something else was said since)
@@ -49,7 +47,7 @@ pub struct Agents {
 
 impl Default for Agents {
     fn default() -> Self {
-        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None, races: vec![], storage: None, hook_runner: None }
+        Agents { alt: 0, terminal_focused: true, alerts: None, making: vec![], last_stat: None, races: vec![], storage: None, hook_runner: None }
     }
 }
 
@@ -118,12 +116,6 @@ pub fn storage_health_lines(h: &worktree::Health) -> Vec<(String, &'static str)>
         ));
     }
     l
-}
-
-/// A y/n question, like vim's confirm prompts.
-pub struct Confirm {
-    pub question: String,
-    pub on_yes: Box<dyn FnOnce(&mut App)>,
 }
 
 /// How to start an agent (:new's flags, templates).
@@ -560,12 +552,15 @@ impl App {
         a.closed = true;
         a.queue.clear();
         a.unread = false;
-        if i == self.focus {
+        let was_focused = i == self.focus;
+        if was_focused {
             let open = self.open();
             // as src/app.ts does: the next agent takes its place, or the last one
             self.focus = at.and_then(|p| open.get(p).or(open.last())).copied().unwrap_or(self.sessions.len());
             self.scroll = 0;
         }
+        // the windows showing it close (the last one stays)
+        crate::actions::windows::dropped(self, i, was_focused);
     }
 
     /// worktree_created: set the new worktree up (npm ci, ...) before the agent's first prompt goes out.
@@ -1147,21 +1142,9 @@ impl App {
     // y/n questions
     // -----------------------------------------------------------------
 
-    /// Ask a y/n question on the message line; `y` runs `on_yes`, any other key is a no.
+    /// Ask a y/n question (the Windows area's, on the command line); `y` runs `on_yes`, any other key is a no.
     pub fn ask(&mut self, question: String, on_yes: Box<dyn FnOnce(&mut App)>) {
-        self.seq.reset();
-        self.say(question.clone(), "Question");
-        self.agents.confirm = Some(Confirm { question, on_yes });
-    }
-
-    /// The key that answers the question. True when there was one.
-    pub fn answer(&mut self, k: &crossterm::event::KeyEvent) -> bool {
-        let Some(c) = self.agents.confirm.take() else { return false };
-        self.say("", "Comment");
-        if matches!(k.code, crossterm::event::KeyCode::Char('y' | 'Y')) {
-            (c.on_yes)(self);
-        }
-        true
+        crate::actions::windows::ask(self, &question, on_yes, None);
     }
 }
 
@@ -1291,7 +1274,7 @@ mod tests {
     fn dd_asks_first() {
         let mut a = two();
         crate::actions::run(&mut a, "session.kill", None);
-        assert_eq!(a.message.0, "Kill 'fix the race'? [y/N]");
+        assert_eq!(a.windows.confirm.as_ref().map(|c| c.question.as_str()), Some("Kill 'fix the race'? [y/N]"));
         a.key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('n'), crossterm::event::KeyModifiers::NONE));
         assert_eq!(a.open().len(), 2);
         crate::actions::run(&mut a, "session.kill", None);

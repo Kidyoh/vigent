@@ -850,6 +850,11 @@ impl Sequencer {
         self.pending.clear();
         self.deadline = None;
     }
+
+    /// A which-key hint is showing: wait for the next key, however long.
+    pub fn hold(&mut self) {
+        self.deadline = None;
+    }
 }
 
 /// The keys matched nothing; the first of them may still be a shorter mapping
