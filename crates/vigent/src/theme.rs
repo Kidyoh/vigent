@@ -674,6 +674,18 @@ impl Theme {
         s
     }
 
+    /// A group the theme (or your overrides) sets itself, with its own colors
+    /// (a link is followed); None: it doesn't set it (the :serve page's colors).
+    pub fn group(&self, group: &str) -> Option<Style> {
+        let a = self.explicit(group)?;
+        Some(if a.link.is_some() { self.style_of(&self.resolve(group)) } else { self.style_of(&a) })
+    }
+
+    /// Normal's background as the theme sets it, even when a transparent theme doesn't paint it (the :serve page).
+    pub fn normal_bg(&self) -> Option<Color> {
+        self.color(&self.normal_attr().bg).filter(|c| *c != Color::Reset)
+    }
+
     /// A highlight group's style.
     pub fn hl(&self, group: &str) -> Style {
         self.style_of(&self.attr(group))

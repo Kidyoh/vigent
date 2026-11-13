@@ -253,6 +253,11 @@ impl Session {
         last_claude_message(&self.path, id, dir.as_deref())
     }
 
+    /// The transcript line a reply is streaming into, if one is.
+    pub fn streaming_at(&self) -> Option<usize> {
+        self.streaming
+    }
+
     /// held: waiting for its worktree (or a setup hook) before it can run
     pub fn held(&self) -> bool {
         self.hold_reason.is_some()

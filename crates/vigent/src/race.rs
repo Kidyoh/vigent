@@ -272,7 +272,12 @@ impl App {
 
     /// Start one agent per racer on the same prompt, each in its own worktree.
     pub fn start_race(&mut self, task: &str, prompt: &str, asked: Option<Vec<Racer>>) -> bool {
-        let racers = asked.unwrap_or_else(|| self.engines.infos.iter().filter(|e| e.connected).map(|e| Racer { engine: e.id.clone(), model: None }).collect());
+        // scripted agents have no engine to pick, so --demo races three of them (serve/demo.rs)
+        let demo = self.serve.demo && asked.is_none();
+        let racers = asked.unwrap_or_else(|| match self.serve.demo {
+            true => ["claude", "codex", "gemini"].iter().map(|e| Racer { engine: e.to_string(), model: None }).collect(),
+            false => self.engines.infos.iter().filter(|e| e.connected).map(|e| Racer { engine: e.id.clone(), model: None }).collect(),
+        });
         if racers.len() < 2 {
             let msg = match racers.first() {
                 Some(r) => format!(
@@ -294,7 +299,7 @@ impl App {
             return false;
         }
         // racers sharing a folder would overwrite each other's work, so each needs its own worktree
-        if self.root.is_none() || !self.config.worktree.enabled {
+        if !self.serve.demo && (self.root.is_none() || !self.config.worktree.enabled) {
             let why = if self.root.is_some() { "worktrees are off here ([worktree] enabled = false in your config)" } else { "this folder isn't a git repo" };
             self.say(format!("a race needs a worktree for each racer, and {why}"), "ErrorMsg");
             return false;
@@ -306,11 +311,12 @@ impl App {
         for (r, label) in racers.iter().zip(&labels) {
             // a model id like anthropic/claude-opus-5-5 keeps its slash in the race, not in the agent's name and branch
             let name = format!("{base} {}", label.replace('/', " "));
-            let Some(i) = self.start_agent(&name, NewAgent { engine: Some(r.engine.clone()), model: r.model.clone(), ..Default::default() }) else {
+            let o = if demo { NewAgent::default() } else { NewAgent { engine: Some(r.engine.clone()), model: r.model.clone(), ..Default::default() } };
+            let Some(i) = self.start_agent(&name, o) else {
                 failed.push(format!("{label}: {}", self.message.0));
                 continue;
             };
-            if !self.sessions[i].own_worktree() {
+            if !self.serve.demo && !self.sessions[i].own_worktree() {
                 self.forget_agent(i);
                 failed.push(format!("{label}: it got no worktree of its own"));
                 continue;

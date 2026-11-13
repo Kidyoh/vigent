@@ -207,6 +207,11 @@ pub fn statusline(app: &App, w: usize) -> Vec<Seg> {
             let b = format!(" {} ", mode_name(badge));
             left_w += width(&b);
             out.push(Seg::new(b, t.hl(mode_group(badge))));
+            // demo mode (Serve area)
+            if app.serve.demo {
+                left_w += width(" DEMO ");
+                out.push(Seg::new(" DEMO ", t.hl("VigentModeCommand")));
+            }
             continue;
         }
         let text = if p == "agent" && s.is_none() { "[no session]".to_string() } else { part(app, p) };
@@ -220,6 +225,8 @@ pub fn statusline(app: &App, w: usize) -> Vec<Seg> {
     }
     let parts: Vec<String> = if s.is_some() { layout.right.iter().map(|p| if p == "mode" { format!(" {} ", mode_name(badge)) } else { part(app, p) }).filter(|x| !x.is_empty()).collect() } else { vec![] };
     let right = if s.is_some() && !parts.is_empty() { format!(" {} ", parts.join("  ")) } else { String::new() };
+    // ⇄ while :serve runs (Serve area)
+    let right = crate::serve::statusline_right(app, s.map(|_| right)).unwrap_or_default();
     let fill = w.saturating_sub(left_w + width(&right));
     out.push(Seg::new(" ".repeat(fill), t.hl(if first { "StatusLine" } else { "StatusLineNC" })));
     out.push(Seg::new(right, t.hl("StatusLine")));

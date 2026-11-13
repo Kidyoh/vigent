@@ -47,8 +47,13 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDe
     // --engine / config's engine, and model and effort for new agents (before agents reopen: one saved
     // on pi moves to the engine new agents use when pi isn't here)
     crate::engines::select::startup(&mut app, opts.model.as_deref(), opts.engine.as_deref());
-    // the agents that were open when vigent last quit (Sessions area); warnings are said after, over its message
-    app.restore(&mut warnings);
+    // demo mode (scripted agents), else the agents that were open when vigent last quit (Sessions area);
+    // warnings are said after, over its message
+    if crate::serve::demo::wanted(&app, opts.demo) {
+        crate::serve::demo::begin(&mut app, opts.demo, &mut warnings);
+    } else {
+        app.restore(&mut warnings);
+    }
     // theme = "nvim" / "vim": your editor's colorscheme, checked again in the background (src/follow.ts)
     crate::follow::refresh_in_background(&app, theme_name);
     if !warnings.is_empty() {
@@ -60,6 +65,8 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDe
         let _ = tx.send(Msg::Engines(crate::engines::detect_all(&env, 8000)));
     });
 
+    // --serve: follow from your phone from the start (same as :serve)
+    crate::serve::startup(&mut app, opts.serve, opts.local);
     // ratatui::init restores the terminal on a panic too
     let mut terminal = ratatui::init();
     // the alternate screen (ratatui::init), pastes as text, and focus reports (a notification skips the agent you're looking at)

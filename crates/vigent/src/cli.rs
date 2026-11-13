@@ -167,8 +167,6 @@ fn worktree_command(args: &[String]) -> i32 {
 #[derive(Debug, Default)]
 pub struct StartOptions {
     pub folder: Option<PathBuf>,
-    /// nothing here can run agents (no CLI, pi without a key): the demo starts by itself and says so
-    pub auto_demo: bool,
     pub theme: Option<String>,
     /// Engines area: the model for new agents on --engine
     pub model: Option<String>,
@@ -266,11 +264,6 @@ fn start(args: Vec<String>) -> i32 {
             theme::load_def("default").expect("the default theme")
         }
     };
-    for (flag, given) in [("--demo", opts.demo), ("--serve", opts.serve)] {
-        if given {
-            warnings.push(format!("{flag} isn't in this build yet (PORTING.md)"));
-        }
-    }
     crate::tui::run(VERSION, cwd, theme_def, &theme_name, config, keymap, warnings, &opts)
 }
 

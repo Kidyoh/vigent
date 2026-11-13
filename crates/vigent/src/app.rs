@@ -303,6 +303,10 @@ impl App {
     }
 
     pub fn send(&mut self, i: usize, text: String) {
+        // demo mode: scripted agents (serve/demo.rs)
+        if self.serve.demo {
+            return crate::serve::demo::send(self, i, text);
+        }
         // pi: one long-running process per agent (engines/pi.rs); the CLIs: one process per turn
         if self.sessions[i].engine == "pi" {
             return engines::pi::send(self, i, text);
