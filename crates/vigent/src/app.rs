@@ -254,9 +254,10 @@ impl App {
                 self.cmd = "new ".into();
             }
             "c" => crate::health::open(self),
+            "T" => self.list_templates(),
             "?" => crate::help::open(self),
             "q" => crate::commands::exec(self, "q"),
-            // Config/Engines/Sessions areas: t (themes), s (settings), m (model), e (effort), E (engine), T (templates)
+            // Config/Engines areas: t (themes), s (settings), m (model), e (effort), E (engine)
             _ => return false,
         }
         true

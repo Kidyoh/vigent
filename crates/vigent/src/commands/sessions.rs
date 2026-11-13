@@ -15,7 +15,17 @@ pub static COMMANDS: &[Command] = &[
     Command { name: "attach", aliases: &[], also: None, run: |app, ex| app.attach(ex.arg) },
     Command { name: "worktrees", aliases: &["worktree", "wt"], also: None, run: worktrees },
     Command { name: "tree", aliases: &[], also: None, run: tree },
+    Command { name: "templates", aliases: &["template", "tpl"], also: None, run: templates },
 ];
+
+/// :templates lists them; :templates <name> starts one (:new -t <name>).
+fn templates(app: &mut App, ex: &Ex) {
+    if ex.arg.is_empty() {
+        app.list_templates();
+    } else {
+        super::exec(app, &format!("new -t {}", ex.arg));
+    }
+}
 
 /// :new's arguments (src/app.ts exec "new"): the name, and --model, --engine / -e, --template / -t.
 #[derive(Debug, Default, PartialEq)]
@@ -80,8 +90,9 @@ pub fn parse_new(arg: &str) -> NewArgs {
 fn new(app: &mut App, ex: &Ex) {
     let a = parse_new(ex.arg);
     if let Some(t) = a.template {
-        // Sessions area, still to port: templates (src/templates.ts, App.startFromTemplate)
-        return app.say(format!("no template '{t}' in this build yet"), "ErrorMsg");
+        let worktree = if ex.bang { Some(false) } else { None };
+        app.start_from_template(&t, &a.name, NewAgent { worktree, model: a.model, engine: a.engine, effort: None });
+        return;
     }
     let name = if a.name.is_empty() { format!("agent-{}", app.open().len() + 1) } else { a.name };
     app.start_agent(&name, NewAgent { worktree: Some(!ex.bang), model: a.model, engine: a.engine, effort: None });

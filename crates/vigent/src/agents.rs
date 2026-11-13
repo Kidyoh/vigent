@@ -195,6 +195,63 @@ pub fn last_line(output: &str) -> String {
     output.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("").to_string()
 }
 
+// ---------------------------------------------------------------------------
+// templates (src/templates.ts)
+// ---------------------------------------------------------------------------
+
+/// The built-in templates: (name, description, prompt). One in config.toml with the same name replaces it.
+pub const BUILTIN_TEMPLATES: [(&str, &str, &str); 4] = [
+    (
+        "fix",
+        "reproduce a bug with a failing test, then fix it",
+        "Find and fix this bug: {task}\n\nFirst reproduce it with a failing test. Then make the smallest change that makes the test pass, and run the whole test suite before you finish.",
+    ),
+    (
+        "test",
+        "write tests in the project's own style",
+        "Write tests for {task}. Cover the usual cases and the edge cases, follow the style of the tests already in the project, and run them. Don't change the code under test; if a test finds a bug, say so.",
+    ),
+    (
+        "review",
+        "review this branch's work; changes nothing",
+        "Review the work on this branch: compare it with the branch it started from using git. Look for bugs, missing tests and code that's hard to follow.{task}\n\nList what you find by file and line, most serious first. Don't change any files.",
+    ),
+    (
+        "explain",
+        "how something works and where it lives; changes nothing",
+        "Explain {task}: how it works, where it lives in the code, and what would break if it changed. Don't change any files.",
+    ),
+];
+
+/// A template, and whether it's a built-in one.
+pub type Tpl = (crate::config::Template, bool);
+
+/// Built-ins first, then yours (yours replace a built-in of the same name), in config order.
+pub fn all_templates(user: &[crate::config::Template]) -> Vec<Tpl> {
+    let mut out: Vec<Tpl> = BUILTIN_TEMPLATES
+        .iter()
+        .map(|(name, description, prompt)| match user.iter().find(|t| t.name == *name) {
+            Some(t) => (t.clone(), false),
+            None => (crate::config::Template { name: name.to_string(), prompt: prompt.to_string(), description: Some(description.to_string()), ..Default::default() }, true),
+        })
+        .collect();
+    out.extend(user.iter().filter(|t| !BUILTIN_TEMPLATES.iter().any(|b| b.0 == t.name)).map(|t| (t.clone(), false)));
+    out
+}
+
+/// The prompt for a task: `{task}` takes it; a template without one gets it
+/// added after. The built-in review's `{task}` is an optional focus.
+pub fn fill_template(t: &Tpl, task: &str) -> String {
+    let text = task.trim();
+    if !t.0.prompt.contains("{task}") {
+        return if text.is_empty() { t.0.prompt.clone() } else { format!("{}\n\n{text}", t.0.prompt) };
+    }
+    if t.0.name == "review" && t.1 {
+        return t.0.prompt.replace("{task}", &if text.is_empty() { String::new() } else { format!(" Focus on: {text}.") });
+    }
+    t.0.prompt.replace("{task}", text)
+}
+
 const WORKTREE_CREATED_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const AGENT_FINISHED_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -293,6 +350,60 @@ impl App {
             }
         }
         Some(self.add_session(s, true))
+    }
+
+    /// `:new -t <template> [task]`: an agent on the template's engine, model
+    /// and effort, sent the template's prompt. Flags you type (--engine,
+    /// --model) win over the template's (src/app.ts startFromTemplate).
+    pub fn start_from_template(&mut self, name: &str, task: &str, o: NewAgent) -> Option<usize> {
+        let all = all_templates(&self.config.templates);
+        let Some(t) = all.iter().find(|t| t.0.name == name).cloned() else {
+            let names: Vec<&str> = all.iter().map(|t| t.0.name.as_str()).collect();
+            let msg = format!("no template '{name}'{} · :templates lists them", crate::keys::did_you_mean(name, &names));
+            self.say(msg, "ErrorMsg");
+            return None;
+        };
+        let review = t.1 && t.0.name == "review";
+        if t.0.prompt.contains("{task}") && task.is_empty() && !review {
+            self.say(format!("template '{}' needs a task: :new -t {} <what>", t.0.name, t.0.name), "ErrorMsg");
+            self.mode = crate::app::Mode::Command;
+            self.cmd = format!("new -t {} ", t.0.name);
+            return None;
+        }
+        let typed_engine = o.engine.clone();
+        let engine = typed_engine.clone().or_else(|| t.0.engine.clone());
+        let same = engine == t.0.engine || t.0.engine.is_none();
+        let agent = if task.is_empty() { t.0.name.clone() } else { crate::names::agent_name_from(task) };
+        let i = self.start_agent(
+            &agent,
+            NewAgent {
+                worktree: o.worktree.or(t.0.worktree),
+                model: o.model.or_else(|| if same { t.0.model.clone() } else { None }),
+                engine,
+                effort: if typed_engine.is_none() || typed_engine == t.0.engine { t.0.effort.clone() } else { None },
+            },
+        )?;
+        let prompt = fill_template(&t, task);
+        if let crate::session::Submitted::Now(p) = self.sessions[i].submit(prompt) {
+            self.send(i, p);
+        }
+        let (msg, group) = (format!("{} · template {}", self.message.0, t.0.name), self.message.1);
+        self.say(msg, group);
+        Some(i)
+    }
+
+    /// `:templates` with no name: what there is to start from (Windows area: a picker that starts one).
+    pub fn list_templates(&mut self) {
+        let lines = all_templates(&self.config.templates)
+            .iter()
+            .map(|(t, builtin)| {
+                let how: Vec<String> = [t.engine.as_deref().map(engines::engine_name), t.model.clone(), t.effort.clone()].into_iter().flatten().collect();
+                let what = t.description.clone().unwrap_or_else(|| t.prompt.lines().next().unwrap_or("").to_string());
+                let how = if how.is_empty() { String::new() } else { format!(" ({})", how.join(" · ")) };
+                (format!("{:<10} {what}{how}{}", t.name, if *builtin { "" } else { " · yours" }), "NormalFloat")
+            })
+            .collect();
+        self.float = Some(Float::new("Start an agent from a template", lines));
     }
 
     /// Put an agent in the list (focused or not): its slot.
@@ -1093,6 +1204,25 @@ mod tests {
         crate::actions::run(&mut a, "session.kill", None);
         a.key(crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('y'), crossterm::event::KeyModifiers::NONE));
         assert_eq!(a.open().len(), 1);
+    }
+
+    #[test]
+    fn templates_fill_their_task_and_yours_replace_the_built_in_ones() {
+        let mine = crate::config::Template { name: "fix".into(), prompt: "Fix: {task}!".into(), ..Default::default() };
+        let extra = crate::config::Template { name: "docs".into(), prompt: "Write docs".into(), ..Default::default() };
+        let all = all_templates(&[mine, extra]);
+        let names: Vec<&str> = all.iter().map(|t| t.0.name.as_str()).collect();
+        assert_eq!(names, ["fix", "test", "review", "explain", "docs"]);
+        assert_eq!(fill_template(&all[0], " the cart "), "Fix: the cart!");
+        assert!(fill_template(&all[2], "").contains("hard to follow.\n\nList"));
+        assert!(fill_template(&all[2], "auth").contains("hard to follow. Focus on: auth.\n\nList"));
+        assert_eq!(fill_template(&all[4], "the cli"), "Write docs\n\nthe cli");
+        let mut a = app();
+        crate::commands::exec(&mut a, "new -t fixx");
+        assert_eq!(a.message.0, "no template 'fixx' (did you mean 'fix'?) · :templates lists them");
+        crate::commands::exec(&mut a, "new -t fix");
+        assert_eq!(a.message.0, "template 'fix' needs a task: :new -t fix <what>");
+        assert_eq!(a.cmd, "new -t fix ");
     }
 
     #[test]
