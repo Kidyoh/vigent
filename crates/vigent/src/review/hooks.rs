@@ -330,3 +330,102 @@ mod tests {
         assert_eq!(last_line(""), "");
     }
 }
+
+#[cfg(test)]
+mod app_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    type Calls = Arc<Mutex<Vec<(String, HookOpts)>>>;
+
+    /// An App whose hooks are recorded and answer `result`; one agent ("name", on feat/<name>) in a worktree folder.
+    fn hooked(name: &str, result: HookResult) -> (App, std::sync::mpsc::Receiver<Msg>, Calls, crate::review::land::tests::Tmp) {
+        let t = crate::review::land::tests::Tmp::new(&format!("hook-{name}"));
+        let (mut a, rx) = crate::review::tests::app();
+        a.root = Some(t.0.clone());
+        let calls: Calls = Arc::default();
+        let c = Arc::clone(&calls);
+        a.review.runner = Some(Arc::new(move |cmd: &str, o: &HookOpts| {
+            c.lock().unwrap().push((cmd.to_string(), o.clone()));
+            result.clone()
+        }));
+        // codex doesn't run in this build, so a prompt that goes out doesn't start a real CLI
+        let mut s = crate::session::Session::new(0, name, "codex", t.0.clone());
+        (s.branch, s.base) = (Some(format!("feat/{name}")), "main".into());
+        a.sessions.push(s);
+        (a, rx, calls, t)
+    }
+
+    fn env_of<'a>(o: &'a HookOpts, k: &str) -> &'a str {
+        o.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str()).unwrap_or("")
+    }
+
+    fn settle(a: &mut App, rx: &std::sync::mpsc::Receiver<Msg>, done: impl Fn(&App) -> bool) {
+        crate::review::tests::settle(a, rx, done)
+    }
+
+    #[test]
+    fn worktree_created_runs_in_the_new_worktree_and_the_first_prompt_waits() {
+        let (mut a, rx, calls, t) = hooked("cart", HookResult { ok: true, code: Some(0), output: "added 120 packages".into(), ms: 4200, timed_out: false });
+        a.config.hooks.worktree_created = Some("npm ci".into());
+        a.sessions[0].hold("making its worktree");
+        a.input = "fix the cart total".into();
+        a.submit();
+        a.on_msg(Msg::WorktreeMade(0, Ok(crate::worktree::Made::Git("test".into()))));
+        assert_eq!(a.sessions[0].hold_reason.as_deref(), Some("setting up"), "held while the worktree is set up");
+        assert!(a.sessions[0].items.iter().all(|i| !matches!(i, Item::User(_))));
+        assert_eq!(a.sessions[0].resume(), None, ":resume can't skip the setup");
+        settle(&mut a, &rx, |a| a.sessions[0].items.iter().any(|i| matches!(i, Item::User(t) if t == "fix the cart total")));
+        let c = calls.lock().unwrap();
+        assert_eq!(c[0].0, "npm ci");
+        assert_eq!(c[0].1.cwd, t.0);
+        assert_eq!(env_of(&c[0].1, "VIGENT_HOOK"), "worktree_created");
+        assert_eq!(env_of(&c[0].1, "VIGENT_BRANCH"), "feat/cart");
+        assert!(a.sessions[0].items.contains(&Item::Info("setting up the worktree: npm ci".into())));
+        assert!(a.sessions[0].items.contains(&Item::Info("worktree ready (4.2s)".into())));
+    }
+
+    #[test]
+    fn a_failing_worktree_created_says_so_and_lets_the_agent_start_anyway() {
+        let (mut a, rx, _calls, _t) = hooked("docs", HookResult { ok: false, code: Some(1), output: "npm ERR! missing lockfile".into(), ms: 900, timed_out: false });
+        a.config.hooks.worktree_created = Some("npm ci".into());
+        a.sessions[0].hold("making its worktree");
+        a.input = "update the docs".into();
+        a.submit();
+        a.on_msg(Msg::WorktreeMade(0, Ok(crate::worktree::Made::Git("test".into()))));
+        settle(&mut a, &rx, |a| a.sessions[0].items.iter().any(|i| matches!(i, Item::User(_))));
+        assert!(a.sessions[0].items.contains(&Item::Info("worktree_created failed (exit 1) after 0.9s; the agent starts anyway\nnpm ERR! missing lockfile".into())));
+        assert_eq!(a.message.0, "'docs': worktree_created failed: npm ERR! missing lockfile");
+    }
+
+    #[test]
+    fn before_merge_stops_merge_and_pr_when_it_fails() {
+        let (mut a, rx, calls, _t) = hooked("race", HookResult { ok: false, code: Some(1), output: "✗ 2 failing".into(), ms: 3000, timed_out: false });
+        a.config.hooks.before_merge = Some("npm test".into());
+        crate::commands::exec(&mut a, "merge");
+        assert_eq!(a.message.0, "before_merge: npm test in feat/race…");
+        settle(&mut a, &rx, |a| a.message.0.starts_with("before_merge failed"));
+        assert_eq!(a.message.0, "before_merge failed, nothing merged: ✗ 2 failing");
+        assert!(a.sessions[0].items.contains(&Item::Info("before_merge failed (exit 1) after 3.0s, so no merge\n✗ 2 failing".into())));
+        crate::commands::exec(&mut a, "pr");
+        settle(&mut a, &rx, |a| a.message.0.starts_with("before_merge failed, nothing pushed"));
+        assert!(a.sessions[0].items.iter().any(|i| matches!(i, Item::Info(t) if t.contains("so no pull request"))));
+        let c = calls.lock().unwrap();
+        assert_eq!(c.len(), 2);
+        assert_eq!(env_of(&c[1].1, "VIGENT_HOOK"), "before_merge");
+    }
+
+    #[test]
+    fn agent_finished_runs_whenever_an_agent_stops_with_vigent_state() {
+        let (mut a, rx, calls, _t) = hooked("tidy", HookResult { ok: true, code: Some(0), ..Default::default() });
+        a.config.hooks.agent_finished = Some("notify-send done".into());
+        crate::review::watch(&mut a);
+        for st in [State::Running, State::Idle, State::Running, State::Error] {
+            a.sessions[0].state = st;
+            crate::review::watch(&mut a);
+        }
+        settle(&mut a, &rx, |_| calls.lock().unwrap().len() == 2);
+        let got: Vec<(String, String, String)> = calls.lock().unwrap().iter().map(|(c, o)| (c.clone(), env_of(o, "VIGENT_STATE").into(), env_of(o, "VIGENT_AGENT").into())).collect();
+        assert_eq!(got, [("notify-send done".into(), "finished".into(), "tidy".into()), ("notify-send done".into(), "failed".into(), "tidy".into())]);
+    }
+}
