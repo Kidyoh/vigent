@@ -21,6 +21,16 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDe
     for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP, signal_hook::consts::SIGINT] {
         let _ = signal_hook::flag::register(sig, Arc::clone(&stop));
     }
+    // A hung-up terminal can keep crossterm's poll spinning on EOF, so the loop
+    // never sees the flag: after a signal, give the loop a moment, then exit.
+    let watched = Arc::clone(&stop);
+    std::thread::spawn(move || {
+        while !watched.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::thread::sleep(Duration::from_millis(1500));
+        std::process::exit(0);
+    });
     let (tx, rx) = channel();
     let mut app = App::new(version, cwd, "default", config, keymap, tx.clone());
     app.theme.set_def(theme_def);
@@ -49,6 +59,8 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDe
             Ok(true) => match event::read() {
                 Ok(Event::Key(k)) if k.kind != KeyEventKind::Release => app.key(k),
                 Ok(Event::Paste(s)) => app.paste(&s),
+                // the terminal is gone
+                Err(_) => break,
                 _ => {}
             },
             Ok(false) => {}
