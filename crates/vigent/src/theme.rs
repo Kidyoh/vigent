@@ -787,6 +787,29 @@ mod tests {
     }
 
     #[test]
+    fn lazyvim_is_tokyonight_moon_on_the_terminal_background() {
+        let p = load("lazyvim").unwrap();
+        assert!(p.transparent());
+        for g in ["Normal", "NormalFloat", "StatusLine", "VigentSidebar", "WinBar"] {
+            assert!(matches!(p.attr(g).bg.as_deref(), None | Some("NONE")), "{g}: {:?}", p.attr(g).bg);
+        }
+        assert_eq!(p.attr("Normal").fg.as_deref(), Some("#c8d3f5"));
+        assert_eq!(p.attr("FloatBorder").fg.as_deref(), Some("#589ed7"));
+        assert_eq!(p.attr("CursorLineNr").fg.as_deref(), Some("#ff966c"));
+        assert_eq!(p.attr("Visual"), Attr { bg: Some("#2d3f76".into()), fg: Some("#c8d3f5".into()), ..Default::default() });
+        assert_eq!(p.attr("CursorLine").bg.as_deref(), Some("#2f334d"));
+        assert_eq!(p.attr("VigentModeNormal"), Attr { fg: Some("#1b1d2b".into()), bg: Some("#82aaff".into()), bold: Some(true), ..Default::default() });
+        assert_eq!(p.attr("PmenuSel").bg.as_deref(), Some("#363c58"));
+        let moon = load("tokyonight-moon").unwrap();
+        assert_eq!(moon.attr("Normal").bg.as_deref(), Some("#222436"));
+        assert_eq!(moon.attr("VigentSidebar").bg.as_deref(), Some("#1e2030"));
+        assert_eq!(extract_palette(&load_def("lazyvim").unwrap()), extract_palette(&load_def("tokyonight-moon").unwrap()));
+        let mut lazy = load("lazyvim").unwrap();
+        lazy.transparency = Transparent::Off;
+        assert_eq!(lazy.attr("Normal").bg.as_deref(), Some("#222436"));
+    }
+
+    #[test]
     fn palettes_and_specs() {
         let spec = crate::toml::parse("name = \"x\"\nextends = \"nord\"\ntransparent = true\n[groups]\nComment = \"guifg=#123456 gui=bold\"\nTitle = \"Comment\"\n").unwrap();
         let d = build(&spec, "x", &mut vec![]).unwrap();

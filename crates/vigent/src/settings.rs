@@ -727,4 +727,44 @@ mod tests {
         feed(&mut a, "q");
         assert!(a.cfg.panel.is_none());
     }
+
+    #[test]
+    fn settings_like_the_typescript_test() {
+        let mut a = crate::app::tests::app();
+        open(&mut a);
+        let text = a.cfg.panel.as_ref().unwrap().text(&a);
+        assert!(text.contains("Engine for new agents") && text.contains("auto (Claude Code)"), "{text}");
+        a.cfg.panel.as_mut().unwrap().select("Transparent background");
+        feed(&mut a, "l");
+        assert_eq!(a.config.ui.transparent, Transparent::On);
+        assert_eq!(a.theme.attr("Normal").bg.as_deref(), Some("NONE"), "applied at once");
+        a.cfg.panel.as_mut().unwrap().select("Engine for new agents");
+        feed(&mut a, "<CR>");
+        feed(&mut a, "l");
+        feed(&mut a, "l");
+        assert_eq!(a.config.engine.as_deref(), Some("codex"));
+        a.cfg.panel.as_mut().unwrap().select("Worktree storage");
+        feed(&mut a, "h");
+        assert_eq!(a.config.worktree.backend, "git");
+        // rebind: the dashboard moves from <Space>D to gd
+        let p = a.cfg.panel.take().unwrap();
+        let dash = p.items.iter().position(|i| (i.value)(&a).contains("<Space>D")).unwrap();
+        a.cfg.panel = Some(p);
+        a.cfg.panel.as_mut().unwrap().index = dash;
+        feed(&mut a, "<CR>");
+        feed(&mut a, "g");
+        feed(&mut a, "d");
+        feed(&mut a, "<CR>");
+        let msg = a.cfg.panel.as_ref().unwrap().message.clone();
+        assert!(msg.starts_with("gd now: ") && msg.ends_with("· w saves it"), "{msg}");
+        assert_eq!(a.keymap.lookup(KeyMode::Normal, &["g".into(), "d".into()], false).exact.unwrap().rhs_text, ":dash<CR>");
+        assert!(a.keymap.lookup(KeyMode::Normal, &["<Space>".into(), "D".into()], false).exact.is_none());
+        assert!(a.cfg.key_changes.contains(&("<Space>D".to_string(), None)));
+        // Esc cancels a capture
+        feed(&mut a, "<CR>");
+        feed(&mut a, "x");
+        feed(&mut a, "<Esc>");
+        assert!(a.keymap.lookup(KeyMode::Normal, &["x".into()], false).exact.is_none());
+        assert_eq!(a.cfg.panel.as_ref().unwrap().message, "cancelled");
+    }
 }
