@@ -142,6 +142,21 @@ area consumes yet (remove your flag from that list when you wire it).
 
 ## Differences to know about
 
+- Windows area: `:set`, the `:map` / `:unmap` family, `:command`,
+  `:delcommand`, your own commands and `:!` live in `commands/windows.rs`
+  (the checklist used to give them to Config; `:hi`, `:let`, `:settings`,
+  `:trust` stay Config's). Pickers are `ui::picker::Picker`, opened with
+  `actions::windows::open_picker`; y/n questions are `actions::windows::ask`;
+  floats with rows to pick are `Float::rich` with `selectable` + `on_select`.
+- Every screen row is built as `ui::text::Seg`s exactly the screen's width
+  (like the TypeScript's strings) and drawn as one paragraph; a `Seg` with a
+  `link` becomes a terminal hyperlink (`ui::write_links`, after the frame).
+- `App::input` / `App::cmd` stay plain strings; their cursors are
+  `App::windows.input_cursor` / `cmd_cursor`, which go to the end whenever
+  the text changes behind them (as setting a LineBuffer's text does).
+- `:set termguicolors` / `transparent` change the option but not the colors on
+  screen until the theme is loaded again (Config: theme loading).
+
 - Rust's `:new <task>` names the agent after the task *and sends it as the
   first prompt*; TypeScript's `:new <name>` only starts an agent by that name.
   Sessions area: match TypeScript (check `test/e2e.test.mjs` and the help text).

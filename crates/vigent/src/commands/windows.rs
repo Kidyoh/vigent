@@ -559,7 +559,8 @@ mod tests {
     #[test]
     fn set_shows_toggles_and_errs() {
         let mut ui = UiOptions::default();
-        assert!(apply_set(&mut ui, "").unwrap().starts_with("  sidebar    sidebar_width=30  sidebar_position=left"));
+        let all = apply_set(&mut ui, "").unwrap();
+        assert!(all.starts_with("  sidebar    sidebar_width=30    sidebar_position=left"), "{all}");
         apply_set(&mut ui, "nonu").unwrap();
         assert!(!ui.number);
         apply_set(&mut ui, "nu!").unwrap();

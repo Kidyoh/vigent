@@ -82,8 +82,120 @@ pub fn part(app: &App, p: &str) -> String {
     }
 }
 
+/// [style] separators' glyphs: (toward the right, toward the left).
+pub fn separator_glyphs(style: &str) -> Option<(&'static str, &'static str)> {
+    match style {
+        "round" => Some(("\u{e0b4}", "\u{e0b6}")),
+        "arrow" => Some(("\u{e0b0}", "\u{e0b2}")),
+        "slant" => Some(("\u{e0bc}", "\u{e0ba}")),
+        _ => None,
+    }
+}
+
+/// lualine's look (src/app.ts renderPowerline): the mode in its color, a lighter section, then the bar; the right side mirrors it.
+fn powerline(app: &App, w: usize, (to_right, to_left): (&str, &str)) -> Vec<Seg> {
+    use super::icons::nerd;
+    use ratatui::style::{Color, Modifier, Style};
+    let t = &app.theme;
+    let s = app.focused();
+    let badge = badge_mode(app);
+    let mode = t.hl(mode_group(badge));
+    let fill = t.hl("StatusLine").bg.or(t.normal().bg);
+    let fill_fg = t.hl("Comment").fg.or(t.normal().fg);
+    let middle = t.hl("CursorLine").bg.or(t.hl("Visual").bg).or(fill);
+    let mid_fg = t.normal().fg;
+    let icon = |p: &str| -> Option<&str> {
+        Some(match p {
+            "mode" => "\u{e62b}",
+            "agent" => nerd::CHIP,
+            "model" => nerd::BOLT,
+            "engine" => nerd::TERMINAL,
+            "effort" => nerd::GEAR,
+            "usage" => "\u{f201}",
+            "agents" => nerd::LIST,
+            "path" => "\u{f07b}",
+            "clock" => nerd::CLOCK,
+            _ => return None,
+        })
+    };
+    let text = |p: &str| -> String {
+        if p == "mode" {
+            return format!("{} {}", icon("mode").unwrap(), mode_name(badge));
+        }
+        let tx = if p == "agent" && s.is_none() { "no agent".to_string() } else if s.is_some() || p == "clock" || p == "agents" { part(app, p) } else { String::new() };
+        if tx.is_empty() {
+            return tx;
+        }
+        match icon(p) {
+            Some(i) if p != "branch" => format!("{i} {tx}"),
+            _ => tx,
+        }
+    };
+    let st = |fg: Option<Color>, bg: Option<Color>, bold: bool| {
+        let mut x = Style::default();
+        if let Some(f) = fg {
+            x = x.fg(f);
+        }
+        if let Some(b) = bg {
+            x = x.bg(b);
+        }
+        if bold {
+            x = x.add_modifier(Modifier::BOLD);
+        }
+        x
+    };
+    let colors = |i: usize, n: usize, from_end: bool| {
+        let k = if from_end { n - 1 - i } else { i };
+        match k {
+            0 => (mode.fg, mode.bg, true),
+            1 => (mid_fg, middle, false),
+            _ => (fill_fg, fill, false),
+        }
+    };
+    let build = |parts: &[String], from_end: bool| -> Vec<(String, (Option<Color>, Option<Color>, bool))> {
+        let texts: Vec<String> = parts.iter().map(|p| text(p)).filter(|x| !x.is_empty()).collect();
+        let n = texts.len();
+        texts.into_iter().enumerate().map(|(i, x)| (format!(" {x} "), colors(i, n, from_end))).collect()
+    };
+    let layout = &app.config.layout.statusline;
+    let left = build(&layout.left, false);
+    let right = if s.is_some() { build(&layout.right, true) } else { vec![] };
+    let mut out = vec![];
+    if let Some((_, c)) = left.first() {
+        out.push(Seg::new(to_left, st(c.1, fill, false)));
+    }
+    for (i, (x, c)) in left.iter().enumerate() {
+        out.push(Seg::new(x.clone(), st(c.0, c.1, c.2)));
+        let next = left.get(i + 1).map(|n| n.1.1).unwrap_or(fill);
+        out.push(Seg::new(to_right, st(c.1, next, false)));
+    }
+    let mut tail = vec![];
+    for (i, (x, c)) in right.iter().enumerate() {
+        let prev = if i > 0 { right[i - 1].1.1 } else { fill };
+        tail.push(Seg::new(to_left, st(c.1, prev, false)));
+        tail.push(Seg::new(x.clone(), st(c.0, c.1, c.2)));
+    }
+    if let Some((_, c)) = right.last() {
+        tail.push(Seg::new(to_right, st(c.1, fill, false)));
+    }
+    let used = super::text::segs_width(&out);
+    let mut tail_w = super::text::segs_width(&tail);
+    if used + tail_w > w {
+        tail.clear();
+        tail_w = 0;
+    }
+    out.push(Seg::new(" ".repeat(w.saturating_sub(used + tail_w)), st(None, fill, false)));
+    out.extend(tail);
+    exact(out, w, st(None, fill, false))
+}
+
 pub fn statusline(app: &App, w: usize) -> Vec<Seg> {
     let t = &app.theme;
+    if app.config.ui.icons == "nerd"
+        && let Some(g) = app.config.style.separators.as_deref().and_then(separator_glyphs)
+    {
+        return powerline(app, w, g);
+    }
     let s = app.focused();
     let layout = &app.config.layout.statusline;
     let mut out = vec![];

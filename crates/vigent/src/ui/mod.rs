@@ -188,3 +188,32 @@ fn term_color(c: ratatui::style::Color) -> Option<crossterm::style::Color> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen(app: &App) -> Vec<String> {
+        rows(app).iter().map(|r| text::segs_plain(r)).collect()
+    }
+
+    #[test]
+    fn the_start_screen_the_sidebar_and_the_statusline() {
+        let mut a = crate::app::tests::app();
+        a.windows.cols = 130;
+        a.windows.rows = 30;
+        let s = screen(&a);
+        assert_eq!(s.len(), 30);
+        assert!(s.iter().any(|l| l.contains("New agent: type a task, Enter") && l.trim_end().ends_with("    i")), "{s:#?}");
+        assert!(s[0].starts_with(" SESSIONS"));
+        assert!(s[28].contains(" NORMAL  [no session]"), "{}", s[28]);
+        a.config.ui.sidebar_position = "right".into();
+        let s = screen(&a);
+        assert!(s[0].find("SESSIONS").unwrap() > 80);
+        a.config.ui.icons = "nerd".into();
+        a.config.style.separators = Some("round".into());
+        assert!(screen(&a)[28].starts_with('\u{e0b6}'));
+        a.config.ui.sidebar = false;
+        assert!(!screen(&a)[0].contains("SESSIONS"));
+    }
+}
