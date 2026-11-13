@@ -46,13 +46,17 @@ pub fn icon(app: &App) -> &'static str {
     }
 }
 
-/// The statusline's right side, with the serve mark when it runs: the parts
-/// given (an agent's model, usage, agents), else "serving" with no agent open.
-pub fn statusline_right(app: &App, parts: Option<String>) -> Option<String> {
+/// The plain statusline's right side, with the serve mark while it runs
+/// (src/app.ts renderStatusline): the parts given (an agent's model, usage,
+/// agents) when an agent is open, else "serving" with no agent open. The
+/// powerline statusline draws no mark (renderPowerline).
+pub fn statusline_right(app: &App, parts: Option<&[String]>) -> String {
     let serve = if app.serve.server.is_some() { icon(app) } else { "" };
     match parts {
-        Some(p) => Some(format!("{serve}{p}")),
-        None => app.serve.server.is_some().then(|| format!(" {serve}serving ")),
+        Some(p) if !p.is_empty() || !serve.is_empty() => format!(" {serve}{} ", p.join("  ")),
+        Some(_) => String::new(),
+        None if app.serve.server.is_some() => format!(" {serve}serving "),
+        None => String::new(),
     }
 }
 
@@ -458,7 +462,22 @@ mod tests {
         assert!(text.contains(&format!("  {code}")));
         assert!(text.contains(&format!("  http://127.0.0.1:{port}/#{code}")));
         assert!(text.iter().any(|l| l.starts_with("This machine only")));
-        assert_eq!(statusline_right(&app, Some("m  0/1 ".into())).as_deref(), Some("⇄ m  0/1 "));
+        assert_eq!(statusline_right(&app, Some(&["m".into(), "0/1".into()])), " ⇄ m  0/1 ");
+        assert_eq!(statusline_right(&app, Some(&[])), " ⇄  ", "the mark alone, as TypeScript pads it");
+        assert_eq!(statusline_right(&app, None), " ⇄ serving ");
+        let row = |app: &App| crate::ui::text::segs_plain(&crate::ui::statusline::statusline(app, 100));
+        assert!(row(&app).ends_with(" ⇄ claude-fable-5  74.8k tok · $0.50  0/1 "), "{}", row(&app));
+        // powerline draws no ⇄ (src/app.ts renderPowerline), with an agent or without
+        app.config.ui.icons = "nerd".into();
+        app.config.style.separators = Some("round".into());
+        assert!(!row(&app).contains('\u{f10b}'), "{}", row(&app));
+        app.sessions[0].closed = true;
+        let none = row(&app);
+        assert!(!none.contains('\u{f10b}') && !none.contains("serving"), "{none}");
+        assert!(none.ends_with("\u{e0b6} \u{f03a} 0/0 \u{e0b4}"), "the right side shows while serving: {none}");
+        app.config.ui.icons = "unicode".into();
+        assert!(row(&app).ends_with(" ⇄ serving "), "{}", row(&app));
+        app.sessions[0].closed = false;
         // :serve again shows it again; :serve stop ends it
         app.float = None;
         exec(&mut app, "");
@@ -469,7 +488,9 @@ mod tests {
         assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err(), "the port is closed");
         exec(&mut app, "stop");
         assert_eq!(app.message.0, ":serve isn't running");
-        assert_eq!(statusline_right(&app, None), None);
+        assert_eq!(statusline_right(&app, None), "");
+        assert_eq!(statusline_right(&app, Some(&[])), "");
+        assert_eq!(statusline_right(&app, Some(&["m".into()])), " m ");
         exec(&mut app, "99999");
         assert_eq!(app.message.0, ":serve couldn't start: options.port should be >= 0 and < 65536. Received type number (99999).");
     }

@@ -120,7 +120,8 @@ fn powerline(app: &App, w: usize, (to_right, to_left): (&str, &str)) -> Vec<Seg>
     };
     let text = |p: &str| -> String {
         if p == "mode" {
-            return format!("{} {}", icon("mode").unwrap(), mode_name(badge));
+            // demo mode (Serve area): one section with the mode, not a badge of its own
+            return format!("{} {}{}", icon("mode").unwrap(), mode_name(badge), if app.serve.demo { " · DEMO" } else { "" });
         }
         let tx = if p == "agent" && s.is_none() { "no agent".to_string() } else if s.is_some() || p == "clock" || p == "agents" { part(app, p) } else { String::new() };
         if tx.is_empty() {
@@ -159,7 +160,8 @@ fn powerline(app: &App, w: usize, (to_right, to_left): (&str, &str)) -> Vec<Seg>
     };
     let layout = &app.config.layout.statusline;
     let left = build(&layout.left, false);
-    let right = if s.is_some() { build(&layout.right, true) } else { vec![] };
+    // while :serve runs the right side shows with no agent open too (no ⇄ here, as in TypeScript)
+    let right = if s.is_some() || app.serve.server.is_some() { build(&layout.right, true) } else { vec![] };
     let mut out = vec![];
     if let Some((_, c)) = left.first() {
         out.push(Seg::new(to_left, st(c.1, fill, false)));
@@ -224,9 +226,8 @@ pub fn statusline(app: &App, w: usize) -> Vec<Seg> {
         first = false;
     }
     let parts: Vec<String> = if s.is_some() { layout.right.iter().map(|p| if p == "mode" { format!(" {} ", mode_name(badge)) } else { part(app, p) }).filter(|x| !x.is_empty()).collect() } else { vec![] };
-    let right = if s.is_some() && !parts.is_empty() { format!(" {} ", parts.join("  ")) } else { String::new() };
     // ⇄ while :serve runs (Serve area)
-    let right = crate::serve::statusline_right(app, s.map(|_| right)).unwrap_or_default();
+    let right = crate::serve::statusline_right(app, s.map(|_| parts.as_slice()));
     let fill = w.saturating_sub(left_w + width(&right));
     out.push(Seg::new(" ".repeat(fill), t.hl(if first { "StatusLine" } else { "StatusLineNC" })));
     out.push(Seg::new(right, t.hl("StatusLine")));
@@ -367,4 +368,27 @@ pub fn cmdline(app: &App, w: usize) -> Vec<Seg> {
 pub fn cursor_pos(app: &App, input: bool) -> usize {
     let (c, text) = if input { (&app.windows.input_cursor, &app.input) } else { (&app.windows.cmd_cursor, &app.cmd) };
     if c.seen == *text { c.pos } else { text.chars().count() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::text::segs_plain;
+
+    #[test]
+    fn demo_mode_is_a_badge_or_part_of_the_mode_section() {
+        let mut a = crate::app::tests::app();
+        a.serve.demo = true;
+        // the plain statusline: a badge of its own after the mode's
+        let row = segs_plain(&statusline(&a, 80));
+        assert!(row.starts_with(" NORMAL  DEMO  [no session] "), "{row}");
+        // powerline: the mode section says it (src/app.ts renderPowerline)
+        a.config.ui.icons = "nerd".into();
+        a.config.style.separators = Some("round".into());
+        let row = segs_plain(&statusline(&a, 80));
+        assert!(row.starts_with("\u{e0b6} \u{e62b} NORMAL · DEMO \u{e0b4}"), "{row}");
+        assert!(!row.contains(" DEMO  "), "no badge of its own: {row}");
+        a.serve.demo = false;
+        assert!(segs_plain(&statusline(&a, 80)).starts_with("\u{e0b6} \u{e62b} NORMAL \u{e0b4}"));
+    }
 }
