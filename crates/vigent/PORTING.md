@@ -167,10 +167,10 @@ non-binary parts of the others. These fail and are the areas' targets:
 | e2e 5: no agent CLI and no API key: the demo starts | Serve (demo) |
 | fork 5: a split forks once | Windows (splits), Sessions (fork) |
 | layout 6: sidebar on the right and a statusline of your own | Windows |
-| permissions-panel 4: two vigents open at once | Engines |
-| pi-live 1: vigent --engine pi | Engines |
+| permissions-panel 4: two vigents open at once (needs the :permissions panel and config.toml writing) | Engines, Config |
+| pi-live 1: vigent --engine pi — the pi half passes (reply, model in the winbar, tools, edit in the worktree); the restart half needs agents reopened at startup | Sessions (Restore) |
 | project-config 12: untrusted .vigent.toml, :trust, vigent trust | Config |
-| reopen-without-pi 1-4 | Sessions (Restore), Engines |
+| reopen-without-pi 1-4 (engines side is ready: `engines::select`, pi.rs; needs reopening at startup) | Sessions (Restore) |
 | user-commands 5: a [commands] shell command from config.toml | Config |
 | worktree-background 2: keys while a worktree is made, the prompt waits | Sessions |
 
@@ -298,7 +298,7 @@ below means it's also *used*.
 - [x] `engine` (`auto`, a built-in, or a custom one) — **Engines**
 - [x] `leader` / `mapleader` — **Config**
 - [ ] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `termguicolors`, `transparent`, `whichkey` — **Windows** (`[x]` `timeoutlen`); `notify` — **Serve**
-- [x] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow` `[x]`, `ask` `[ ]` (asking to allow isn't in this build: the transcript says which rule to add) — **Engines**
+- [x] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow` `[x]`, `ask` `[x]` (always-allow isn't written to config.toml yet) — **Engines**
 - [x] `[engines.<id>]` with `command`: `name`, `output`, `model_args`, `models`, `resume_args` — **Engines**
 - [x] `[keys]`, `[keys.normal|insert|visual|command]` — **Config**
 - [ ] `[highlights]` (tables, `:hi` strings, links) — **Config**
@@ -323,7 +323,7 @@ below means it's also *used*.
 - [x] detection: installed, version, signed in, install hints, the ANTHROPIC_API_KEY rule (`dropEnv`) — **Engines**
 - [x] `defaultEngine` (auto: first signed-in CLI, else pi with a key) — **Engines**
 - [x] model and effort choices (`src/choices.ts`) — **Engines**
-- [~] Claude Code permission denials: what was refused and the rule that allows it `[x]`; ask to allow once/always and retry (`askToAllow`), `:permissions` panel and its file `[ ]` — **Engines**
+- [~] Claude Code permission denials: what was refused and the rule that allows it `[x]`; `[engines.claude] ask`: allow once / always (kept for the session; writing config.toml waits for Config's line editor) and retry `[x]`; `:permissions` panel and its file `[ ]` — **Engines**
 - [ ] fork a conversation (`--fork-session`, `--resume-session-at`) — **Sessions** with **Engines**
 
 ### Sessions, Review, Windows, Serve features beyond commands and keys

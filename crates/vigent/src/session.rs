@@ -94,6 +94,8 @@ pub struct Session {
     pub launch: engines::Launch,
     /// a pi agent's RPC process (engines/pi.rs)
     pub pi: Option<Box<engines::pi::Pi>>,
+    /// tools the CLI refused, to ask you about ([engines.claude] ask)
+    pub ask: Option<engines::permissions::Ask>,
 }
 
 fn tokens_text(n: u64) -> String {
@@ -140,6 +142,7 @@ impl Session {
             finishing: false,
             launch: Default::default(),
             pi: None,
+            ask: None,
         }
     }
 
@@ -241,6 +244,7 @@ impl Session {
         self.aborted = false;
         self.finishing = false;
         self.last_error = None;
+        self.ask = None;
         self.stderr.clear();
         self.launch = launch.clone();
         let name = engines::engine_name(&self.engine);
@@ -351,9 +355,11 @@ impl Session {
                     )
                     .unwrap_or_else(|| "default".into());
                     let rel = |s: &str| self.relative(s);
-                    let notes = engines::permissions::blocked_notes(&self.engine, &name, &tools, &self.launch.allow, &mode, &rel);
+                    let (notes, ask) = engines::permissions::blocked(&self.engine, &name, &tools, &self.launch.allow, &mode, self.launch.ask, &rel);
                     self.end_streaming();
                     self.items.extend(notes.into_iter().map(Item::Info));
+                    // [engines.claude] ask: once the CLI exits, the App asks you (engines::select::ask_to_allow)
+                    self.ask = ask;
                 }
                 Ev::TurnEnd => {
                     // done for you now; the CLI's result (usage, refused tools) still comes when it exits
@@ -403,9 +409,15 @@ impl Session {
         }
         self.end_streaming();
         if self.aborted {
+            self.ask = None;
             if self.state == State::Running {
                 self.state = State::Idle;
             }
+            return;
+        }
+        if self.ask.is_some() {
+            // it's asking you whether to allow what was refused
+            self.state = State::Waiting;
             return;
         }
         if self.done_seen {

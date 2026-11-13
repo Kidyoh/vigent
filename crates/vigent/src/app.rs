@@ -456,6 +456,10 @@ impl App {
             let Ok(Some(status)) = child.try_wait() else { continue };
             a.exited(status, i == self.focus);
             self.refresh_stat(i);
+            if self.sessions[i].ask.is_some() {
+                engines::select::ask_to_allow(self, i);
+                continue;
+            }
             self.drain(i);
         }
     }

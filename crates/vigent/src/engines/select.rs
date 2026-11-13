@@ -322,6 +322,66 @@ pub fn choose_engine(app: &mut App, value: &str) {
     app.say(format!("new agents run on {}{auto}{warn}{open} · :settings, w keeps it", engine_name(now)), group);
 }
 
+/// Claude Code refused agent `i` some tools ([engines.claude] ask = true): allow them for
+/// one retry, always ([engines.claude] allow, for this session), or leave them blocked (TS askToAllow).
+pub fn ask_to_allow(app: &mut App, i: usize) {
+    let Some(ask) = app.sessions[i].ask.clone() else { return };
+    let list = ask.missing.join(", ");
+    let items = vec![
+        Choice::new("allow once", None, Some(&format!("{list}, for this retry"))),
+        Choice::new("always allow", None, Some(&format!("{list}, saved to [engines.claude] allow"))),
+        Choice::new("no", None, Some("leave it blocked")),
+    ];
+    let title = format!("'{}' was blocked · {}", app.sessions[i].name, ask.what);
+    let p = Picker::new(&title, Some(items), "", false, Some(3), Box::new(move |app, v| {
+        let s = &mut app.sessions[i];
+        // aborted, or a new prompt was sent meanwhile
+        if s.ask.take().is_none() || s.state != crate::session::State::Waiting {
+            return;
+        }
+        let choice = v.as_deref().filter(|v| *v != "no");
+        let Some(choice) = choice else {
+            s.items.push(crate::session::Item::Info("left blocked".into()));
+            s.state = crate::session::State::Idle;
+            return app.drain(i);
+        };
+        let always = choice == "always allow";
+        if always {
+            // kept for this session; writing it to config.toml waits for the Config area's
+            // line-by-line editor (src/config-edit.ts setTomlValue)
+            let mut o = app.config.engine_options("claude").cloned().unwrap_or_default();
+            let mut allow = o.allow.unwrap_or_default();
+            for r in &ask.missing {
+                if !allow.contains(r) {
+                    allow.push(r.clone());
+                }
+            }
+            o.allow = Some(allow);
+            match app.config.engines.iter_mut().find(|(k, _)| k == "claude") {
+                Some(slot) => slot.1 = o,
+                None => app.config.engines.push(("claude".into(), o)),
+            }
+        }
+        let how = if always { "always allowed" } else { "allowed once" };
+        app.sessions[i].items.push(crate::session::Item::Info(format!("{how}: {} · retrying", ask.missing.join(", "))));
+        // the retry runs with the rules allowed; it isn't a prompt of yours, so it stays out of the transcript
+        let text = format!("You now have permission to use {}. Retry what was blocked, then carry on with the task.", ask.rules.join(", "));
+        let mut l = launch(app, "claude");
+        for r in &ask.missing {
+            if !l.allow.contains(r) {
+                l.allow.push(r.clone());
+            }
+        }
+        let tx = app.tx.clone();
+        let s = &mut app.sessions[i];
+        s.send(text.clone(), &l, tx);
+        if let Some(j) = s.items.iter().rposition(|x| *x == crate::session::Item::User(text.clone())) {
+            s.items.remove(j);
+        }
+    }));
+    picker::open(app, p);
+}
+
 /// Model and effort for new agents at startup: [engines.<id>] model/effort, `model` (pi's), and --model
 /// (pi's, or the --engine CLI's) (cli.ts: newAgentModel, piModel, requested).
 pub fn startup(app: &mut App, model_arg: Option<&str>, engine_arg: Option<&str>) {
@@ -436,6 +496,27 @@ mod tests {
         ];
         assert_eq!(cant_start(&a, None).unwrap(), "no engine is signed in: run claude auth login or codex login, or for pi export ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY) · :checkhealth");
         assert_eq!(cant_start(&a, Some("claude")), None, "an engine you picked yourself still starts");
+    }
+
+    #[test]
+    fn a_refused_tool_is_asked_about_when_ask_is_on() {
+        let mut a = app();
+        let mut s = Session::new(0, "pr", "claude", "/nope".into());
+        s.launch.ask = true;
+        s.state = crate::session::State::Running;
+        s.apply(vec![super::super::Ev::Denied(vec![super::super::permissions::denial("Bash", serde_json::json!({"command": "gh pr view 12"}))])], true);
+        assert!(s.ask.is_some());
+        a.sessions.push(s);
+        a.focus = 0;
+        ask_to_allow(&mut a, 0);
+        let p = a.engines.picker.as_ref().unwrap();
+        assert_eq!(p.title, "'pr' was blocked · gh pr view 12");
+        let rows: String = p.render(100, "unicode").iter().flat_map(|r| r.iter().map(|(s, _)| s.clone())).collect();
+        assert!(rows.contains("allow once") && rows.contains("always allow") && rows.contains("saved to [engines.claude] allow"));
+        // no: left blocked
+        a.sessions[0].state = crate::session::State::Waiting;
+        crate::engines::picker::key(&mut a, crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('q'), crossterm::event::KeyModifiers::NONE));
+        assert_eq!(a.sessions[0].items.last(), Some(&crate::session::Item::Info("left blocked".into())));
     }
 
     #[test]

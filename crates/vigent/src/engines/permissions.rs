@@ -217,9 +217,45 @@ pub fn allow_rules(d: &Denial) -> Vec<String> {
     vec![d.name.clone()]
 }
 
-/// What the transcript says when the CLI refused some tools (TS CliSession.blocked,
-/// without asking: [engines.claude] ask is reported as not in this build).
-/// `relative` shortens paths inside the agent's folder.
+/// What to ask when [engines.claude] ask is on: allow these rules once, always, or not.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ask {
+    /// what was refused, short
+    pub what: String,
+    /// the rules not allowed yet (what allowing adds)
+    pub missing: Vec<String>,
+    /// every rule that would allow what was refused (the retry names them)
+    pub rules: Vec<String>,
+}
+
+/// What the transcript says when the CLI refused some tools, and what to ask
+/// when `ask` is on (TS CliSession.blocked). `relative` shortens paths inside the agent's folder.
+pub fn blocked(engine: &str, engine_name: &str, all: &[Denial], allowed: &[String], permission_mode: &str, ask: bool, relative: &dyn Fn(&str) -> String) -> (Vec<String>, Option<Ask>) {
+    let mut notes = blocked_notes(engine, engine_name, all, allowed, permission_mode, relative);
+    let asking = ask && engine == "claude" && notes.last().is_some_and(|n| n.starts_with("to allow it: "));
+    if !asking {
+        return (notes, None);
+    }
+    notes.pop();
+    let denied: Vec<&Denial> = all.iter().filter(|d| !INTERACTIVE_TOOLS.contains(&d.name.as_str())).collect();
+    let mut what: Vec<String> = vec![];
+    let mut rules: Vec<String> = vec![];
+    for d in &denied {
+        let w = describe_denial(d);
+        if !what.contains(&w) {
+            what.push(w);
+        }
+        for r in allow_rules(d) {
+            if !rules.contains(&r) {
+                rules.push(r);
+            }
+        }
+    }
+    let missing = rules.iter().filter(|r| !allowed.contains(r)).cloned().collect();
+    (notes, Some(Ask { what: what.join(" · "), missing, rules }))
+}
+
+/// What the transcript says when the CLI refused some tools (TS CliSession.blocked, not asking).
 pub fn blocked_notes(engine: &str, engine_name: &str, all: &[Denial], allowed: &[String], permission_mode: &str, relative: &dyn Fn(&str) -> String) -> Vec<String> {
     let mut notes = vec![];
     let denied: Vec<&Denial> = all
@@ -317,6 +353,10 @@ mod tests {
         assert!(n[1].starts_with("Bash(gh:*) is allowed, and Claude Code still refused"));
         let q = [denial("AskUserQuestion", json!({"questions": [{"question": "Which?", "options": [{"label": "A"}, {"label": "B"}]}]}))];
         assert_eq!(blocked_notes("claude", "Claude Code", &q, &[], "default", &id), ["Claude Code wanted to ask you: Which? (A / B) · answer with i"]);
+        let (n, ask) = blocked("claude", "Claude Code", &d, &[], "acceptEdits", true, &id);
+        assert_eq!(n, ["blocked by Claude Code's permissions: gh pr view 12"]);
+        assert_eq!(ask, Some(Ask { what: "gh pr view 12".into(), missing: vec!["Bash(gh:*)".into()], rules: vec!["Bash(gh:*)".into()] }));
+        assert_eq!(blocked("codex", "Codex", &d, &[], "", true, &id).1, None, "only Claude Code is asked about");
         assert_eq!(flag_value(&["--permission-mode".into(), "plan".into()], "--permission-mode").as_deref(), Some("plan"));
         assert_eq!(flag_value(&["--permission-mode=plan".into()], "--permission-mode").as_deref(), Some("plan"));
     }
