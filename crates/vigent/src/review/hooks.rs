@@ -170,7 +170,9 @@ mod app_tests {
             a.watch_states();
         }
         settle(&mut a, &rx, |_| calls.lock().unwrap().len() == 2);
-        let got: Vec<(String, String, String)> = calls.lock().unwrap().iter().map(|(c, _, env)| (c.clone(), env_of(env, "VIGENT_STATE").into(), env_of(env, "VIGENT_AGENT").into())).collect();
-        assert_eq!(got, [("notify-send done".into(), "finished".into(), "tidy".into()), ("notify-send done".into(), "failed".into(), "tidy".into())]);
+        // each hook runs on a thread of its own, so they may come back in either order
+        let mut got: Vec<(String, String, String)> = calls.lock().unwrap().iter().map(|(c, _, env)| (c.clone(), env_of(env, "VIGENT_STATE").into(), env_of(env, "VIGENT_AGENT").into())).collect();
+        got.sort();
+        assert_eq!(got, [("notify-send done".into(), "failed".into(), "tidy".into()), ("notify-send done".into(), "finished".into(), "tidy".into())]);
     }
 }
