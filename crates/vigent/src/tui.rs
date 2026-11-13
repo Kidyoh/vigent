@@ -20,6 +20,26 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
     for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP, signal_hook::consts::SIGINT] {
         let _ = signal_hook::flag::register(sig, Arc::clone(&stop));
     }
+    // A terminal that hung up (its window closed) leaves crossterm reading EOF in a
+    // loop, so the loop below never sees the signal: if it hasn't ended a moment after
+    // one, stop the agents vigent started (its process group: pi, a CLI's run) and exit.
+    #[cfg(unix)]
+    {
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            std::thread::sleep(Duration::from_millis(1500));
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let pgid = stat.rsplit(')').next().and_then(|r| r.split_whitespace().nth(2)).map(str::to_string);
+            // only a group vigent leads (a terminal's own session): never the script that started it
+            if pgid.as_deref() == Some(std::process::id().to_string().as_str()) {
+                let _ = std::process::Command::new("kill").args(["-TERM", "--", &format!("-{}", std::process::id())]).status();
+            }
+            std::process::exit(129);
+        });
+    }
     let (tx, rx) = channel();
     let mut app = App::new(version, cwd, theme_name, config, keymap, tx.clone());
     if !warnings.is_empty() {
