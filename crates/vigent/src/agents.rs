@@ -835,9 +835,10 @@ impl App {
     // watching: notifications, records, hooks
     // -----------------------------------------------------------------
 
-    /// Shown on screen (Windows area: in any window of a split).
+    /// Shown in the current window or any other of a split (src/app.ts onScreen).
     pub fn on_screen(&self, i: usize) -> bool {
-        i == self.focus
+        let l = &self.windows.layout;
+        i == self.focus || l.all().into_iter().any(|id| id != l.cur && l.win(id).session == Some(i))
     }
 
     /// Every frame: agents that stopped running. If you're not looking, say so
@@ -1234,6 +1235,35 @@ mod tests {
         assert!(a.sessions[0].unread);
         a.focus_changed(true);
         assert!(!a.sessions[0].unread, "seeing it counts as reading it");
+    }
+
+    #[test]
+    fn an_agent_in_another_window_of_a_split_counts_as_seen() {
+        let mut a = two();
+        (a.windows.cols, a.windows.rows) = (130, 30);
+        assert!(a.on_screen(0) && !a.on_screen(1));
+        // the window left behind keeps showing 'fix the race'; the new one shows 'add retries'
+        crate::commands::exec(&mut a, "vsplit add retries");
+        assert_eq!((a.windows.layout.count(), a.focus), (2, 1), "{}", a.message.0);
+        assert!(a.on_screen(0), "shown in the other window");
+        assert!(a.on_screen(1));
+        a.sessions[0].state = State::Running;
+        a.watch_states();
+        a.sessions[0].state = State::Idle;
+        a.watch_states();
+        assert!(!a.sessions[0].unread, "you could see it finish");
+        assert!(a.agents.alerts.as_ref().unwrap().is_empty(), "no bell for what's on screen");
+        assert!(!a.message.0.contains("finished"), "no 'finished' message: {}", a.message.0);
+        // one window again, on 'add retries': 'fix the race' is out of sight
+        crate::commands::exec(&mut a, "only");
+        assert_eq!((a.windows.layout.count(), a.focus), (1, 1));
+        assert!(!a.on_screen(0));
+        a.sessions[0].state = State::Running;
+        a.watch_states();
+        a.sessions[0].state = State::Idle;
+        a.watch_states();
+        assert!(a.sessions[0].unread);
+        assert_eq!(a.agents.alerts.as_ref().unwrap().len(), 1);
     }
 
     #[test]

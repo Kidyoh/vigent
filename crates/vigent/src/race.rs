@@ -418,8 +418,8 @@ impl App {
                 format!("{} {}{changes}", r.label(x), took(t))
             })
             .collect();
-        let focus = self.focus;
-        let unseen = !self.agents.terminal_focused || r.racers.iter().any(|&x| x != focus);
+        let racers = r.racers.clone();
+        let unseen = !self.agents.terminal_focused || racers.iter().any(|&x| !self.on_screen(x));
         self.say(format!("race over: {} · :race compares them", results.join(" · ")), "ModeMsg");
         if unseen {
             let bytes = alert_sequence("vigent: the race is over", &self.config.ui.notify, &|k| std::env::var(k).ok());
