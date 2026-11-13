@@ -34,7 +34,12 @@ Size matters: std over crates, no async runtime, no HTTP framework. The
 release profile is size-tuned. After the foundation the binary is 1,797,880
 bytes (1.5 MB before; the config loader, the keymap and a hand-written TOML
 reader account for the rest. `toml_edit` would have added ~170 KB, and
-`src/config-edit.ts` edits line by line anyway).
+`src/config-edit.ts` edits line by line anyway). With the Sessions area it is
+2,240,584 bytes: records, restore, races, templates, hooks, notifications,
+and riftri's inspect/repair/storage accounting (~90 KB of that is
+`storage_accounting` for the "N worktrees: X of files in Y on disk" line;
+`riftri_health` uses riftri's storage probe instead of `doctor`, which would
+add ~100 KB more).
 
 ## Module map
 
@@ -47,6 +52,7 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `session.rs` | `src/session.ts`, `CliSession` in `src/cli-engines.ts` | one agent: states, queue, hold/release, pause/resume, abort, transcript items, folding engine events | Sessions |
 | `records.rs` | `src/agents.ts` | the agent record in `.git/worktrees/<n>/vigent/agent.json`: format (unknown keys kept), load/save/update, `set_detached`, `restorable`, `reopenable` (riftri views repaired first), `iso_now` | Sessions (Restore) |
 | `agents.rs` | `App.startAgent`, `killFocused`, `execAttach`, `execWorktree`, `execQueue`, `watchState`, hooks in `src/app.ts`; `reopen`, `movedOffPi`, `persist`, `forkSession` in `src/cli.ts`; `src/notify.ts`, `src/hooks.ts`, `src/templates.ts` | `impl App` for agents' lives: start (worktree in the background, record saved when it's made), restore at startup, `:kill`/`:attach`/`:worktrees`, queue/pause/resume, forks for splits (`fork_session`, `add_session`), notifications (bell, OSC 9, ◆, focus reporting), `worktree_created`/`agent_finished` hooks, templates, y/n questions (`ask`); its state is `App::agents` | Sessions |
+| `tree.rs` | `src/tree.ts` | `:tree` rows from pi's session tree (`flatten`); the pi session feeds it | Sessions |
 | `race.rs` | `src/race.ts`, `App.execRace`/`startRace`/`watchRace`/`openRace`/`pickRacer` | `:race` | Sessions |
 | `engines/mod.rs` | `src/cli-engines.ts`, `src/engines.ts`, `src/choices.ts` | `Adapter` trait, `RunOpts`, `Ev`, `EngineInfo`, `KNOWN`, `ADAPTERS` registry, `efforts()`, detection | Engines |
 | `engines/claude.rs` | `claudeAdapter`, `detectClaude` | Claude Code | Engines |
