@@ -795,7 +795,8 @@ impl App {
         }
         for a in &r.agents {
             let s = self.reopen(&a.meta, &a.branch, &a.path, a.backend.clone());
-            self.add_session(s, false);
+            let i = self.add_session(s, false);
+            self.start_reopened(i);
         }
         let n = self.open().len();
         if n > 0 {
@@ -968,8 +969,18 @@ impl App {
         let _ = records::save(&w.path, &AgentMeta { detached: false, ..meta.clone() }); // reopened at the next start again
         let s = self.reopen(&meta, &branch, &w.path, view.backend);
         let name = s.name.clone();
-        self.add_session(s, true);
+        let i = self.add_session(s, true);
+        self.start_reopened(i);
         self.say(format!("attached '{name}' to {branch}"), "ModeMsg");
+    }
+
+    /// A reopened pi agent starts pi at once, as the TypeScript's PiSession does:
+    /// its conversation comes back from pi's session file (engines/pi.rs). The
+    /// CLIs continue theirs at the next prompt.
+    fn start_reopened(&mut self, i: usize) {
+        if self.sessions[i].engine == "pi" && engines::detect::on_path("pi", &self.engines.env) {
+            engines::pi::warm(self, i);
+        }
     }
 
     /// `:worktrees` lists them; `:worktree remove[!] <branch>` deletes one.
