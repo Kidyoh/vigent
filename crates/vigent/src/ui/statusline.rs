@@ -23,6 +23,9 @@ pub fn draw(f: &mut Frame, app: &App, r: Rect) {
     };
     let sl = t.hl("StatusLine");
     let mut left = vec![Span::styled(format!(" {mode} "), t.hl(mode_group).add_modifier(Modifier::BOLD))];
+    if app.serve.demo {
+        left.push(Span::styled(" DEMO ", t.hl("VigentModeCommand")));
+    }
     let mut right = String::new();
     match app.focused() {
         Some(a) => {
@@ -36,6 +39,8 @@ pub fn draw(f: &mut Frame, app: &App, r: Rect) {
         }
         None => left.push(Span::styled(" [no session]", sl)),
     }
+    // ⇄ while :serve runs (Serve area)
+    right = crate::serve::statusline_right(app, app.focused().map(|_| right)).unwrap_or_default();
     let used: usize = left.iter().map(|s| width(&s.content)).sum();
     let gap = (r.width as usize).saturating_sub(used + width(&right));
     left.push(Span::styled(" ".repeat(gap), sl));

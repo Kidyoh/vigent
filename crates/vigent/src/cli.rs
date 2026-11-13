@@ -225,11 +225,6 @@ pub fn main(args: Vec<String>) -> i32 {
         eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
         return 1;
     }
-    for (flag, given) in [("--demo", opts.demo), ("--serve", opts.serve)] {
-        if given {
-            warnings.push(format!("{flag} isn't in this build yet (PORTING.md)"));
-        }
-    }
     crate::tui::run(VERSION, cwd, &theme_name, config, keymap, warnings, &opts)
 }
 

@@ -9,6 +9,8 @@ const THEMES: &str = include_str!("themes.txt");
 pub struct Theme {
     pub name: String,
     groups: HashMap<String, Style>,
+    /// Normal's background as the theme sets it, even when a transparent theme doesn't paint it (the :serve page)
+    pub normal_bg: Option<Color>,
 }
 
 /// Every built-in theme's name: default first, then the rest in order (as `vigent theme list` prints them).
@@ -49,6 +51,7 @@ pub fn load(name: &str) -> Option<Theme> {
     let head = lines.next()?;
     let transparent = head.ends_with(" transparent");
     let mut groups = HashMap::new();
+    let mut normal_bg = None;
     for l in lines.take_while(|l| !l.starts_with("theme ")) {
         let f: Vec<&str> = l.split(' ').collect();
         if f.len() != 4 {
@@ -59,6 +62,9 @@ pub fn load(name: &str) -> Option<Theme> {
             s = s.fg(c);
         }
         if let Some(c) = color(f[2], tc) {
+            if f[0] == "Normal" {
+                normal_bg = Some(c);
+            }
             if !(transparent && f[0] == "Normal") {
                 s = s.bg(c);
             }
@@ -70,13 +76,17 @@ pub fn load(name: &str) -> Option<Theme> {
         }
         groups.insert(f[0].to_string(), s);
     }
-    Some(Theme { name: name.to_string(), groups })
+    Some(Theme { name: name.to_string(), groups, normal_bg })
 }
 
 impl Theme {
     /// A highlight group, Normal's when the theme doesn't set it.
     pub fn hl(&self, group: &str) -> Style {
         self.groups.get(group).copied().unwrap_or_else(|| self.normal())
+    }
+    /// A group the theme sets (None: it doesn't).
+    pub fn group(&self, group: &str) -> Option<Style> {
+        self.groups.get(group).copied()
     }
     pub fn normal(&self) -> Style {
         self.groups.get("Normal").copied().unwrap_or_default()

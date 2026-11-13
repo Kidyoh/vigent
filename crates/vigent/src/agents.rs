@@ -348,6 +348,10 @@ impl App {
                 return None;
             }
         };
+        // demo mode: a scripted agent, its worktree only shown (serve/demo.rs)
+        if self.serve.demo {
+            return Some(crate::serve::demo::start_agent(self, name, o.model.clone(), o.worktree));
+        }
         let with_worktree = o.worktree != Some(false) && self.config.worktree.enabled;
         let index = self.sessions.len();
         let mut s = Session::new(index, name, engine, self.cwd.clone());

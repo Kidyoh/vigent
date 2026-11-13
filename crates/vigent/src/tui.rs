@@ -45,8 +45,13 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
     // --engine / config's engine, and model and effort for new agents (before agents reopen: one saved
     // on pi moves to the engine new agents use when pi isn't here)
     crate::engines::select::startup(&mut app, opts.model.as_deref(), opts.engine.as_deref());
-    // the agents that were open when vigent last quit (Sessions area); warnings are said after, over its message
-    app.restore(&mut warnings);
+    // demo mode (scripted agents), else the agents that were open when vigent last quit (Sessions area);
+    // warnings are said after, over its message
+    if crate::serve::demo::wanted(&app, opts.demo) {
+        crate::serve::demo::begin(&mut app, opts.demo, &mut warnings);
+    } else {
+        app.restore(&mut warnings);
+    }
     if !warnings.is_empty() {
         app.say(warnings.join(" · "), "WarningMsg");
     }
@@ -56,6 +61,8 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
         let _ = tx.send(Msg::Engines(crate::engines::detect_all(&env, 8000)));
     });
 
+    // --serve: follow from your phone from the start (same as :serve)
+    crate::serve::startup(&mut app, opts.serve, opts.local);
     // ratatui::init restores the terminal on a panic too
     let mut terminal = ratatui::init();
     // focus reports let a notification skip the agent you're looking at

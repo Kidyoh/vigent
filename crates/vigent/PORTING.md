@@ -77,7 +77,10 @@ add ~100 KB more).
 | `help.rs` | `App.openHelp` | `:help` | Config |
 | `review.rs` | `src/review.ts`, `hunks.ts`, `hunk-review.ts`, `diffview.ts`, `export.ts` | `Review` state (stub) | Review |
 | `windows.rs` | `src/windows.ts`, `line-edit.ts`, `search.ts`, `completion.ts` | `Windows` state (stub) | Windows |
-| `serve.rs` | `src/serve.ts`, `serve-page.ts`, `demo.ts`, `notify.ts` | `Serve` state (stub) | Serve |
+| `serve.rs` | `App.execServe`, `serveHost`, `openServeInfo`, `openUsage`, `agentSummary`/`itemJson`/`preview` in `src/serve.ts` | `Serve` state (server, page versions, demo), `:serve`, `--serve`, `:cost`, `AppHost` (the server's calls run on the UI thread through `Msg::Run`) | Serve |
+| `serve/http.rs` | `startServer`, `newAccessCode`, `lanAddresses` | the HTTP server: std `TcpListener`, a thread per connection, SSE broadcaster, auth and lock-out, routes; `Host` trait (tests pass their own) | Serve |
+| `serve/page.rs`, `serve/page.html` | `src/serve-page.ts`, `extractPalette` | the phone page (page.html is `servePage`'s output with @@placeholders@@) | Serve |
+| `serve/demo.rs` | `src/demo.ts`, `DemoSession` | demo mode: scripted agents, played on a thread | Serve |
 | `ui/mod.rs` | `App.render` | lays out the parts below | Windows |
 | `ui/sidebar.rs` | sidebar | sessions + engines | Windows |
 | `ui/transcript.rs`, `ui/markdown.rs` | `buildPaneLines`, `src/markdown.ts` | the transcript | Windows |
@@ -177,6 +180,22 @@ area consumes yet (remove your flag from that list when you wire it).
     pi's tree yet.
   - Serve: `:usage`/`:cost` read `Session::tokens`/`cost` (restored from the
     record) and `session::total_usage`/`format_usage`.
+- Serve area:
+  - The page's agent ids are slot + 1 (TypeScript's start at 1 and count up the
+    same way); an agent's `version` is bumped when what the page shows of it
+    changes (a fingerprint the server compares), not on every emit.
+  - The event stream is polled: the agent list is built on the UI thread every
+    120 ms while a phone follows and sent when it changed (TypeScript coalesces
+    `onChange` the same 120 ms). Responses close their connection.
+  - A tool's output is "" on the page: Rust's transcript keeps no tool output yet.
+  - `:serve 99999` says node's port error; other bind errors are the OS's wording.
+  - Demo agents run on engine "pi" (DemoSession's default), so they show their model.
+  - Hooks into shared files: `App::send` and `App::start_agent` hand demo agents
+    to serve/demo.rs; `tui::run` starts demo mode instead of restoring agents
+    and runs `--serve`; the statusline draws ` DEMO ` and ⇄ through
+    `serve::statusline_right`; `Theme::group` and `Theme::normal_bg` (a
+    transparent theme's background) give the page its palette;
+    `Session::streaming_at` marks a streaming reply.
 - Kill keeps the slot (`Session::closed`): `App::open()` is the list the
   TypeScript's `sessions` array is; forks name their original by slot (`fork_of`).
 - An agent that finishes goes idle, and unread (◆) when you weren't looking,
@@ -194,7 +213,6 @@ parts of the others. These fail and are the areas' targets:
 |---|---|
 | e2e 2: first run ... follows up, and comes back after a restart | Sessions (Restore), Engines |
 | e2e 3: @ in a prompt: pick a file | Windows (line editor, attach picker) |
-| e2e 5: no agent CLI and no API key: the demo starts | Serve (demo) |
 | fork 5: a split forks once (Sessions' `fork_session` is there; needs `<C-w>v` and the Claude parser's `Message` event) | Windows (splits), Engines |
 | layout 6: sidebar on the right and a statusline of your own | Windows |
 | permissions-panel 4: two vigents open at once (needs the :permissions panel and config.toml writing) | Engines, Config |
@@ -215,8 +233,8 @@ parts of the others. These fail and are the areas' targets:
 - [x] `--theme <name>` — **Config**
 - [x] `--engine <id>` (every built-in engine and yours; unknown exits 1 as in TypeScript) — **Engines**
 - [x] `--model <id>` (pi's, or the `--engine` CLI's) — **Engines**
-- [ ] `--demo` (and the automatic demo when nothing can run agents) — **Serve**
-- [ ] `--serve [--local]` — **Serve**
+- [x] `--demo` (and the automatic demo when nothing can run agents: no engine chosen, no pi with a key, no Claude Code/Codex/OpenCode or engine of your own on PATH) — **Serve**
+- [x] `--serve [--local]` — **Serve**
 - [x] `vigent theme list` (built-ins; installed themes in `~/.config/vigent/themes` too) — **Config** `[~]`
 - [ ] `vigent theme path` — **Config**
 - [ ] `vigent theme new <name> [--from <theme>] [--palette] [--transparent|--no-transparent]` — **Config**
@@ -283,8 +301,8 @@ Config:
 - [ ] `:trust` — **Config**
 
 Serve:
-- [ ] `:serve [port] [local]`, `:serve stop`, serve info float — **Serve**
-- [ ] `:cost` `:usage` — **Serve**
+- [x] `:serve [port] [local]`, `:serve stop`, serve info float, ⇄ on the statusline — **Serve**
+- [~] `:cost` `:usage` (the float; Enter on a row doesn't open that agent until floats can select) — **Serve**
 
 ### Keys (`src/keys.ts` `DEFAULT_KEYS`; every one is bound, handlers below)
 
@@ -368,6 +386,6 @@ below means it's also *used*.
 - [ ] diff view, hunk review, merge, PR, transcript export — **Review**
 - [ ] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`), icons (`src/icons.ts`), styles (`src/style.ts`), pickers (`src/picker.ts`), confirm prompts — **Windows**
 - [x] desktop notification / bell when an agent finishes elsewhere, focus reporting, `[ui] notify` (`src/notify.ts`, in agents.rs) — **Sessions**
-- [ ] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`) — **Serve**
-- [ ] demo sessions (`src/demo.ts`, `DemoSession`) — **Serve**
-- [ ] usage float (`:usage`) — **Serve**
+- [x] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`): access code, bearer/`?code=` reads, header-only prompts and stops, constant-time compare, 10 wrong codes lock it, the page in the theme's colors, the agent list over SSE, follow-ups, stop, new agents, LAN addresses — **Serve**
+- [~] demo sessions (`src/demo.ts`, `DemoSession`): the three scripted agents, streaming, prompts answered, `:new` in demo mode; a tool's output isn't shown (Rust's transcript keeps no tool output yet) — **Serve**
+- [~] usage float (`:usage`) — **Serve**
