@@ -9,16 +9,21 @@
 
 mod actions;
 mod app;
+mod attach;
 mod cli;
 mod commands;
+mod completion;
 mod config;
 mod engines;
 mod health;
 mod help;
 mod keys;
+mod line_edit;
 mod names;
+mod printable;
 mod records;
 mod review;
+mod search;
 mod serve;
 mod session;
 mod theme;

@@ -22,6 +22,7 @@ unicode-width = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
+libc = "0.2"
 
 # small: it's one file people download
 [profile.release]

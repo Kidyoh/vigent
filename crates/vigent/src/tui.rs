@@ -1,7 +1,7 @@
 //! The terminal and the loop: draw, read a key (or paste), handle what the
 //! threads sent, tick. Restores the terminal on exit, a signal or a panic.
 
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
+use crossterm::event::{self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange, Event, KeyEventKind};
 use crossterm::execute;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,18 +31,31 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
 
     // ratatui::init restores the terminal on a panic too
     let mut terminal = ratatui::init();
-    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    // the alternate screen (ratatui::init), pastes as text, and focus reports (the terminal window gained or lost focus)
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableFocusChange);
     let mut code = 0;
     while !app.quit && !stop.load(Ordering::Relaxed) {
-        if let Err(e) = terminal.draw(|f| crate::ui::draw(f, &mut app)) {
-            eprintln!("vigent: {e}");
-            code = 1;
-            break;
+        if std::mem::take(&mut app.windows.redraw) {
+            let _ = terminal.clear();
+        }
+        match terminal.draw(|f| crate::ui::draw(f, &mut app)) {
+            Ok(frame) => {
+                if !app.windows.links.is_empty() {
+                    crate::ui::write_links(&app, frame.buffer, &mut std::io::stdout());
+                }
+            }
+            Err(e) => {
+                eprintln!("vigent: {e}");
+                code = 1;
+                break;
+            }
         }
         match event::poll(Duration::from_millis(40)) {
             Ok(true) => match event::read() {
                 Ok(Event::Key(k)) if k.kind != KeyEventKind::Release => app.key(k),
                 Ok(Event::Paste(s)) => app.paste(&s),
+                Ok(Event::FocusGained) => app.windows.terminal_focused = true,
+                Ok(Event::FocusLost) => app.windows.terminal_focused = false,
                 _ => {}
             },
             Ok(false) => {}
@@ -54,7 +67,7 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
         app.tick();
     }
     app.shutdown();
-    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+    let _ = execute!(std::io::stdout(), DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
     code
 }

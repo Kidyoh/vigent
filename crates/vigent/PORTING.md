@@ -60,14 +60,22 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `health.rs` | `App.openHealth` | `:checkhealth` | Engines (engines part), Sessions (worktrees part) |
 | `help.rs` | `App.openHelp` | `:help` | Config |
 | `review.rs` | `src/review.ts`, `hunks.ts`, `hunk-review.ts`, `diffview.ts`, `export.ts` | `Review` state (stub) | Review |
-| `windows.rs` | `src/windows.ts`, `line-edit.ts`, `search.ts`, `completion.ts` | `Windows` state (stub) | Windows |
+| `windows.rs` | `src/windows.ts` | the split layout (`Layout`: tree, rects, split/close/resize/neighbour) and the area's state on `App::windows` (cursors, history, search, marks, jumps, VISUAL, picker, y/n question, sidebar focus, folds, your commands); `fork_session` | Windows |
+| `actions/windows.rs` | `App.handleInput`, `runAction` | every key first (`key`), counts, marks, the line editor, completion, search, VISUAL, folds, yank (OSC 52), window keys, sidebar keys, the start screen's keys, `@` picker, `ask` | Windows |
+| `commands/windows.rs` | `App.exec` | `:sp :vs :only :close :wincmd :b :bn :bp :ls :dash :noh :marks :jumps :history :set :map… :unmap… :command :delcommand :!`, your commands | Windows |
+| `line_edit.rs` | `src/line-edit.ts` | `LineBuffer`, `LineEditor` (vim NORMAL on a line), `HistoryWalk`, `remember` | Windows |
+| `completion.rs` | `src/completion.ts`, `src/suggest.ts`, `completeRaceArg` | `:` line completion, `closest` | Windows |
+| `search.rs` | `src/search.ts` | smartcase occurrences, hits, wrapscan | Windows |
+| `printable.rs` | `src/printable.ts`, `oneRow` | control characters out of agent text and screen rows | Windows |
+| `attach.rs` | `src/attach.ts` | files `@` offers, `mentionable` | Windows |
 | `serve.rs` | `src/serve.ts`, `serve-page.ts`, `demo.ts`, `notify.ts` | `Serve` state (stub) | Serve |
 | `ui/mod.rs` | `App.render` | lays out the parts below | Windows |
 | `ui/sidebar.rs` | sidebar | sessions + engines | Windows |
-| `ui/transcript.rs`, `ui/markdown.rs` | `buildPaneLines`, `src/markdown.ts` | the transcript | Windows |
+| `ui/pane.rs`, `ui/markdown.rs` | `buildPaneLines`, `renderWindow`, `src/markdown.ts` | the transcript as pane lines (plain text, item, message start, code block) and each window drawn (winbar, VISUAL, search highlight); markdown with tables, lists, quotes, links (OSC 8) | Windows |
+| `ui/picker.rs`, `ui/whichkey.rs`, `ui/icons.rs` | `src/picker.ts` ChoicePicker, `whichKeyPanel`, `ICONS` / `src/icons.ts` | pickers (fuzzy filter), which-key, icon sets and tool glyphs | Windows |
 | `ui/dashboard.rs` | `DASHBOARD`, start screen | logo, one-key actions, engines | Windows |
 | `ui/statusline.rs`, `ui/winbar.rs` | statusline, winbar, message line | | Windows |
-| `ui/floats.rs` | `src/float.ts`, `src/picker.ts` | `Float` windows (checkhealth, help) | Windows |
+| `ui/floats.rs` | `src/float.ts` | `Float` windows: rich lines, selectable rows (`on_select`), `]c`/`[c` jumps, `s` alternate | Windows |
 | `ui/text.rs` | `visibleWidth`, wrap | width, fit, pad, wrap | Windows |
 
 ## Extension points
@@ -156,15 +164,15 @@ non-binary parts of the others. These fail and are the areas' targets:
 |---|---|
 | custom-engines 7: the real vigent runs a custom engine from config.toml | Engines |
 | e2e 2: first run ... follows up, and comes back after a restart | Sessions (Restore), Engines |
-| e2e 3: @ in a prompt: pick a file | Windows (line editor, attach picker) |
+| e2e 3: @ in a prompt: pick a file | passes |
 | e2e 5: no agent CLI and no API key: the demo starts | Serve (demo) |
-| fork 5: a split forks once | Windows (splits), Sessions (fork) |
-| layout 6: sidebar on the right and a statusline of your own | Windows |
+| fork 5: a split forks once | Sessions/Engines: the split and `fork_session` are in; the Claude parser's `Ev::Message` (fork point) and the agent record are missing |
+| layout 6: sidebar on the right and a statusline of your own | Serve (`--demo`: the parts show only with an agent; Windows has the layout) |
 | permissions-panel 4: two vigents open at once | Engines |
 | pi-live 1: vigent --engine pi | Engines |
 | project-config 12: untrusted .vigent.toml, :trust, vigent trust | Config |
 | reopen-without-pi 1-4 | Sessions (Restore), Engines |
-| user-commands 5: a [commands] shell command from config.toml | Config |
+| user-commands 5: a [commands] shell command from config.toml | passes (Windows) |
 | worktree-background 2: keys while a worktree is made, the prompt waits | Sessions |
 
 ## Parity checklist
@@ -199,14 +207,14 @@ non-binary parts of the others. These fail and are the areas' targets:
 ### Ex commands (`App.exec` in `src/app.ts`)
 
 Core / windows and buffers:
-- [x] `:q` `:quit` `:x` `:wq` `:qa` `:qall` `:xa` `:wqa` (E37 when running), `:q!` `:quit!` `:qa!` `:qall!` — core; closing a split first is **Windows**
-- [x] `:help` `:h` (list every binding, yours too) — **Config** `[~]`
-- [ ] `:split` `:sp`, `:vsplit` `:vs` `:vsp` (with an agent: fork) — **Windows**
-- [ ] `:only` `:on`, `:close` `:clo`, `:wincmd` `:winc` — **Windows**
-- [ ] `:bnext` `:bn`, `:bprevious` `:bprev` `:bp` `:bNext` `:bN`, `:buffer` `:b <agent>` — **Windows**
-- [ ] `:ls` `:buffers` `:files`, `:dash` `:dashboard` — **Windows**
-- [ ] `:noh` `:nohl` `:nohlsearch` — **Windows**
-- [ ] `:marks`, `:jumps`, `:his` `:history` — **Windows**
+- [x] `:q` `:quit` `:x` `:wq` `:qa` `:qall` `:xa` `:wqa` (E37 when running), `:q!` `:quit!` `:qa!` `:qall!` — core; closing a split first is **Windows** `[x]`
+- [x] `:help` `:h` (every binding from the keymap, yours first, then EX_HELP) — **Windows**
+- [x] `:split` `:sp`, `:vsplit` `:vs` `:vsp` (with an agent: fork, `windows::fork_session`) — **Windows**
+- [x] `:only` `:on`, `:close` `:clo`, `:wincmd` `:winc` — **Windows**
+- [x] `:bnext` `:bn`, `:bprevious` `:bprev` `:bp` `:bNext` `:bN`, `:buffer` `:b <agent>` — **Windows**
+- [x] `:ls` `:buffers` `:files`, `:dash` `:dashboard` — **Windows**
+- [x] `:noh` `:nohl` `:nohlsearch` — **Windows**
+- [x] `:marks`, `:jumps`, `:his` `:history` — **Windows**
 
 Sessions:
 - [~] `:new <task>`, `:new!`, `--model`, `--engine`/`-e`, `--template`/`-t` — **Sessions**
@@ -237,13 +245,13 @@ Review:
 Config:
 - [~] `:colorscheme` `:colo` `:theme [name]` (picker without a name), `:theme save[!] [name]` — **Config**
 - [ ] `:hi` `:highlight` `:hi!` `:highlight!` (`Group guifg=… guibg=… gui=…`, `link A B`, `clear`) — **Config**
-- [ ] `:set` `:se` (`applySetCommand`: `opt`, `noopt`, `opt!`, `invopt`, `opt=val`, `opt?`, `opt&`) — **Config**
+- [x] `:set` `:se` (`applySetCommand`: `opt`, `noopt`, `opt!`, `invopt`, `opt=val`, `opt?`, `opt&`) — **Windows** (commands/windows.rs)
 - [ ] `:settings` `:options` `:prefs` — **Config**
 - [ ] `:let mapleader = "<key>"` — **Config**
-- [ ] `:map` `:nmap` `:imap` `:cmap` `:vmap` `:xmap` and `…noremap` — **Config**
-- [ ] `:unmap` `:nunmap` `:iunmap` `:cunmap` `:vunmap` `:xunmap` — **Config**
-- [ ] `:command[!]` `:com[!]`, `:delcommand` `:delc`, user commands (`Name args`) — **Config**
-- [ ] `:!{command}` (in the agent's worktree) — **Config**
+- [x] `:map` `:nmap` `:imap` `:cmap` `:vmap` `:xmap` and `…noremap` — **Windows**
+- [x] `:unmap` `:nunmap` `:iunmap` `:cunmap` `:vunmap` `:xunmap` — **Windows**
+- [x] `:command[!]` `:com[!]`, `:delcommand` `:delc`, user commands (`Name args`) — **Windows**
+- [x] `:!{command}` (in the agent's worktree) — **Windows**
 - [ ] `:trust` — **Config**
 
 Serve:
@@ -253,33 +261,33 @@ Serve:
 ### Keys (`src/keys.ts` `DEFAULT_KEYS`; every one is bound, handlers below)
 
 Normal mode:
-- [x] `i` `a` `o` mode.insert; [ ] `I` mode.insert_start, `A` mode.append_end (need a cursor) — core / **Windows**
+- [x] `i` `a` `o` mode.insert; `I` mode.insert_start, `A` mode.append_end — core / **Windows**
 - [x] `:` mode.command — core
-- [ ] `/` mode.search, `?` mode.search_back, `n` `N`, `<Esc>` search.clear — **Windows**
-- [ ] `v` `V` mode.visual and all of VISUAL (`j k <C-d> <C-u> <C-f> <C-b> H M L gg G y ib o zz zt zb <Esc> v V`) — **Windows**
+- [x] `/` mode.search, `?` mode.search_back, `n` `N`, `<Esc>` search.clear (incsearch, hlsearch, smartcase, wrapscan, E486/E35) — **Windows**
+- [x] `v` `V` mode.visual and all of VISUAL (`j k <C-d> <C-u> <C-f> <C-b> H M L gg G y ib o zz zt zb <Esc> v V`) — **Windows**
 - [x] `j` `k` `<Down>` `<Up>` `<C-e>` `<C-y>` `<C-n>` `<C-p>` `<C-d>` `<C-u>` `<C-f>` `<C-b>` `<PageDown>` `<PageUp>` `gg` `G` — **Windows**
-- [x] `]s` `[s` `gt` `gT`; [ ] `<C-^>` session.alternate; [x] `<leader>1`…`<leader>9` — **Sessions**
-- [ ] counts (`3gt`, `5j`, `<C-w>` with a count) — **Windows**
-- [ ] `za` `zR` `zM` `zr` `zm` folds — **Windows**
-- [ ] `{` `}` message.prev/next, `zz` `zt` `zb`, `<C-o>` `<Tab>` jumps, `<C-g>`, `gv` — **Windows**
-- [ ] `yy` yank.reply, `yib` yank.block (OSC 52 clipboard, `src/clipboard.ts`) — **Windows**
+- [x] `]s` `[s` `gt` `gT`; [x] `<C-^>` session.alternate (Windows); [x] `<leader>1`…`<leader>9` — **Sessions**
+- [x] counts (`3gt`, `5j`, `<C-w>` with a count) — **Windows**
+- [x] `za` `zR` `zM` `zr` `zm` folds (tool output from `Ev::ToolResult`, `Session::tool_output`) — **Windows**
+- [x] `{` `}` message.prev/next, `zz` `zt` `zb`, `<C-o>` `<Tab>` jumps, `m{a-z}` `'{a-z}` marks, `<C-g>`, `gv` — **Windows**
+- [x] `yy` yank.reply, `yib` yank.block (OSC 52 clipboard, `src/clipboard.ts`) — **Windows**
 - [ ] `dd` session.kill (asks first: CONFIRM) — **Sessions**
 - [x] `<C-c>` session.abort — **Sessions**
-- [ ] `<C-h>` `<BS>` `<C-l>` `<C-j>` `<C-k>`, all `<C-w>…` window keys, `<leader>|` `<leader>-` — **Windows**
-- [ ] `<leader>e` sidebar.focus and the sidebar's own keys (j k Enter Esc l o d a p w …) — **Windows**
+- [x] `<C-h>` `<BS>` `<C-l>` `<C-j>` `<C-k>`, all `<C-w>…` window keys, `<leader>|` `<leader>-` — **Windows**
+- [x] `<leader>e` sidebar.focus and the sidebar's own keys (j k Enter Esc l o d a p w …) — **Windows**
 - [ ] `<leader>n` `:new `, `<leader>q` `:queue ` (open the command line: works), `<leader>d` `:diff`, `<leader>m` `:merge`, `<leader>p` `:pr`, `<leader>D` `:dash`, `<leader>s` `:settings`, `<leader>r` `:review`, `<leader>T` `:templates`, `<leader>M` `:model`, `<leader>R` `:effort`, `<leader>E` `:engine` — each command's area
 - [ ] `<leader>t` theme.picker — **Config**; `<leader>u` session.tree — **Sessions**
 - [x] `ZZ` `ZQ` app.quit / app.quit_force, `q` app.quit_hint — core
-- [~] start screen keys: [x] `i` `n` `c` `?` `q`; [ ] `T` `t` `s` `m` `e` `E` — each area
-- [ ] which-key hint after `<leader>` (`[ui] whichkey`) — **Windows**
-- [ ] showcmd (pending keys on the statusline) — **Windows**
+- [x] start screen keys `i` `n` `T` `t` `s` `m` `e` `E` `c` `?` `q` as TypeScript (Windows); `T` `t` `s` `m` `e` `E` run `:templates`, `theme.picker`, `:settings`, `:model`, `:effort`, `:engine`, which open their pickers once those areas port them
+- [x] which-key hint after `<leader>` (`[ui] whichkey`) — **Windows**
+- [x] showcmd (pending keys on the command line) — **Windows**
 
 Insert and command line:
 - [x] `<Esc>` `<C-c>` mode.normal, `<CR>` edit.submit, `<BS>` `<C-h>` edit.backspace, `<C-w>` edit.delete_word, `<C-u>` edit.clear — core
-- [ ] a real cursor (`src/line-edit.ts`): `<Del>` `<Left>` `<Right>` `<Home>` `<End>` `<C-Left>` `<S-Left>` `<C-Right>` `<S-Right>` `<C-b>` `<C-e>` — **Windows**
-- [ ] history `<Up>` `<Down>` `<C-p>` `<C-n>` (prefix match), `<C-r>"` paste, `<C-f>` line NORMAL mode (motions, operators, text objects, undo) — **Windows**
-- [ ] `<Tab>` `<S-Tab>` completion (commands, agents, themes, wildmenu) — **Windows**
-- [ ] `@` file picker in a prompt (`src/attach.ts`) — **Windows**
+- [x] a real cursor (`src/line-edit.ts`): `<Del>` `<Left>` `<Right>` `<Home>` `<End>` `<C-Left>` `<S-Left>` `<C-Right>` `<S-Right>` `<C-b>` `<C-e>` — **Windows**
+- [x] history `<Up>` `<Down>` `<C-p>` `<C-n>` (prefix match), `<C-r>"` paste, `<C-f>` line NORMAL mode (motions, operators, text objects, undo) — **Windows**
+- [x] `<Tab>` `<S-Tab>` completion (commands, agents, themes, wincmd keys, `:race` flags, wildmenu, the rest dim as you type) — **Windows**
+- [x] `@` file picker in a prompt (`src/attach.ts`) — **Windows**
 - [x] bracketed paste — core
 
 ### Config (`config.toml`, `.vigent.toml`)
@@ -290,7 +298,7 @@ below means it's also *used*.
 - [ ] `model` (pi's model) — **Engines**
 - [ ] `engine` (`auto`, a built-in, or a custom one) — **Engines**
 - [x] `leader` / `mapleader` — **Config**
-- [ ] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `termguicolors`, `transparent`, `whichkey` — **Windows** (`[x]` `timeoutlen`); `notify` — **Serve**
+- [~] `[ui]` [x] `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `whichkey`, `timeoutlen`; [ ] `termguicolors`, `transparent` (the theme is loaded once: Config) — **Windows**; `notify` — **Serve**
 - [ ] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow`, `ask` — **Engines**
 - [ ] `[engines.<id>]` with `command`: `name`, `output`, `model_args`, `models`, `resume_args` — **Engines**
 - [x] `[keys]`, `[keys.normal|insert|visual|command]` — **Config**
@@ -298,9 +306,9 @@ below means it's also *used*.
 - [ ] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
 - [ ] `[templates.<name>]` `prompt`, `description`, `engine`, `model`, `effort`, `worktree` (+ built-ins fix, test, review, explain) — **Sessions**
 - [ ] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions**; `before_merge` — **Review**
-- [ ] `[statusline]` / `[winbar]` `left`, `right` — **Windows**
-- [ ] `[commands]` — **Config**
-- [ ] `[style]` `sidebar`, `messages`, `tool_icons`, `separators`, `user_label`, `[style.icons]`, `[style.nerd_icons]` — **Windows**
+- [x] `[statusline]` / `[winbar]` `left`, `right` — **Windows**
+- [x] `[commands]` — **Windows** (parsed by Config)
+- [~] `[style]` [x] `sidebar` (tree, compact, cards), `messages` (plain, labeled; bubbles' agent header), `tool_icons`, `user_label`, `[style.icons]`, `[style.nerd_icons]`; [ ] `separators` (powerline statusline and winbar pill), bubbles' prompt box, a theme's own `[style]` — **Windows**
 - [~] project `.vigent.toml` layered over yours, gated until trusted (`is_trusted` stub) — **Config**
 - [ ] theme files in `~/.config/vigent/themes` (`.toml`, `.json`, `.vim`), `extends`, palettes, `[style]` in themes — **Config**
 
@@ -330,7 +338,8 @@ below means it's also *used*.
 - [ ] conversation tree (`src/tree.ts`) — **Sessions**
 - [ ] riftri storage health in `:checkhealth` (`riftriHealth`) — **Sessions**
 - [ ] diff view, hunk review, merge, PR, transcript export — **Review**
-- [ ] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`), icons (`src/icons.ts`), styles (`src/style.ts`), pickers (`src/picker.ts`), confirm prompts — **Windows**
+- [x] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`, links as OSC 8 printed over the frame), icons (`src/icons.ts`), styles (`src/style.ts`, see `[style]`), pickers (`src/picker.ts` ChoicePicker: `windows::open_picker`; the theme picker with live preview is Config's), confirm prompts (`windows::ask`) — **Windows**
+- [x] alternate screen and focus reporting (`EnableFocusChange`: `App::windows.terminal_focused`) — **Windows**; what a focus change does to notifications — **Serve**
 - [ ] desktop notification / bell when an agent finishes elsewhere, focus reporting (`src/notify.ts`) — **Serve**
 - [ ] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`) — **Serve**
 - [ ] demo sessions (`src/demo.ts`, `DemoSession`) — **Serve**

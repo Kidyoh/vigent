@@ -86,6 +86,10 @@ pub struct Session {
     pub aborted: bool,
     /// :kill'd: hidden, but its slot stays so the threads' messages still find the right agent
     pub closed: bool,
+    /// each tool call's output, by its id (shown when its fold is open: za, zR)
+    pub tool_output: std::collections::HashMap<String, String>,
+    /// a split's fork: its next run continues the original's conversation as a new one, at this message
+    pub fork_at: Option<Option<String>>,
 }
 
 fn tokens_text(n: u64) -> String {
@@ -128,6 +132,8 @@ impl Session {
             stderr: String::new(),
             aborted: false,
             closed: false,
+            tool_output: Default::default(),
+            fork_at: None,
         }
     }
 
@@ -229,7 +235,8 @@ impl Session {
             self.state = State::Error;
             return;
         };
-        let opts = RunOpts { resume: self.resume_id.clone(), model: self.requested_model.clone(), effort: self.effort.clone(), ..Default::default() };
+        let fork_at = self.fork_at.take();
+        let opts = RunOpts { resume: self.resume_id.clone(), model: self.requested_model.clone(), effort: self.effort.clone(), fork: fork_at.is_some(), fork_at: fork_at.flatten(), ..Default::default() };
         let drop_env = engine.map(|e| e.drop_env.clone()).unwrap_or_default();
         let bin = engines::spec(&self.engine).bin;
         match engines::run::spawn(adapter, bin, self.slot, &self.path, &text, &opts, &drop_env, tx) {
@@ -279,7 +286,9 @@ impl Session {
                         None => self.items.push(Item::Tool { id, name, summary }),
                     }
                 }
-                Ev::ToolResult { .. } => {}
+                Ev::ToolResult { id, output } => {
+                    self.tool_output.insert(id, output);
+                }
                 Ev::Thinking(on) => self.thinking = on,
                 Ev::Usage { tokens, cost } => {
                     self.tokens += tokens;

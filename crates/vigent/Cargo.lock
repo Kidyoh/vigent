@@ -967,6 +967,7 @@ name = "vigent"
 version = "0.0.0"
 dependencies = [
  "crossterm",
+ "libc",
  "ratatui",
  "riftri-core",
  "serde",
