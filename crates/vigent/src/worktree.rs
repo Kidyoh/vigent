@@ -392,29 +392,16 @@ pub fn riftri_health(root: Option<&Path>, cfg: &WorktreeConfig) -> Health {
         return Health { detail: "not installed: agent worktrees are full copies".into(), ..Default::default() };
     }
     let Some(root) = root else { return Health { installed: true, detail: "not in a git repository".into(), ..Default::default() } };
-    // doctor needs a destination that doesn't exist yet
+    // riftri's storage probe for a destination in the worktrees folder (the one `riftri doctor` runs; doctor's
+    // git and repository checks would add ~100 KB to the binary, and riftri says those when it declines a worktree)
     let probe = worktrees_dir(root, cfg).join(format!(".vigent-probe-{}", std::process::id()));
-    let doc = riftri_core::doctor_for_destination(root, &probe);
-    let rd = serde_json::to_value(&doc.destination_readiness).unwrap_or_default();
-    let status = rd["status"].as_str().unwrap_or("").to_string();
-    // needs-activation only concerns riftri's git shim; vigent calls riftri directly
-    let blockers: Vec<String> = doc
-        .destination_readiness
-        .blockers
-        .iter()
-        .filter(|b| b.kind != "repository-activation")
-        .map(|b| if b.remedy.is_empty() { b.explanation.clone() } else { format!("{} · {}", b.explanation, b.remedy) })
-        .collect();
-    let ready = (status == "ready" || status == "needs-activation") && doc.destination_readiness.copy_on_write;
-    let backend = doc.destination_readiness.backend.map(backend_id);
-    let detail = if ready {
-        format!("copy-on-write worktrees ({})", backend_name(backend.as_deref().unwrap_or("riftri")))
-    } else if !blockers.is_empty() {
-        "can't optimize this repository yet".into()
-    } else {
-        format!("not available here ({})", if status.is_empty() { "blocked" } else { &status })
-    };
-    let next = if status == "needs-activation" { None } else { doc.destination_readiness.next_command.clone() };
+    let caps = riftri_core::backends(&probe);
+    let cow = caps.iter().find(|c| backend_id(c.kind) != "full-copy-fallback" && backend_id(c.status) == "supported");
+    let ready = cow.is_some();
+    let backend = cow.map(|c| backend_id(c.kind));
+    let blockers: Vec<String> = if ready { vec![] } else { caps.iter().filter(|c| backend_id(c.kind) != "full-copy-fallback").map(|c| c.explanation.clone()).filter(|e| !e.is_empty()).collect() };
+    let detail = if ready { format!("copy-on-write worktrees ({})", backend_name(backend.as_deref().unwrap_or("riftri"))) } else { "not available here (blocked)".into() };
+    let next = None;
     let views = riftri_state_dir(root).and_then(|state| riftri_core::storage_accounting(&state).ok()).map(|r| (r.active_views, r.total_logical_bytes, r.total_allocated_bytes));
     Health { installed: true, ready, backend, detail, blockers, next, views }
 }

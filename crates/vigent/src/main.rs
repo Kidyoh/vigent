@@ -25,6 +25,7 @@ mod serve;
 mod session;
 mod theme;
 mod toml;
+mod tree;
 mod tui;
 mod ui;
 mod windows;

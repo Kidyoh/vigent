@@ -203,25 +203,24 @@ pub fn run_hook(command: &str, cwd: &Path, env: &[(String, String)], timeout: Du
     // stdout and stderr into one pipe, in the order they were written
     let spawned = (|| {
         let (reader, writer) = std::io::pipe()?;
-        let child = Command::new(shell)
-            .arg(flag)
-            .arg(command)
-            .current_dir(cwd)
-            .envs(env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null())
-            .stdout(writer.try_clone()?)
-            .stderr(writer)
-            .spawn()?;
+        let mut cmd = Command::new(shell);
+        cmd.arg(flag).arg(command).current_dir(cwd).envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(writer.try_clone()?).stderr(writer);
+        // its own process group, so a timeout stops what it started too
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        let child = cmd.spawn()?;
+        drop(cmd); // the pipe's write ends: only the hook holds them now
         Ok::<_, std::io::Error>((child, reader))
     })();
     let (mut child, mut reader) = match spawned {
         Ok(c) => c,
         Err(e) => return HookResult { ok: false, code: None, output: e.to_string(), took: Duration::ZERO, timed_out: false },
     };
-    let out = std::thread::spawn(move || {
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut buf = vec![];
         let _ = std::io::Read::read_to_end(&mut reader, &mut buf);
-        buf
+        let _ = done_tx.send(buf);
     });
     let mut timed_out = false;
     let status = loop {
@@ -229,6 +228,8 @@ pub fn run_hook(command: &str, cwd: &Path, env: &[(String, String)], timeout: Du
             Ok(Some(s)) => break Some(s),
             Ok(None) if started.elapsed() >= timeout => {
                 timed_out = true;
+                #[cfg(unix)]
+                let _ = Command::new("kill").args(["-TERM", &format!("-{}", child.id())]).stderr(Stdio::null()).status();
                 let _ = child.kill();
                 let _ = child.wait();
                 break None;
@@ -237,7 +238,8 @@ pub fn run_hook(command: &str, cwd: &Path, env: &[(String, String)], timeout: Du
             Err(_) => break None,
         }
     };
-    let bytes = out.join().unwrap_or_default();
+    // what it printed; something it started that's still running may hold the pipe open, so don't wait for long
+    let bytes = done_rx.recv_timeout(Duration::from_secs(if timed_out { 1 } else { 5 })).unwrap_or_default();
     let text = String::from_utf8_lossy(&bytes);
     let keep: String = text.chars().rev().take(4000).collect::<Vec<_>>().into_iter().rev().collect();
     let code = if timed_out { None } else { status.and_then(|s| s.code()) };
@@ -878,6 +880,13 @@ impl App {
                 }
             }
             self.watch_race(i);
+        }
+        // an agent that's free again takes its next queued prompt (stopped with <C-c>, say)
+        for i in self.open() {
+            let a = &self.sessions[i];
+            if matches!(a.state, State::Idle | State::Waiting) && !a.queue.is_empty() && a.child.is_none() {
+                self.drain(i);
+            }
         }
         if self.agents.last_stat.is_none_or(|t| t.elapsed() >= STAT_EVERY) {
             self.agents.last_stat = Some(Instant::now());
