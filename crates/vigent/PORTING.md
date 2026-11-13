@@ -44,6 +44,10 @@ add ~100 KB more). With Engines (every adapter, pi's RPC session, pickers) and R
 line editor, search, VISUAL, markdown, pickers, which-key, the TypeScript's
 screen layout) was 2,199,752 bytes on its own branch; its only new dependency
 is `libc` (already linked, for the statusline clock's local time).
+With all six areas merged it was 3,405,168 bytes at `opt-level = "s"`;
+`opt-level = "z"` brings it to 2,970,512 (a 1.3 MB archive), and the pty
+suite runs no slower. The growth since milestone 1 is the port itself (about
+4,500 lines of Rust then, 30,000 now); `serde` and `libc` are the only new crates.
 
 ## Module map
 

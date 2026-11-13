@@ -30,11 +30,11 @@ Linux x64, measured:
 
 | Build | Binary | Download |
 |---|---|---|
-| Rust (`scripts/build-binary.mjs`), riftri inside | 1.5 MB | 0.7 MB |
-| Rust, static musl (Alpine and minimal images) | 1.6 MB | 0.8 MB |
+| Rust (`scripts/build-binary.mjs`), every feature, riftri inside | 2.8 MB | 1.3 MB |
+| Rust at milestone 1 (Claude Code engine and worktrees only) | 1.5 MB | 0.7 MB |
 | Bun (`scripts/build-binary-bun.mjs`), riftri beside it | 104.5 MB + 4.3 MB | 51.3 MB |
 
-The release profile in `crates/vigent/Cargo.toml` is set for size: `opt-level = "s"`, fat LTO, one codegen unit, `panic = "abort"`, stripped.
+The release profile in `crates/vigent/Cargo.toml` is set for size: `opt-level = "z"` (13% smaller than `"s"`, and the pty suite runs no slower), fat LTO, one codegen unit, `panic = "abort"`, stripped.
 
 ## Building it
 
