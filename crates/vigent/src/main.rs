@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 mod actions;
+mod agents;
 mod app;
 mod cli;
 mod commands;

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::engines::{self, EngineInfo, Engines, Ev};
 use crate::keys::{self, Binding, KeyMode, Keymap, Rhs, Sequencer, Step};
-use crate::session::{Item, Session, State, Submitted};
+use crate::session::{Session, Submitted};
 use crate::theme::{self, Theme};
 use crate::ui::floats::Float;
 use crate::worktree::{self, Made};
@@ -89,6 +89,8 @@ pub struct App {
     pub review: crate::review::Review,
     pub windows: crate::windows::Windows,
     pub serve: crate::serve::Serve,
+    /// the Sessions area's (agents.rs): <C-^>, focus reporting, y/n questions
+    pub agents: crate::agents::Agents,
 }
 
 impl App {
@@ -118,6 +120,7 @@ impl App {
             review: Default::default(),
             windows: Default::default(),
             serve: Default::default(),
+            agents: Default::default(),
         }
     }
 
@@ -137,6 +140,10 @@ impl App {
 
     /// The engine new agents start on (Engines area: config's `engine`, --engine, :engine).
     pub fn new_agent_engine(&self) -> &'static str {
+        // a built-in engine chosen in config.toml or with --engine (Engines area: custom engines, :engine)
+        if let Some(spec) = self.config.engine.as_deref().filter(|e| *e != "auto").and_then(|e| engines::KNOWN.iter().find(|s| s.id == e)) {
+            return spec.id;
+        }
         engines::default_engine(&self.engines.infos).and_then(|e| engines::KNOWN.iter().find(|s| s.id == e.id)).map(|s| s.id).unwrap_or("claude")
     }
 
@@ -161,6 +168,9 @@ impl App {
     // -----------------------------------------------------------------
 
     pub fn key(&mut self, k: KeyEvent) {
+        if self.answer(&k) {
+            return;
+        }
         if self.float.is_some() {
             return crate::ui::floats::key(self, k);
         }
@@ -276,12 +286,7 @@ impl App {
     /// Focus the n-th open agent (0-based, as the sidebar numbers them from 1).
     pub fn focus_agent(&mut self, n: usize) {
         let Some(&i) = self.open().get(n) else { return };
-        self.focus = i;
-        self.scroll = 0;
-        let a = &mut self.sessions[i];
-        if a.state == State::Waiting {
-            a.state = State::Idle;
-        }
+        self.focus_slot(i);
     }
 
     // -----------------------------------------------------------------
@@ -297,7 +302,7 @@ impl App {
         }
         if self.focused().is_none() {
             let name = crate::names::agent_name_from(&text);
-            if self.start_agent(&name).is_none() {
+            if self.start_agent(&name, Default::default()).is_none() {
                 return;
             }
         }
@@ -312,41 +317,6 @@ impl App {
                 self.say(msg, "Comment");
             }
         }
-    }
-
-    /// A new agent, in a worktree of its own made in the background. Its slot, or None (and why, on the message line).
-    pub fn start_agent(&mut self, name: &str) -> Option<usize> {
-        if let Some(why) = self.cant_start() {
-            self.say(why, "ErrorMsg");
-            return None;
-        }
-        let taken: Vec<PathBuf> = self.sessions.iter().map(|a| a.path.clone()).collect();
-        let index = self.sessions.len();
-        let mut agent = Session::new(index, name, self.new_agent_engine(), self.cwd.clone());
-        match &self.root {
-            Some(root) => match worktree::plan(root, name, &taken) {
-                Ok(p) => {
-                    agent.branch = Some(p.branch.clone());
-                    agent.path = p.path.clone();
-                    agent.base = p.base.clone();
-                    agent.hold("making its worktree");
-                    let (root, tx) = (root.clone(), self.tx.clone());
-                    std::thread::spawn(move || {
-                        let r = worktree::make(&root, &p);
-                        let _ = tx.send(Msg::WorktreeMade(index, r));
-                    });
-                    self.say(format!("'{name}' on {} · making its worktree…", agent.branch.as_deref().unwrap_or("")), "Comment");
-                }
-                Err(e) => {
-                    self.say(format!("can't make a worktree for '{name}': {e}"), "ErrorMsg");
-                    return None;
-                }
-            },
-            None => agent.items.push(Item::Info("not a git repository: this agent works in this folder".into())),
-        }
-        self.sessions.push(agent);
-        self.focus = index;
-        Some(index)
     }
 
     pub fn send(&mut self, i: usize, text: String) {
@@ -366,31 +336,7 @@ impl App {
         match m {
             Msg::Engines(v) => self.engines.infos = v,
             Msg::Run(f) => f(self),
-            Msg::WorktreeMade(i, r) => {
-                let Some(a) = self.sessions.get_mut(i) else { return };
-                match r {
-                    Ok(made) => {
-                        let how = match &made {
-                            Made::Riftri(_) => " · lightweight copy".to_string(),
-                            Made::Git(_) => " · full copy (:checkhealth says why)".to_string(),
-                        };
-                        let msg = format!("'{}' on {} in {}{how}", a.name, a.branch.as_deref().unwrap_or(""), a.path.display());
-                        let group = if matches!(made, Made::Git(_)) { "WarningMsg" } else { "ModeMsg" };
-                        a.made = Some(made);
-                        a.release();
-                        self.say(msg, group);
-                        self.refresh_stat(i);
-                        self.drain(i);
-                    }
-                    Err(e) => {
-                        a.hold_reason = None;
-                        a.state = State::Error;
-                        a.items.push(Item::Error(format!("couldn't make its worktree: {e}")));
-                        let msg = format!("'{}': couldn't make its worktree", a.name);
-                        self.say(msg, "ErrorMsg");
-                    }
-                }
-            }
+            Msg::WorktreeMade(i, r) => self.worktree_made(i, r),
             Msg::Stat(i, s) => {
                 if let Some(a) = self.sessions.get_mut(i) {
                     a.stat = s;
@@ -406,14 +352,7 @@ impl App {
                     a.stream_ended = true;
                 }
             }
-            Msg::Engine(i, evs) => {
-                let focused = i == self.focus;
-                let Some(a) = self.sessions.get_mut(i) else { return };
-                a.apply(evs, focused);
-                if a.done_seen {
-                    self.refresh_stat(i);
-                }
-            }
+            Msg::Engine(i, evs) => self.on_engine(i, evs),
         }
     }
 
@@ -440,9 +379,16 @@ impl App {
             }
             let Some(child) = a.child.as_mut() else { continue };
             let Ok(Some(status)) = child.try_wait() else { continue };
-            a.exited(status);
-            self.drain(i);
+            match a.exited(status) {
+                // a prompt sent while it was wrapping up
+                Some(next) => {
+                    let (tx, info) = (self.tx.clone(), self.engines.get(&a.engine).cloned());
+                    self.sessions[i].run(next, info.as_ref(), tx);
+                }
+                None => self.drain(i),
+            }
         }
+        self.watch_states();
     }
 
     pub fn shutdown(&mut self) {
@@ -450,36 +396,15 @@ impl App {
             a.kill_child();
         }
     }
-
-    /// Stop the focused agent and close it. Its worktree is kept, unless `remove` (:kill!).
-    pub fn kill_focused(&mut self, remove: bool) {
-        if self.focused().is_none() {
-            return self.say("no agent to kill", "ErrorMsg");
-        }
-        let a = &mut self.sessions[self.focus];
-        a.kill_child();
-        a.closed = true;
-        a.queue.clear();
-        let (name, branch, path) = (a.name.clone(), a.branch.clone(), a.path.clone());
-        let open = self.open();
-        self.focus = open.iter().rev().find(|&&i| i < self.focus).or(open.first()).copied().unwrap_or(self.sessions.len());
-        self.scroll = 0;
-        match (self.root.clone(), branch.as_deref(), remove) {
-            (Some(root), Some(branch), true) => match worktree::remove(&root, &path, true) {
-                Ok(m) => self.say(format!("'{name}' killed; {m}"), "Comment"),
-                Err(e) => self.say(format!("'{name}' killed; its worktree stays ({e}): vigent worktree remove {branch} --force"), "WarningMsg"),
-            },
-            (Some(_), Some(branch), false) => self.say(format!("'{name}' killed; its work stays in {} (vigent worktree remove {branch})", path.display()), "Comment"),
-            _ => self.say(format!("'{name}' killed"), "Comment"),
-        }
-    }
 }
+
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
     use std::sync::mpsc::channel;
+    use crate::session::State;
 
     /// An App with Claude Code signed in, outside any repository.
     pub fn app() -> App {

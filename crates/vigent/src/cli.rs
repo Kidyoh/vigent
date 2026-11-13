@@ -67,21 +67,32 @@ fn theme_command(args: &[String]) -> i32 {
     0
 }
 
+/// `vigent worktree list | remove <branch> [--force] | prune | gc` (src/cli.ts worktreeCommand).
 fn worktree_command(args: &[String]) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_default();
     let Some(root) = worktree::repo_root(&cwd) else {
         eprintln!("vigent: not inside a git repository");
         return 1;
     };
+    let cfg = config::load_all(Some(&root)).config.worktree;
     match args.first().map(String::as_str) {
         None | Some("list") => {
-            let all = worktree::list(&root);
+            let all = match worktree::list(&root, &cfg) {
+                Ok(a) => a,
+                Err(e) => {
+                    eprintln!("vigent: {e}");
+                    return 1;
+                }
+            };
             if all.is_empty() {
-                println!("no agent worktrees (they go in {})", worktree::worktrees_dir(&root).display());
+                println!("no agent worktrees (they go in {})", worktree::worktrees_dir(&root, &cfg).display());
             }
-            for (branch, path) in all {
-                let how = if worktree::is_riftri(&root, &path) { "copy-on-write" } else { "full copy" };
-                println!("{branch:<36} {how:<16} {}", path.display());
+            let paths: Vec<PathBuf> = all.iter().map(|w| w.path.clone()).collect();
+            let backends = worktree::riftri_backends(&root, &paths);
+            for w in all {
+                let branch = w.branch.clone().unwrap_or_else(|| format!("(detached {})", w.head));
+                let how = backends.get(&w.path).map(|b| worktree::backend_name(b)).unwrap_or_else(|| "full copy".into());
+                println!("{branch:<36} {how:<16} {}", w.path.display());
             }
             0
         }
@@ -90,25 +101,37 @@ fn worktree_command(args: &[String]) -> i32 {
                 eprintln!("usage: vigent worktree remove <branch> [--force]");
                 return 1;
             };
-            let force = args.iter().any(|a| a == "--force");
-            let found = worktree::list(&root).into_iter().find(|(b, p)| b == query || p.file_name().is_some_and(|n| n == query.as_str()));
-            let Some((_, path)) = found else {
+            let Some(w) = worktree::find(&root, query, &cfg) else {
                 eprintln!("vigent: no agent worktree '{query}' (see: vigent worktree list)");
                 return 1;
             };
-            match worktree::remove(&root, &path, force) {
-                Ok(m) => {
-                    println!("{m}");
+            let base = crate::records::load(&w.path).and_then(|m| m.base);
+            let r = worktree::remove(&root, &w.path, w.branch.as_deref(), base.as_deref(), args.iter().any(|a| a == "--force"));
+            println!("{}", r.message);
+            if r.removed { 0 } else { 1 }
+        }
+        Some("prune") => {
+            let ok = std::process::Command::new("git").args(["worktree", "prune", "-v"]).current_dir(&root).status().is_ok_and(|s| s.success());
+            if ok { 0 } else { 1 }
+        }
+        Some("gc") => {
+            if worktree::riftri_state_dir(&root).is_none() {
+                println!("no shared worktree storage in this repository");
+                return 0;
+            }
+            match worktree::riftri_gc(&root) {
+                Ok(bytes) => {
+                    println!("freed {}", worktree::format_bytes(bytes));
                     0
                 }
                 Err(e) => {
-                    eprintln!("vigent: {e}");
+                    eprintln!("vigent: freeing worktree storage failed: {e}");
                     1
                 }
             }
         }
-        Some(other) => {
-            eprintln!("vigent: unknown worktree command '{other}' (list, remove)");
+        Some(_) => {
+            eprintln!("usage: vigent worktree list | remove <branch> [--force] | prune | gc");
             1
         }
     }
@@ -176,7 +199,7 @@ pub fn main(args: Vec<String>) -> i32 {
         }
     let cwd = std::env::current_dir().unwrap_or_default();
     let root = worktree::repo_root(&cwd);
-    let config::Loaded { config, mut warnings, .. } = config::load_all(root.as_deref());
+    let config::Loaded { mut config, mut warnings, .. } = config::load_all(root.as_deref());
     let (keymap, key_warnings) = keys::build_keymap(config.leader.as_deref(), &config.keys);
     warnings.extend(key_warnings);
     let theme_name = match (&opts.theme, &config.theme) {
@@ -198,10 +221,13 @@ pub fn main(args: Vec<String>) -> i32 {
             eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
             return 1;
         }
-        if crate::engines::adapter(e).is_none() {
+        // pi's agents still reopen (they say pi isn't there, or how to reach :new) before this build runs pi
+        if crate::engines::adapter(e).is_none() && e != "pi" {
             eprintln!("vigent: {} doesn't run in this build yet (PORTING.md)", crate::engines::engine_name(e));
             return 1;
         }
+        // what --engine names wins over config.toml's `engine`
+        config.engine = Some(e.clone());
     }
     for (flag, given) in [("--model", opts.model.is_some()), ("--demo", opts.demo), ("--serve", opts.serve)] {
         if given {

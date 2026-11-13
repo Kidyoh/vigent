@@ -35,12 +35,12 @@ pub fn lines(app: &App, area: Rect) -> Vec<Line<'static>> {
             State::Paused => ("‖", "WarningMsg"),
             State::Idle => ("○", "Comment"),
         };
-        let mark = if a.state == State::Waiting { " ◆" } else { "" };
+        let mark = if a.unread { " ◆" } else { "" };
         let queued = if a.queue.is_empty() { String::new() } else { format!(" ⧗{}", a.queue.len()) };
         let focused = i == app.focus;
         let name_style = if focused { t.fg("Normal").add_modifier(Modifier::BOLD) } else { t.fg("Normal") };
         let num_style = if focused { t.fg("CursorLineNr") } else { t.fg("LineNr") };
-        let name = fit(&format!("{}{mark}{queued}", a.name), w.saturating_sub(8));
+        let name = fit(&format!("{}{queued}{mark}", a.name), w.saturating_sub(8));
         let mut row = Line::from(vec![
             Span::styled(format!("{:>3} ", n + 1), num_style),
             Span::styled(if last { "└╴" } else { "├╴" }, t.fg("NonText")),

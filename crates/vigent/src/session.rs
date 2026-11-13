@@ -76,7 +76,8 @@ pub struct Session {
     pub effort: Option<String>,
     pub thinking: bool,
     pub tokens: u64,
-    pub cost: f64,
+    /// money spent, in US dollars, as the engine reports it; None: the engine doesn't say (Codex)
+    pub cost: Option<f64>,
     pub stat: (usize, usize),
     pub child: Option<Child>,
     pub done_seen: bool,
@@ -86,16 +87,80 @@ pub struct Session {
     pub aborted: bool,
     /// :kill'd: hidden, but its slot stays so the threads' messages still find the right agent
     pub closed: bool,
+    /// finished, failed or needs you while you looked elsewhere: ◆ in the sidebar until you open it
+    pub unread: bool,
+    /// the state the App last saw (agents.rs watches what changed: notifications, records, hooks)
+    pub seen: State,
+    /// the agent a split forked this one from; its worktree stays that agent's to save to and remove
+    pub fork_of: Option<usize>,
+    /// the next run forks `resume_id` (at `fork_at`); cleared once the new conversation reports its id
+    pub forking: bool,
+    pub fork_at: Option<String>,
+    /// a prompt sent while the last run's CLI was still wrapping up: it starts once that one exits
+    pub after_exit: Option<String>,
+    /// its worktree's record says when it was made (agents reopen in that order)
+    pub created_at: String,
+    /// riftri's backend when riftri made its worktree, as reopened (Made says how a new one was made)
+    pub riftri: Option<String>,
 }
 
-fn tokens_text(n: u64) -> String {
+/// 74800 -> "74.8k tok" (src/app.ts formatTokens)
+pub fn format_tokens(n: u64) -> String {
     if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1e6)
+        format!("{:.1}M tok", n as f64 / 1e6)
     } else if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1e3)
+        format!("{:.1}k tok", n as f64 / 1e3)
     } else {
-        n.to_string()
+        format!("{n} tok")
     }
+}
+
+/// US dollars: cents, or a tenth of a cent below one cent (src/app.ts formatCost)
+pub fn format_cost(usd: f64) -> String {
+    if usd > 0.0 && usd < 0.01 { format!("${usd:.3}") } else { format!("${usd:.2}") }
+}
+
+/// "12.4k tok · $0.31", or just the tokens when the engine reports no price (src/app.ts formatUsage)
+pub fn format_usage(tokens: u64, cost: Option<f64>) -> String {
+    match cost {
+        Some(c) => format!("{} · {}", format_tokens(tokens), format_cost(c)),
+        None => format_tokens(tokens),
+    }
+}
+
+/// Every agent's usage added up; cost counts the agents that report one (src/app.ts totalUsage):
+/// (tokens, cost, how many agents used tokens but report no price).
+pub fn total_usage<'a>(all: impl IntoIterator<Item = &'a Session>) -> (u64, Option<f64>, usize) {
+    let (mut tokens, mut cost, mut unpriced) = (0, None, 0);
+    for s in all {
+        tokens += s.tokens;
+        match s.cost {
+            Some(c) => cost = Some(cost.unwrap_or(0.0) + c),
+            None if s.tokens > 0 => unpriced += 1,
+            None => {}
+        }
+    }
+    (tokens, cost, unpriced)
+}
+
+/// The id of the last assistant message of a conversation Claude Code saved
+/// (~/.claude/projects/<folder>/<id>.jsonl), to fork an agent reopened after
+/// a restart where it's up to (src/cli-engines.ts lastClaudeMessage).
+pub fn last_claude_message(cwd: &std::path::Path, session: &str, config_dir: Option<&std::path::Path>) -> Option<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let dir = config_dir.map(PathBuf::from).unwrap_or_else(|| home.join(".claude"));
+    let folder: String = cwd.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let text = std::fs::read_to_string(dir.join("projects").join(folder).join(format!("{session}.jsonl"))).ok()?;
+    let mut last = None;
+    for line in text.lines().filter(|l| l.contains("\"assistant\"")) {
+        let Ok(e) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if e["type"] == "assistant" && e["isSidechain"] != true
+            && let Some(u) = e["uuid"].as_str()
+        {
+            last = Some(u.to_string());
+        }
+    }
+    last
 }
 
 impl Session {
@@ -120,7 +185,7 @@ impl Session {
             effort: None,
             thinking: false,
             tokens: 0,
-            cost: 0.0,
+            cost: None,
             stat: (0, 0),
             child: None,
             done_seen: false,
@@ -128,18 +193,39 @@ impl Session {
             stderr: String::new(),
             aborted: false,
             closed: false,
+            unread: false,
+            seen: State::Idle,
+            fork_of: None,
+            forking: false,
+            fork_at: None,
+            after_exit: None,
+            created_at: String::new(),
+            riftri: None,
         }
     }
 
+    /// What it has used so far, for the statusline ("" before anything was used).
     pub fn usage(&self) -> String {
-        if self.tokens == 0 && self.cost == 0.0 {
+        if self.tokens == 0 && self.cost.is_none() {
             return String::new();
         }
-        let mut s = format!("{} tok", tokens_text(self.tokens));
-        if self.cost > 0.0 {
-            s += &format!(" · ${:.2}", self.cost);
+        format_usage(self.tokens, self.cost)
+    }
+
+    /// It has a worktree of its own (a fork works in its original's, and one in your checkout has none).
+    pub fn own_worktree(&self) -> bool {
+        self.branch.is_some() && self.fork_of.is_none()
+    }
+
+    /// Where a fork made now starts: the last message (Claude Code forks at
+    /// it), from this run or from the conversation Claude Code saved.
+    pub fn fork_point(&self) -> Option<String> {
+        if self.last_message.is_some() || self.engine != "claude" {
+            return self.last_message.clone();
         }
-        s
+        let id = self.resume_id.as_deref()?;
+        let dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+        last_claude_message(&self.path, id, dir.as_deref())
     }
 
     /// held: waiting for its worktree (or a setup hook) before it can run
@@ -152,9 +238,9 @@ impl Session {
         matches!(self.state, State::Running) || self.held() || self.child.is_some()
     }
 
-    /// Send a prompt now, or queue it if the agent is busy, paused or has prompts waiting.
+    /// Send a prompt now, or queue it if the agent is running or paused (held included).
     pub fn submit(&mut self, text: String) -> Submitted {
-        if self.busy() || self.state == State::Paused || !self.queue.is_empty() {
+        if self.state == State::Running || self.state == State::Paused || self.held() {
             self.queue.push_back(text);
             Submitted::Queued(self.queue.len())
         } else {
@@ -165,7 +251,7 @@ impl Session {
     /// The next queued prompt, once the agent is free to run it.
     pub fn next_prompt(&mut self) -> Option<String> {
         // busy, paused, closed, or its worktree couldn't be made: nothing to run it in
-        if self.busy() || self.state == State::Paused || self.closed || (self.branch.is_some() && self.made.is_none()) {
+        if self.busy() || self.state == State::Paused || self.closed {
             return None;
         }
         self.queue.pop_front()
@@ -193,6 +279,7 @@ impl Session {
         self.child = None;
         self.aborted = true;
         self.streaming = None;
+        self.after_exit = None;
         if self.state == State::Running {
             self.state = State::Idle;
         }
@@ -216,8 +303,21 @@ impl Session {
     }
 
     /// Start a turn: the prompt goes into the transcript and to the engine's CLI.
+    /// While the last run's CLI is still wrapping up, it starts once that one
+    /// exits (two runs at once would both write the conversation).
     pub fn send(&mut self, text: String, engine: Option<&EngineInfo>, tx: Sender<Msg>) {
         self.items.push(Item::User(text.clone()));
+        if self.child.is_some() {
+            self.streaming = None;
+            self.state = State::Running;
+            self.after_exit = Some(text);
+            return;
+        }
+        self.run(text, engine, tx);
+    }
+
+    /// One run of the CLI (the prompt is in the transcript already).
+    pub fn run(&mut self, text: String, engine: Option<&EngineInfo>, tx: Sender<Msg>) {
         self.streaming = None;
         self.done_seen = false;
         self.stream_ended = false;
@@ -229,7 +329,14 @@ impl Session {
             self.state = State::Error;
             return;
         };
-        let opts = RunOpts { resume: self.resume_id.clone(), model: self.requested_model.clone(), effort: self.effort.clone(), ..Default::default() };
+        let opts = RunOpts {
+            resume: self.resume_id.clone(),
+            model: self.requested_model.clone(),
+            effort: self.effort.clone(),
+            fork: self.forking,
+            fork_at: if self.forking { self.fork_at.clone() } else { None },
+            ..Default::default()
+        };
         let drop_env = engine.map(|e| e.drop_env.clone()).unwrap_or_default();
         let bin = engines::spec(&self.engine).bin;
         match engines::run::spawn(adapter, bin, self.slot, &self.path, &text, &opts, &drop_env, tx) {
@@ -244,12 +351,16 @@ impl Session {
         }
     }
 
-    /// Fold an engine's events into the transcript. `focused`: you're looking at it
-    /// (a finished run then goes idle rather than waiting).
-    pub fn apply(&mut self, evs: Vec<Ev>, focused: bool) {
+    /// Fold an engine's events into the transcript.
+    pub fn apply(&mut self, evs: Vec<Ev>, _focused: bool) {
         for ev in evs {
             match ev {
-                Ev::Session(id) => self.resume_id = Some(id),
+                Ev::Session(id) => {
+                    if self.resume_id.as_deref() != Some(id.as_str()) {
+                        self.forking = false;
+                        self.resume_id = Some(id);
+                    }
+                }
                 Ev::Message(id) => self.last_message = Some(id),
                 Ev::Model(m) => self.model = Some(m),
                 Ev::TextDelta(t) => match self.streaming {
@@ -283,7 +394,9 @@ impl Session {
                 Ev::Thinking(on) => self.thinking = on,
                 Ev::Usage { tokens, cost } => {
                     self.tokens += tokens;
-                    self.cost += cost.unwrap_or(0.0);
+                    if let Some(c) = cost {
+                        self.cost = Some(self.cost.unwrap_or(0.0) + c);
+                    }
                 }
                 Ev::Error(e) => self.items.push(Item::Error(e)),
                 // Engines area: :permissions / ask-to-allow (src/cli-engines.ts askToAllow)
@@ -298,22 +411,28 @@ impl Session {
                     }
                     // done for you; the CLI may still wrap up before it exits
                     if self.state != State::Paused {
-                        self.state = if !ok { State::Error } else if focused { State::Idle } else { State::Waiting };
+                        // finished while you looked elsewhere: the App marks it unread (agents.rs)
+                        self.state = if ok { State::Idle } else { State::Error };
                     }
                 }
             }
         }
     }
 
-    /// The CLI exited: was that the end of a turn, or did it stop without finishing?
-    pub fn exited(&mut self, status: std::process::ExitStatus) {
+    /// The CLI exited: was that the end of a turn, or did it stop without
+    /// finishing? A prompt sent while it was wrapping up comes back, to run now.
+    pub fn exited(&mut self, status: std::process::ExitStatus) -> Option<String> {
         self.child = None;
+        if let Some(next) = self.after_exit.take() {
+            return (self.state == State::Running).then_some(next);
+        }
         if !self.done_seen && !self.aborted {
             let name = engines::engine_name(&self.engine);
             let why = if self.stderr.is_empty() { format!("{name} stopped ({status})") } else { self.stderr.clone() };
             self.items.push(Item::Error(why));
             self.state = State::Error;
         }
+        None
     }
 
     pub fn kill_child(&mut self) {

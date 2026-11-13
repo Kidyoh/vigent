@@ -1,7 +1,7 @@
 //! The terminal and the loop: draw, read a key (or paste), handle what the
 //! threads sent, tick. Restores the terminal on exit, a signal or a panic.
 
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
+use crossterm::event::{self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange, Event, KeyEventKind};
 use crossterm::execute;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use crate::cli::StartOptions;
 use crate::config::Config;
 use crate::keys::Keymap;
 
-pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, warnings: Vec<String>, _opts: &StartOptions) -> i32 {
+pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, mut warnings: Vec<String>, _opts: &StartOptions) -> i32 {
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP, signal_hook::consts::SIGINT] {
@@ -22,6 +22,8 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
     }
     let (tx, rx) = channel();
     let mut app = App::new(version, cwd, theme_name, config, keymap, tx.clone());
+    // the agents that were open when vigent last quit (Sessions area); warnings are said after, over its message
+    app.restore(&mut warnings);
     if !warnings.is_empty() {
         app.say(warnings.join(" · "), "WarningMsg");
     }
@@ -31,7 +33,8 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
 
     // ratatui::init restores the terminal on a panic too
     let mut terminal = ratatui::init();
-    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
+    // focus reports let a notification skip the agent you're looking at
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableFocusChange);
     let mut code = 0;
     while !app.quit && !stop.load(Ordering::Relaxed) {
         if let Err(e) = terminal.draw(|f| crate::ui::draw(f, &mut app)) {
@@ -43,6 +46,8 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
             Ok(true) => match event::read() {
                 Ok(Event::Key(k)) if k.kind != KeyEventKind::Release => app.key(k),
                 Ok(Event::Paste(s)) => app.paste(&s),
+                Ok(Event::FocusGained) => app.focus_changed(true),
+                Ok(Event::FocusLost) => app.focus_changed(false),
                 _ => {}
             },
             Ok(false) => {}
@@ -54,7 +59,7 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
         app.tick();
     }
     app.shutdown();
-    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
+    let _ = execute!(std::io::stdout(), DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
     code
 }

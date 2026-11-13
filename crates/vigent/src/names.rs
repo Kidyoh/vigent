@@ -66,6 +66,11 @@ fn branch_type(word: &str) -> Option<&'static str> {
 ///   "add dark mode"           -> feat/add-dark-mode
 ///   "release/v2-notes"        -> release/v2-notes
 pub fn branch_name(agent: &str) -> String {
+    branch_name_with(agent, "{type}/{name}")
+}
+
+/// branch_name with [worktree] branch's pattern: `{type}` and `{name}`.
+pub fn branch_name_with(agent: &str, template: &str) -> String {
     if agent.contains('/') {
         let parts: Vec<String> = agent.split('/').map(|p| slugify(p, 48)).filter(|p| !p.is_empty()).collect();
         if !parts.is_empty() {
@@ -85,7 +90,7 @@ pub fn branch_name(agent: &str) -> String {
         }
     }
     let name = slugify(&words.join("-"), 48);
-    format!("{kind}/{}", if name.is_empty() { "agent" } else { &name })
+    template.replace("{type}", kind).replace("{name}", if name.is_empty() { "agent" } else { &name })
 }
 
 #[cfg(test)]
@@ -102,6 +107,7 @@ mod tests {
         assert_eq!(branch_name("auth-refactor"), "refactor/auth");
         assert_eq!(branch_name("docs: readme flags"), "docs/readme-flags");
         assert_eq!(branch_name("release/v2-notes"), "release/v2-notes");
+        assert_eq!(branch_name_with("fix login", "agent/{name}"), "agent/login");
         assert_eq!(slugify("a very long name that goes on and on and on past the limit of the slug", 48).len() <= 48, true);
     }
 }

@@ -51,7 +51,7 @@ pub fn open(app: &mut App) {
         match &a.made {
             Some(Made::Riftri(b)) if !seen.contains(b) => {
                 seen.push(b.clone());
-                l.push((format!("    OK copy-on-write worktrees ({b})"), "ModeMsg"));
+                l.push((format!("    OK copy-on-write worktrees ({})", crate::worktree::backend_name(b)), "ModeMsg"));
             }
             Some(Made::Git(why)) => l.push((format!("    WARNING '{}' got a full copy: {why}", a.name), "WarningMsg")),
             _ => {}
