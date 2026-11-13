@@ -28,12 +28,9 @@ fn mode_normal(app: &mut App, _: Option<&str>) {
     app.mode = Mode::Normal;
 }
 
-/// INSERT: a prompt for the focused agent, or (with none) the task for a new one.
+/// INSERT: a prompt for the focused agent, or (with none) the task for a new one
+/// (if no agent can start, Enter says why, as in TypeScript).
 fn mode_insert(app: &mut App, _: Option<&str>) {
-    if app.focused().is_none()
-        && let Some(why) = app.cant_start() {
-            return app.say(why, "ErrorMsg");
-        }
     app.mode = Mode::Insert;
 }
 

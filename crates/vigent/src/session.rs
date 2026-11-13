@@ -16,7 +16,7 @@ use std::process::Child;
 use std::sync::mpsc::Sender;
 
 use crate::app::Msg;
-use crate::engines::{self, EngineInfo, Ev, RunOpts};
+use crate::engines::{self, Ev, RunOpts};
 use crate::worktree::Made;
 
 /// A line of the transcript (src/session.ts TranscriptItem).
@@ -86,6 +86,14 @@ pub struct Session {
     pub aborted: bool,
     /// :kill'd: hidden, but its slot stays so the threads' messages still find the right agent
     pub closed: bool,
+    /// the last error the CLI reported in this run (said only if the run fails)
+    pub last_error: Option<String>,
+    /// the run's reply has ended; its CLI is still wrapping up (Claude Code's TurnEnd)
+    pub finishing: bool,
+    /// how its current run was started (permission rules, for what a refusal says)
+    pub launch: engines::Launch,
+    /// a pi agent's RPC process (engines/pi.rs)
+    pub pi: Option<Box<engines::pi::Pi>>,
 }
 
 fn tokens_text(n: u64) -> String {
@@ -128,6 +136,10 @@ impl Session {
             stderr: String::new(),
             aborted: false,
             closed: false,
+            last_error: None,
+            finishing: false,
+            launch: Default::default(),
+            pi: None,
         }
     }
 
@@ -186,6 +198,10 @@ impl Session {
 
     /// Stop the current run: its CLI is killed, and its exit isn't a failure.
     pub fn abort(&mut self) {
+        // a pi agent: pi stops the run and keeps running
+        if let Some(p) = self.pi.as_mut() {
+            engines::pi::abort_now(p);
+        }
         if let Some(c) = self.child.as_mut() {
             let _ = c.kill();
             let _ = c.wait();
@@ -215,32 +231,70 @@ impl Session {
         Some(self.queue.pop_front().unwrap_or_else(|| "Continue where you left off.".into()))
     }
 
-    /// Start a turn: the prompt goes into the transcript and to the engine's CLI.
-    pub fn send(&mut self, text: String, engine: Option<&EngineInfo>, tx: Sender<Msg>) {
+    /// Start a turn: the prompt goes into the transcript and to the engine's CLI
+    /// (`launch`: its program, [engines.<id>] args and allow rules, what to leave out of its environment).
+    pub fn send(&mut self, text: String, launch: &engines::Launch, tx: Sender<Msg>) {
         self.items.push(Item::User(text.clone()));
         self.streaming = None;
         self.done_seen = false;
         self.stream_ended = false;
         self.aborted = false;
+        self.finishing = false;
+        self.last_error = None;
         self.stderr.clear();
+        self.launch = launch.clone();
         let name = engines::engine_name(&self.engine);
         let Some(adapter) = engines::adapter(&self.engine) else {
-            self.items.push(Item::Error(format!("{name} doesn't run in this build yet")));
+            self.items.push(Item::Error(format!("error: {name} doesn't run in this build yet")));
             self.state = State::Error;
             return;
         };
-        let opts = RunOpts { resume: self.resume_id.clone(), model: self.requested_model.clone(), effort: self.effort.clone(), ..Default::default() };
-        let drop_env = engine.map(|e| e.drop_env.clone()).unwrap_or_default();
-        let bin = engines::spec(&self.engine).bin;
-        match engines::run::spawn(adapter, bin, self.slot, &self.path, &text, &opts, &drop_env, tx) {
+        let opts = RunOpts {
+            cwd: self.path.to_string_lossy().into_owned(),
+            resume: self.resume_id.clone(),
+            model: self.requested_model.clone(),
+            effort: self.effort.clone(),
+            extra_args: launch.extra_args.clone(),
+            allowed_tools: launch.allow.clone(),
+            ..Default::default()
+        };
+        match engines::run::spawn(adapter, &launch.bin, self.slot, &self.path, &text, &opts, &launch.drop_env, tx) {
             Ok(child) => {
                 self.child = Some(child);
                 self.state = State::Running;
             }
-            Err(e) => {
-                self.items.push(Item::Error(format!("couldn't start {name}: {e}")));
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.items.push(Item::Error(format!("error: {} isn't installed (or isn't on PATH) · :checkhealth", launch.bin)));
                 self.state = State::Error;
             }
+            Err(e) => {
+                self.items.push(Item::Error(format!("error: {}: {e}", launch.bin)));
+                self.state = State::Error;
+            }
+        }
+    }
+
+    /// Paths inside the agent's folder, shown relative to it.
+    pub fn relative(&self, text: &str) -> String {
+        let mut out = text.to_string();
+        let mut dirs = vec![self.path.to_string_lossy().into_owned()];
+        if let Ok(real) = std::fs::canonicalize(&self.path) {
+            dirs.push(real.to_string_lossy().into_owned());
+        }
+        for d in dirs {
+            if !d.is_empty() {
+                out = out.replace(&format!("{}/", d.trim_end_matches('/')), "");
+            }
+        }
+        out
+    }
+
+    /// The reply being streamed is done (an empty one goes).
+    fn end_streaming(&mut self) {
+        if let Some(j) = self.streaming.take()
+            && matches!(self.items.get(j), Some(Item::Text(t)) if t.is_empty())
+        {
+            self.items.remove(j);
         }
     }
 
@@ -268,7 +322,8 @@ impl Session {
                     None => self.items.push(Item::Text(t)),
                 },
                 Ev::Tool { id, name, summary } => {
-                    self.streaming = None;
+                    self.end_streaming();
+                    let summary: String = self.relative(&summary).chars().take(80).collect();
                     // the same tool, filled in, within this turn (after the last prompt)
                     let found = self.items.iter_mut().rev().take_while(|it| !matches!(it, Item::User(_))).find_map(|it| match it {
                         Item::Tool { id: tid, summary: s, .. } if *tid == id => Some(s),
@@ -285,16 +340,44 @@ impl Session {
                     self.tokens += tokens;
                     self.cost += cost.unwrap_or(0.0);
                 }
-                Ev::Error(e) => self.items.push(Item::Error(e)),
-                // Engines area: :permissions / ask-to-allow (src/cli-engines.ts askToAllow)
-                Ev::Denied(_) => {}
-                Ev::TurnEnd | Ev::TurnStart => {}
+                // said only if the run fails (a CLI may report errors it recovers from)
+                Ev::Error(e) => self.last_error = Some(e),
+                Ev::Denied(tools) => {
+                    // what was refused, and the rule that would allow it (asking to allow isn't in this build)
+                    let name = engines::engine_name(&self.engine);
+                    let mode = engines::permissions::flag_value(
+                        &self.launch.extra_args.clone().unwrap_or_else(|| engines::adapter(&self.engine).map(|a| a.default_args().iter().map(|s| s.to_string()).collect()).unwrap_or_default()),
+                        "--permission-mode",
+                    )
+                    .unwrap_or_else(|| "default".into());
+                    let rel = |s: &str| self.relative(s);
+                    let notes = engines::permissions::blocked_notes(&self.engine, &name, &tools, &self.launch.allow, &mode, &rel);
+                    self.end_streaming();
+                    self.items.extend(notes.into_iter().map(Item::Info));
+                }
+                Ev::TurnEnd => {
+                    // done for you now; the CLI's result (usage, refused tools) still comes when it exits
+                    if !self.aborted && self.state == State::Running {
+                        self.thinking = false;
+                        self.finishing = true;
+                        self.state = if focused { State::Idle } else { State::Waiting };
+                    }
+                }
+                Ev::TurnStart => {
+                    // the turn went on after its reply (a Stop hook)
+                    if self.finishing && self.queue.is_empty() {
+                        self.finishing = false;
+                        self.state = State::Running;
+                    }
+                }
                 Ev::Done { ok, error } => {
                     self.done_seen = true;
-                    self.streaming = None;
+                    self.end_streaming();
                     self.thinking = false;
                     if !ok {
-                        self.items.push(Item::Error(error.unwrap_or_else(|| "failed".into())));
+                        let name = engines::engine_name(&self.engine);
+                        let why = error.or_else(|| self.last_error.clone()).unwrap_or_else(|| "failed".into());
+                        self.items.push(Item::Error(format!("error: {name}: {why}")));
                     }
                     // done for you; the CLI may still wrap up before it exits
                     if self.state != State::Paused {
@@ -305,15 +388,48 @@ impl Session {
         }
     }
 
-    /// The CLI exited: was that the end of a turn, or did it stop without finishing?
-    pub fn exited(&mut self, status: std::process::ExitStatus) {
+    /// The CLI exited (its output read to the end): was that the end of a turn,
+    /// or did it stop without finishing? (TS CliSession's 'close')
+    pub fn exited(&mut self, status: std::process::ExitStatus, focused: bool) {
         self.child = None;
-        if !self.done_seen && !self.aborted {
-            let name = engines::engine_name(&self.engine);
-            let why = if self.stderr.is_empty() { format!("{name} stopped ({status})") } else { self.stderr.clone() };
-            self.items.push(Item::Error(why));
-            self.state = State::Error;
+        self.finishing = false;
+        self.thinking = false;
+        // a plain-text CLI: no trailing blank lines in the reply
+        if engines::adapter(&self.engine).is_some_and(|a| a.raw())
+            && let Some(j) = self.streaming
+            && let Some(Item::Text(t)) = self.items.get_mut(j)
+        {
+            t.truncate(t.trim_end().len());
         }
+        self.end_streaming();
+        if self.aborted {
+            if self.state == State::Running {
+                self.state = State::Idle;
+            }
+            return;
+        }
+        if self.done_seen {
+            return; // Done said how it went
+        }
+        if status.success() && self.last_error.is_none() {
+            if self.state != State::Paused {
+                self.state = if focused { State::Idle } else { State::Waiting };
+            }
+            return;
+        }
+        let name = engines::engine_name(&self.engine);
+        let why = self.last_error.clone().or_else(|| engines::common::last_lines(&self.stderr)).unwrap_or_else(|| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                if let Some(sig) = status.signal() {
+                    return format!("stopped by signal {sig}");
+                }
+            }
+            format!("exited with code {}", status.code().unwrap_or(1))
+        });
+        self.items.push(Item::Error(format!("error: {name}: {why}")));
+        self.state = State::Error;
     }
 
     pub fn kill_child(&mut self) {
@@ -322,6 +438,8 @@ impl Session {
             let _ = c.wait();
         }
         self.child = None;
+        // a pi agent's process goes too (dropping it stops pi)
+        self.pi = None;
     }
 }
 

@@ -14,7 +14,7 @@ use crate::cli::StartOptions;
 use crate::config::Config;
 use crate::keys::Keymap;
 
-pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, warnings: Vec<String>, _opts: &StartOptions) -> i32 {
+pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, warnings: Vec<String>, opts: &StartOptions) -> i32 {
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP, signal_hook::consts::SIGINT] {
@@ -25,8 +25,12 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config
     if !warnings.is_empty() {
         app.say(warnings.join(" · "), "WarningMsg");
     }
+    // --engine / config's engine, and model and effort for new agents
+    crate::engines::select::startup(&mut app, opts.model.as_deref(), opts.engine.as_deref());
+    // installed? signed in? What's on PATH shows at once; the CLIs' sign-in checks take a moment
+    let env = app.engines.env.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(Msg::Engines(crate::engines::detect_all()));
+        let _ = tx.send(Msg::Engines(crate::engines::detect_all(&env, 8000)));
     });
 
     // ratatui::init restores the terminal on a panic too

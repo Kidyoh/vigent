@@ -22,10 +22,12 @@ usage:
 
 engines (what runs new agents; :checkhealth shows which are signed in):
   claude    your installed Claude Code CLI, with its own login
-
-This is the native build (Rust, milestone 1 of #168): Claude Code agents in riftri
-worktrees. Codex, OpenCode, Gemini CLI, Cursor CLI and pi come in milestone 2;
-until then the npm package (npm install -g @vigent/cli) runs them all.
+  codex     your installed Codex CLI, with its own login
+  opencode  your installed OpenCode CLI, with its own login
+  gemini    your installed Gemini CLI, with its own login
+  cursor    your installed Cursor CLI (cursor-agent), with its own login
+  pi        your installed pi (pi --mode rpc), with its keys or login
+  <id>      any agent CLI from [engines.<id>] in config.toml
 
 keys: i to type a task (Enter starts an agent), j/k gg G to scroll, ]s [s to switch,
       :new <task>, :kill, :theme <name>, :checkhealth, :help, :q";
@@ -192,18 +194,15 @@ pub fn main(args: Vec<String>) -> i32 {
         (None, Some(t)) => t.clone(),
         (None, None) => "default".into(),
     };
-    if let Some(e) = &opts.engine {
-        // Engines area: run what --engine names (src/cli.ts), custom engines included
-        if !config.is_engine_id(e) {
-            eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
-            return 1;
-        }
-        if crate::engines::adapter(e).is_none() {
-            eprintln!("vigent: {} doesn't run in this build yet (PORTING.md)", crate::engines::engine_name(e));
-            return 1;
-        }
+    // engines of your own ([engines.<id>] command = [...]) are known everywhere engines are listed
+    crate::engines::register_custom(&config.custom_engines);
+    if let Some(e) = &opts.engine
+        && !crate::engines::is_engine_id(e)
+    {
+        eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
+        return 1;
     }
-    for (flag, given) in [("--model", opts.model.is_some()), ("--demo", opts.demo), ("--serve", opts.serve)] {
+    for (flag, given) in [("--demo", opts.demo), ("--serve", opts.serve)] {
         if given {
             warnings.push(format!("{flag} isn't in this build yet (PORTING.md)"));
         }

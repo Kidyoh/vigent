@@ -114,7 +114,7 @@ impl App {
             tx,
             started: Instant::now(),
             page: 20,
-            engines: Engines { infos: engines::quick() },
+            engines: Engines::default(),
             review: Default::default(),
             windows: Default::default(),
             serve: Default::default(),
@@ -135,25 +135,14 @@ impl App {
         self.sessions.get(self.focus).filter(|a| !a.closed)
     }
 
-    /// The engine new agents start on (Engines area: config's `engine`, --engine, :engine).
+    /// The engine new agents start on: config's `engine`, --engine or :engine, else auto's pick.
     pub fn new_agent_engine(&self) -> &'static str {
-        engines::default_engine(&self.engines.infos).and_then(|e| engines::KNOWN.iter().find(|s| s.id == e.id)).map(|s| s.id).unwrap_or("claude")
+        self.engines.default_engine()
     }
 
-    /// Why a new agent can't start, if it can't.
+    /// Why a new agent can't start on the default engine, if it can't.
     pub fn cant_start(&self) -> Option<String> {
-        let e = self.engines.get(self.new_agent_engine())?;
-        if e.checking {
-            return None;
-        }
-        if !e.installed {
-            return Some(format!("{} isn't installed: {}", e.name, e.install));
-        }
-        if !e.connected {
-            let how = e.connect.clone().unwrap_or_else(|| engines::spec(&e.id).bin.to_string());
-            return Some(format!("{} isn't signed in: run  {how}  once to sign in, then :checkhealth", e.name));
-        }
-        None
+        engines::select::cant_start(self, None)
     }
 
     // -----------------------------------------------------------------
@@ -161,6 +150,9 @@ impl App {
     // -----------------------------------------------------------------
 
     pub fn key(&mut self, k: KeyEvent) {
+        if self.engines.picker.is_some() {
+            return engines::picker::key(self, k);
+        }
         if self.float.is_some() {
             return crate::ui::floats::key(self, k);
         }
@@ -246,7 +238,10 @@ impl App {
             "c" => crate::health::open(self),
             "?" => crate::help::open(self),
             "q" => crate::commands::exec(self, "q"),
-            // Config/Engines/Sessions areas: t (themes), s (settings), m (model), e (effort), E (engine), T (templates)
+            "m" => engines::select::open_model_picker(self),
+            "e" => engines::select::open_effort_picker(self),
+            "E" => engines::select::open_engine_picker(self),
+            // Config/Sessions areas: t (themes), s (settings), T (templates)
             _ => return false,
         }
         true
@@ -316,13 +311,23 @@ impl App {
 
     /// A new agent, in a worktree of its own made in the background. Its slot, or None (and why, on the message line).
     pub fn start_agent(&mut self, name: &str) -> Option<usize> {
-        if let Some(why) = self.cant_start() {
-            self.say(why, "ErrorMsg");
-            return None;
-        }
+        self.start_agent_with(name, engines::select::StartOpts::default())
+    }
+
+    /// A new agent on the engine, model and effort asked for (each defaults as :engine, :model and :effort set).
+    pub fn start_agent_with(&mut self, name: &str, opts: engines::select::StartOpts) -> Option<usize> {
+        let engine = match engines::select::engine_for_new(self, &opts) {
+            Ok(e) => e,
+            Err(why) => {
+                self.say(why, "ErrorMsg");
+                return None;
+            }
+        };
         let taken: Vec<PathBuf> = self.sessions.iter().map(|a| a.path.clone()).collect();
         let index = self.sessions.len();
-        let mut agent = Session::new(index, name, self.new_agent_engine(), self.cwd.clone());
+        let mut agent = Session::new(index, name, engine, self.cwd.clone());
+        engines::select::configure_new(self, &mut agent, &opts);
+        let by = if engine != "pi" { format!(" · {}", engines::engine_name(engine)) } else { String::new() };
         match &self.root {
             Some(root) => match worktree::plan(root, name, &taken) {
                 Ok(p) => {
@@ -335,7 +340,7 @@ impl App {
                         let r = worktree::make(&root, &p);
                         let _ = tx.send(Msg::WorktreeMade(index, r));
                     });
-                    self.say(format!("'{name}' on {} · making its worktree…", agent.branch.as_deref().unwrap_or("")), "Comment");
+                    self.say(format!("'{name}'{by} on {} · making its worktree…", agent.branch.as_deref().unwrap_or("")), "Comment");
                 }
                 Err(e) => {
                     self.say(format!("can't make a worktree for '{name}': {e}"), "ErrorMsg");
@@ -350,9 +355,13 @@ impl App {
     }
 
     pub fn send(&mut self, i: usize, text: String) {
+        // pi: one long-running process per agent (engines/pi.rs); the CLIs: one process per turn
+        if self.sessions[i].engine == "pi" {
+            return engines::pi::send(self, i, text);
+        }
         let tx = self.tx.clone();
-        let info = self.engines.get(&self.sessions[i].engine).cloned();
-        self.sessions[i].send(text, info.as_ref(), tx);
+        let launch = engines::select::launch(self, &self.sessions[i].engine);
+        self.sessions[i].send(text, &launch, tx);
     }
 
     /// The next queued prompt, once the agent is free.
@@ -374,7 +383,8 @@ impl App {
                             Made::Riftri(_) => " · lightweight copy".to_string(),
                             Made::Git(_) => " · full copy (:checkhealth says why)".to_string(),
                         };
-                        let msg = format!("'{}' on {} in {}{how}", a.name, a.branch.as_deref().unwrap_or(""), a.path.display());
+                        let by = if a.engine != "pi" { format!(" · {}", engines::engine_name(&a.engine)) } else { String::new() };
+                        let msg = format!("'{}'{by} on {} in {}{how}", a.name, a.branch.as_deref().unwrap_or(""), a.path.display());
                         let group = if matches!(made, Made::Git(_)) { "WarningMsg" } else { "ModeMsg" };
                         a.made = Some(made);
                         a.release();
@@ -438,9 +448,14 @@ impl App {
             if a.closed {
                 continue;
             }
+            // its output (and stderr) read to the end first, so the exit is judged with all of it
+            if !a.stream_ended {
+                continue;
+            }
             let Some(child) = a.child.as_mut() else { continue };
             let Ok(Some(status)) = child.try_wait() else { continue };
-            a.exited(status);
+            a.exited(status, i == self.focus);
+            self.refresh_stat(i);
             self.drain(i);
         }
     }

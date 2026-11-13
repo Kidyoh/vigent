@@ -46,7 +46,15 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `app.rs` | `src/app.ts` | `App`: modes, sessions, focus, input lines, message line, keymap + sequencer, per-area state; `Msg` | shared (keep small) |
 | `session.rs` | `src/session.ts`, `CliSession` in `src/cli-engines.ts` | one agent: states, queue, hold/release, pause/resume, abort, transcript items, folding engine events | Sessions |
 | `records.rs` | `src/agents.ts` | the agent record in `.git/worktrees/<n>/vigent/agent.json` (stub: format + load/save) | Sessions (Restore) |
-| `engines/mod.rs` | `src/cli-engines.ts`, `src/engines.ts`, `src/choices.ts` | `Adapter` trait, `RunOpts`, `Ev`, `EngineInfo`, `KNOWN`, `ADAPTERS` registry, `efforts()`, detection | Engines |
+| `engines/mod.rs` | `src/cli-engines.ts`, `src/engines.ts` | `Adapter` trait, `RunOpts`, `Ev`, `EngineInfo`, `KNOWN`, `ADAPTERS` + custom registry (`register_custom`), `quick`/`detect_all`, `default_engine` (auto), `Engines` state, `model_text` | Engines |
+| `engines/{codex,opencode,gemini,cursor}.rs` | the other adapters, `detectCodex`... | args, parser, detection, models | Engines |
+| `engines/custom.rs` | `customAdapter`, `customInfo` | `[engines.<id>] command = [...]` | Engines |
+| `engines/detect.rs` | `run`, `onPath`, `detectPi`, `piAgentDir` | env-explicit command runs with a timeout | Engines |
+| `engines/choices.rs` | `src/choices.ts`, `piModels` | model lists, `model_label`, efforts, `codex debug models` | Engines |
+| `engines/pi.rs` | `src/pi-session.ts`, `pi-ui.ts` | `pi --mode rpc` per agent: requests, events, restore from its session file, extension dialogs | Engines |
+| `engines/select.rs` | `startAgent`, `chooseModel`, `chooseEffort`, `chooseEngine`, pickers | which engine/model/effort new and open agents use | Engines |
+| `engines/picker.rs` | `ChoicePicker`, fuzzy filter | the `:model`/`:effort`/`:engine` list | Engines |
+| `engines/permissions.rs` | `blocked`, `describeDenial`, `allowRules`, `commandPrograms`, `flagValue` | what a refusal says | Engines |
 | `engines/claude.rs` | `claudeAdapter`, `detectClaude` | Claude Code | Engines |
 | `engines/run.rs` | `CliSession.send` | spawns one turn of any adapter, reads its lines on threads | Engines |
 | `keys.rs` | `src/keys.ts` | notation, `ACTIONS` (every name), `DEFAULT_KEYS`, `Rhs`, `Keymap`, `build_keymap`, `Sequencer` (timeoutlen), `replay_next` | Config (mappings), shared tables |
@@ -154,7 +162,6 @@ non-binary parts of the others. These fail and are the areas' targets:
 
 | Test | Area |
 |---|---|
-| custom-engines 7: the real vigent runs a custom engine from config.toml | Engines |
 | e2e 2: first run ... follows up, and comes back after a restart | Sessions (Restore), Engines |
 | e2e 3: @ in a prompt: pick a file | Windows (line editor, attach picker) |
 | e2e 5: no agent CLI and no API key: the demo starts | Serve (demo) |
@@ -177,8 +184,8 @@ non-binary parts of the others. These fail and are the areas' targets:
 - [x] `vigent --help` / `-h` (Rust's own text; TypeScript's lists every subcommand) — **Config**
 - [~] `vigent [folder]` — **Sessions**
 - [x] `--theme <name>` — **Config**
-- [~] `--engine <id>`: unknown engine exits 1 as in TypeScript; a known engine this build can't run exits 1 too; `claude` runs — **Engines**
-- [ ] `--model <id>` — **Engines**
+- [x] `--engine <id>` (every built-in engine and yours; unknown exits 1 as in TypeScript) — **Engines**
+- [x] `--model <id>` (pi's, or the `--engine` CLI's) — **Engines**
 - [ ] `--demo` (and the automatic demo when nothing can run agents) — **Serve**
 - [ ] `--serve [--local]` — **Serve**
 - [x] `vigent theme list` (built-ins; installed themes in `~/.config/vigent/themes` too) — **Config** `[~]`
@@ -220,12 +227,12 @@ Sessions:
 - [ ] `:attach <branch>` — **Sessions**
 
 Engines:
-- [~] `:checkhealth` `:che` `:engines` (Rust also keeps `:health`) — **Engines**
-- [ ] `:model` `:mo [model]` (picker without an argument) — **Engines**
-- [ ] `:engine` `:eng [id]` — **Engines**
-- [ ] `:effort` `:think [level]` — **Engines**
+- [x] `:checkhealth` `:che` `:engines` (re-detects first; TS text; Rust also keeps `:health`) — **Engines** (worktrees part: **Sessions**)
+- [x] `:model` `:mo [model]` (picker of every ready engine's models, `/` search, any name; `codex:gpt-5.5` from another engine) — **Engines**
+- [x] `:engine` `:eng [id]` (picker and direct) — **Engines**
+- [x] `:effort` `:think [level]` (picker and direct; Codex's per-model levels) — **Engines**
 - [ ] `:permissions` `:permission` `:perms` `:perm`, `allow <rule>`, `remove <rule>` — **Engines**
-- [ ] `:pi` `:extensions` — **Engines**
+- [~] `:pi` `:extensions` (the float lists what pi loaded; Enter doesn't start a prompt yet) — **Engines**
 
 Review:
 - [ ] `:diff`, `:diff split|vert|vertical|side` — **Review**
@@ -287,12 +294,12 @@ Insert and command line:
 Parsing every section with TypeScript's warnings is done (`config.rs`); `[x]`
 below means it's also *used*.
 - [x] `theme` / `colorscheme` — **Config**
-- [ ] `model` (pi's model) — **Engines**
-- [ ] `engine` (`auto`, a built-in, or a custom one) — **Engines**
+- [x] `model` (pi's model) — **Engines**
+- [x] `engine` (`auto`, a built-in, or a custom one) — **Engines**
 - [x] `leader` / `mapleader` — **Config**
 - [ ] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `termguicolors`, `transparent`, `whichkey` — **Windows** (`[x]` `timeoutlen`); `notify` — **Serve**
-- [ ] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow`, `ask` — **Engines**
-- [ ] `[engines.<id>]` with `command`: `name`, `output`, `model_args`, `models`, `resume_args` — **Engines**
+- [x] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow` `[x]`, `ask` `[ ]` (asking to allow isn't in this build: the transcript says which rule to add) — **Engines**
+- [x] `[engines.<id>]` with `command`: `name`, `output`, `model_args`, `models`, `resume_args` — **Engines**
 - [x] `[keys]`, `[keys.normal|insert|visual|command]` — **Config**
 - [ ] `[highlights]` (tables, `:hi` strings, links) — **Config**
 - [ ] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
@@ -306,17 +313,17 @@ below means it's also *used*.
 
 ### Engines
 
-- [x] Claude Code (`claude -p --output-format stream-json`), resume — **Engines** `[~]` (model/effort/fork args are built; no `:model`)
-- [ ] Codex (`codex exec --json`) — **Engines**
-- [ ] OpenCode — **Engines**
-- [ ] Gemini CLI — **Engines**
-- [ ] Cursor CLI (`cursor-agent`) — **Engines**
-- [ ] pi (`pi --mode rpc`: `src/pi-session.ts`, `pi-cli.ts`, `pi-ui.ts`, extensions, tree) — **Engines**
-- [ ] custom engines from `[engines.<id>]` — **Engines**
-- [~] detection: installed, version, signed in, `dropEnv` — **Engines**
-- [ ] `defaultEngine` (auto: first signed-in CLI, else pi with a key) — **Engines**
-- [ ] model and effort choices (`src/choices.ts`) — **Engines**
-- [ ] Claude Code permission denials: ask to allow once/always, retry (`askToAllow`), `:permissions` panel and its file — **Engines**
+- [x] Claude Code (`claude -p --output-format stream-json`), resume, model, effort, thinking, turn end / Stop hook, denials — **Engines**
+- [x] Codex (`codex exec --json`, resume, fork args) — **Engines**
+- [x] OpenCode — **Engines**
+- [x] Gemini CLI — **Engines**
+- [x] Cursor CLI (`cursor-agent`) — **Engines**
+- [~] pi (`pi --mode rpc`: one per agent, kept running; prompts, events, retries, compaction, extension dialogs via the picker, `:model`/`:effort`, resume from its session file in git's worktree record) — **Engines**; not yet: `:tree` navigation (**Sessions**), reopening at startup (**Sessions**, Restore)
+- [x] custom engines from `[engines.<id>]` — **Engines**
+- [x] detection: installed, version, signed in, install hints, the ANTHROPIC_API_KEY rule (`dropEnv`) — **Engines**
+- [x] `defaultEngine` (auto: first signed-in CLI, else pi with a key) — **Engines**
+- [x] model and effort choices (`src/choices.ts`) — **Engines**
+- [~] Claude Code permission denials: what was refused and the rule that allows it `[x]`; ask to allow once/always and retry (`askToAllow`), `:permissions` panel and its file `[ ]` — **Engines**
 - [ ] fork a conversation (`--fork-session`, `--resume-session-at`) — **Sessions** with **Engines**
 
 ### Sessions, Review, Windows, Serve features beyond commands and keys
