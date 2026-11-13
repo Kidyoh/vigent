@@ -143,6 +143,11 @@ area consumes yet (remove your flag from that list when you wire it).
   give `start_agent` engine/model options and use them in `review/races.rs`).
   The y/n question (`review::ask`) and the float (`review/float.rs`) are this
   area's own; Windows can fold them into `ui/floats.rs` and a shared confirm.
+  Tab completion after `:race --engines/--models` is `review::races::complete`
+  for the Windows area's completer to call. The Review area's tests in `test/`
+  (review, hunks, race, counts, usage, and project-config's hook tests) import
+  `dist/`; their cases are mirrored as Rust unit tests under `review/` (counts
+  are the Windows area's). The binary is 1,980,240 bytes with Review.
 
 - Rust's `:new <task>` names the agent after the task *and sends it as the
   first prompt*; TypeScript's `:new <name>` only starts an agent by that name.
