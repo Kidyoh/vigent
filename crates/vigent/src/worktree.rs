@@ -368,6 +368,57 @@ pub fn prepare_views(root: &Path, paths: &[PathBuf]) -> HashMap<PathBuf, Readine
     out
 }
 
+/// Can new agent worktrees be copy-on-write here, and what do the ones there
+/// cost (src/riftri.ts RiftriHealth)?
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Health {
+    pub installed: bool,
+    pub ready: bool,
+    pub backend: Option<String>,
+    pub detail: String,
+    /// what's in the way, with riftri's remedy
+    pub blockers: Vec<String>,
+    pub next: Option<String>,
+    /// managed worktrees, their files' size and what they take on disk
+    pub views: Option<(usize, u64, u64)>,
+}
+
+/// Ask riftri about the worktrees folder (src/riftri.ts riftriHealth). Blocking: it probes the disk.
+pub fn riftri_health(root: Option<&Path>, cfg: &WorktreeConfig) -> Health {
+    if cfg.backend == "git" {
+        return Health { installed: riftri_available(), detail: "off ([worktree] backend = \"git\")".into(), ..Default::default() };
+    }
+    if !riftri_available() {
+        return Health { detail: "not installed: agent worktrees are full copies".into(), ..Default::default() };
+    }
+    let Some(root) = root else { return Health { installed: true, detail: "not in a git repository".into(), ..Default::default() } };
+    // doctor needs a destination that doesn't exist yet
+    let probe = worktrees_dir(root, cfg).join(format!(".vigent-probe-{}", std::process::id()));
+    let doc = riftri_core::doctor_for_destination(root, &probe);
+    let rd = serde_json::to_value(&doc.destination_readiness).unwrap_or_default();
+    let status = rd["status"].as_str().unwrap_or("").to_string();
+    // needs-activation only concerns riftri's git shim; vigent calls riftri directly
+    let blockers: Vec<String> = doc
+        .destination_readiness
+        .blockers
+        .iter()
+        .filter(|b| b.kind != "repository-activation")
+        .map(|b| if b.remedy.is_empty() { b.explanation.clone() } else { format!("{} · {}", b.explanation, b.remedy) })
+        .collect();
+    let ready = (status == "ready" || status == "needs-activation") && doc.destination_readiness.copy_on_write;
+    let backend = doc.destination_readiness.backend.map(backend_id);
+    let detail = if ready {
+        format!("copy-on-write worktrees ({})", backend_name(backend.as_deref().unwrap_or("riftri")))
+    } else if !blockers.is_empty() {
+        "can't optimize this repository yet".into()
+    } else {
+        format!("not available here ({})", if status.is_empty() { "blocked" } else { &status })
+    };
+    let next = if status == "needs-activation" { None } else { doc.destination_readiness.next_command.clone() };
+    let views = riftri_state_dir(root).and_then(|state| riftri_core::storage_accounting(&state).ok()).map(|r| (r.active_views, r.total_logical_bytes, r.total_allocated_bytes));
+    Health { installed: true, ready, backend, detail, blockers, next, views }
+}
+
 /// Reclaim riftri storage no worktree uses any more. The bytes freed.
 pub fn riftri_gc(root: &Path) -> Result<u64, String> {
     let state = riftri_core::default_state_directory(root).map_err(|e| e.to_string())?;

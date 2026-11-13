@@ -178,7 +178,24 @@ impl App {
         if self.dashboard_key(&token) {
             return;
         }
-        self.feed(token);
+        for t in self.split_escape(token) {
+            self.feed(t);
+        }
+    }
+
+    /// Esc followed quickly by a key arrives as one Alt-key sequence (<M-j>):
+    /// an Alt key nothing is mapped to is read as Esc and then the key, which
+    /// is what was typed (src/app.ts splitEscape). A busy machine makes this common.
+    fn split_escape(&self, token: String) -> Vec<String> {
+        let Some(rest) = token.strip_prefix("<M-").and_then(|r| r.strip_suffix('>')) else { return vec![token] };
+        let mut keys = self.seq.pending.clone();
+        keys.push(token.clone());
+        let r = self.keymap.lookup(self.mode.keys(), &keys, false);
+        if r.exact.is_some() || r.prefix {
+            return vec![token];
+        }
+        let key = if rest.chars().count() == 1 { rest.to_string() } else { format!("<{rest}>") };
+        vec!["<Esc>".into(), key]
     }
 
     /// A key through the keymap: run what it's bound to (or wait for more keys).

@@ -41,12 +41,74 @@ pub struct Agents {
     last_stat: Option<Instant>,
     /// races started this time (race.rs)
     pub races: Vec<crate::race::Race>,
+    /// can agent worktrees be copy-on-write here (riftri)? None until checked
+    pub storage: Option<worktree::Health>,
 }
 
 impl Default for Agents {
     fn default() -> Self {
-        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None, races: vec![] }
+        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None, races: vec![], storage: None }
     }
+}
+
+/// Text in lines of at most `w` columns, broken between words.
+fn wrap_words(text: &str, w: usize) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        if !cur.is_empty() && crate::ui::text::width(&cur) + 1 + crate::ui::text::width(word) > w {
+            out.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+    }
+    if !cur.is_empty() || out.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// The worktrees part of :checkhealth: riftri, and what agent worktrees cost on disk (src/app.ts storageHealthLines).
+pub fn storage_health_lines(h: &worktree::Health) -> Vec<(String, &'static str)> {
+    let (glyph, group) = if h.ready {
+        ("●", "String")
+    } else if h.installed {
+        ("◐", "WarningMsg")
+    } else {
+        ("○", "Comment")
+    };
+    let mut l: Vec<(String, &'static str)> = vec![(String::new(), "Normal"), ("vigent: agent worktrees".into(), "Title"), (String::new(), "Normal")];
+    l.push((format!("{glyph} lightweight worktrees  copy-on-write: agents share unchanged files"), group));
+    let tag = if h.ready {
+        "OK "
+    } else if h.installed {
+        "WARNING "
+    } else {
+        ""
+    };
+    l.push((format!("    {tag}{}", h.detail), if h.ready { "NormalFloat" } else { group }));
+    for b in &h.blockers {
+        for (n, line) in wrap_words(b, 74).into_iter().enumerate() {
+            l.push((format!("    {}{line}", if n == 0 { "- " } else { "  " }), "WarningMsg"));
+        }
+    }
+    if let Some(next) = &h.next {
+        l.push((format!("    try: {next}"), "Comment"));
+    }
+    if !h.installed {
+        l.push((format!("    install: {}", worktree::RIFTRI_INSTALL), "Comment"));
+    }
+    if let Some((views, logical, allocated)) = h.views {
+        let saved = logical.saturating_sub(allocated);
+        let saves = if saved > 0 { format!(" (saves {})", worktree::format_bytes(saved)) } else { String::new() };
+        l.push((
+            format!("    {views} worktree{}: {} of files in {} on disk{saves}", if views == 1 { "" } else { "s" }, worktree::format_bytes(logical), worktree::format_bytes(allocated)),
+            "NormalFloat",
+        ));
+    }
+    l
 }
 
 /// A y/n question, like vim's confirm prompts.
@@ -460,12 +522,16 @@ impl App {
                 let from = if a.base.is_empty() { String::new() } else { format!(" (from {})", a.base) };
                 let text = format!("'{}'{by} on {} in {}{from}{how}", a.name, a.branch.as_deref().unwrap_or(""), short_path(&self.cwd, &a.path));
                 let group = if matches!(made, Made::Git(_)) { "WarningMsg" } else { "ModeMsg" };
+                let riftri = matches!(made, Made::Riftri(_));
                 if let Made::Riftri(b) = &made {
                     a.riftri = Some(b.clone());
                 }
                 a.made = Some(made);
                 if making.is_some_and(|m| m == self.message.0) {
                     self.say(text, group);
+                }
+                if riftri {
+                    self.refresh_storage();
                 }
                 self.refresh_stat(i);
                 // worktree_created holds it again until the hook has run; without one, its prompts go now
@@ -483,6 +549,18 @@ impl App {
             }
         }
         self.race_worktree_settled(i);
+    }
+
+    /// Recount what riftri's worktrees cost (and whether it can make them here), in the background.
+    pub fn refresh_storage(&self) {
+        if !self.config.worktree.enabled {
+            return;
+        }
+        let (root, cfg, tx) = (self.root.clone(), self.config.worktree.clone(), self.tx.clone());
+        std::thread::spawn(move || {
+            let h = worktree::riftri_health(root.as_deref(), &cfg);
+            let _ = tx.send(Msg::Run(Box::new(move |app: &mut App| app.agents.storage = Some(h))));
+        });
     }
 
     /// Take an agent out (it couldn't start, or was killed): stop it and close its slot.
@@ -724,6 +802,7 @@ impl App {
         if !self.config.worktree.enabled {
             return;
         }
+        self.refresh_storage();
         let r = records::reopenable(&root, &self.config.worktree);
         for (path, why) in &r.blocked {
             warnings.push(format!("couldn't reopen the agent in {}: {why}", path.display()));
@@ -868,6 +947,9 @@ impl App {
             return self.say(format!("killed '{name}' · kept {branch} (:attach {branch} reopens it, :worktree remove deletes it)"), "WarningMsg");
         }
         let r = worktree::remove(&root, &path, Some(&branch), Some(&base).filter(|b| !b.is_empty()).map(|b| b.as_str()), false);
+        if r.removed {
+            self.refresh_storage();
+        }
         self.say(format!("killed '{name}' · {}", r.message), if r.removed { "WarningMsg" } else { "ErrorMsg" });
     }
 
@@ -919,6 +1001,9 @@ impl App {
             }
             let base = records::load(&w.path).and_then(|m| m.base);
             let r = worktree::remove(&root, &w.path, w.branch.as_deref(), base.as_deref(), verb.ends_with('!'));
+            if r.removed {
+                self.refresh_storage();
+            }
             return self.say(r.message, if r.removed { "WarningMsg" } else { "ErrorMsg" });
         }
         if !arg.is_empty() {
@@ -946,6 +1031,13 @@ impl App {
             let who = crate::ui::text::fit(&owner_name, 20);
             let line = format!("{}{branch:<30} {who:<20} {storage}{}", if owner.is_some() { "● " } else { "  " }, short_path(&self.cwd, &w.path));
             lines.push((line, if owner.is_some() { "String" } else { "NormalFloat" }));
+        }
+        if let Some(st) = &self.agents.storage
+            && let Some((_, logical, allocated)) = st.views
+        {
+            lines.push((String::new(), "Normal"));
+            let b = worktree::backend_name(st.backend.as_deref().unwrap_or("unknown"));
+            lines.push((format!("worktrees: {} of files in {} on disk ({b})", worktree::format_bytes(logical), worktree::format_bytes(allocated)), "Comment"));
         }
         lines.push((String::new(), "Normal"));
         lines.push(("● = an agent is working in it · :attach <branch> reopens one · :worktree remove <branch> deletes it".into(), "Comment"));

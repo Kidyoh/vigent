@@ -4,7 +4,6 @@
 
 use crate::app::App;
 use crate::ui::floats::Float;
-use crate::worktree::Made;
 
 pub fn open(app: &mut App) {
     let mut l: Vec<(String, &'static str)> = vec![
@@ -42,23 +41,9 @@ pub fn open(app: &mut App) {
         }
         l.push((String::new(), "Normal"));
     }
-    l.push(("vigent: agent worktrees".into(), "Title"));
-    l.push((String::new(), "Normal"));
-    l.push(("● lightweight worktrees  copy-on-write: agents share unchanged files".into(), "Normal"));
-    l.push(("    OK riftri is built into this binary".into(), "ModeMsg"));
-    let mut seen = vec![];
-    for a in &app.sessions {
-        match &a.made {
-            Some(Made::Riftri(b)) if !seen.contains(b) => {
-                seen.push(b.clone());
-                l.push((format!("    OK copy-on-write worktrees ({})", crate::worktree::backend_name(b)), "ModeMsg"));
-            }
-            Some(Made::Git(why)) => l.push((format!("    WARNING '{}' got a full copy: {why}", a.name), "WarningMsg")),
-            _ => {}
-        }
-    }
-    if app.root.is_none() {
-        l.push(("    not in a git repository: agents work in this folder".into(), "Comment"));
-    }
+    // the worktrees part (Sessions area): riftri, checked again now, and what agent worktrees cost on disk
+    let storage = crate::worktree::riftri_health(app.root.as_deref(), &app.config.worktree);
+    l.extend(crate::agents::storage_health_lines(&storage));
+    app.agents.storage = Some(storage);
     app.float = Some(Float::new("checkhealth", l));
 }
