@@ -11,26 +11,8 @@ use crate::{config, keys, theme, worktree};
 
 pub const VERSION: &str = env!("VIGENT_VERSION");
 
-pub const HELP: &str = "vigent — a vim-native orchestrator for coding-agent harnesses (the agent CLIs you have installed)
-
-usage:
-  vigent --version                           which vigent this is
-  vigent [folder] [--theme <name>]           start (in a git repository: each agent gets its own worktree)
-  vigent theme list                          the built-in themes
-  vigent worktree list                       the agents' worktrees in this repository
-  vigent worktree remove <branch> [--force]  delete one (safe unless --force)
-
-engines (what runs new agents; :checkhealth shows which are signed in):
-  claude    your installed Claude Code CLI, with its own login
-  codex     your installed Codex CLI, with its own login
-  opencode  your installed OpenCode CLI, with its own login
-  gemini    your installed Gemini CLI, with its own login
-  cursor    your installed Cursor CLI (cursor-agent), with its own login
-  pi        your installed pi (pi --mode rpc), with its keys or login
-  <id>      any agent CLI from [engines.<id>] in config.toml
-
-keys: i to type a task (Enter starts an agent), j/k gg G to scroll, ]s [s to switch,
-      :new <task>, :kill, :theme <name>, :checkhealth, :help, :q";
+/// `vigent --help`: the TypeScript vigent's text, word for word (src/cli.ts HELP).
+pub const HELP: &str = include_str!("help.txt");
 
 /// A subcommand: `vigent <name> ...`. `run` gets the arguments after the name and returns the exit code.
 pub struct Sub {
@@ -39,13 +21,13 @@ pub struct Sub {
 }
 
 /// Every subcommand (src/cli.ts). Areas add theirs here:
-///   Config: `config check`, `config init`, `trust`, `theme import|new|path`
 ///   Sessions: `worktree prune`, `worktree gc`
 pub static SUBCOMMANDS: &[Sub] = &[
-    Sub { names: &["--version", "-v", "-V", "version"], run: |_| version() },
-    Sub { names: &["--help", "-h", "help"], run: |_| help() },
-    Sub { names: &["theme", "themes"], run: theme_command },
+    Sub { names: &["version"], run: |_| version() },
+    Sub { names: &["theme", "themes"], run: crate::themecli::command },
     Sub { names: &["worktree", "worktrees", "wt"], run: worktree_command },
+    Sub { names: &["config"], run: config_command },
+    Sub { names: &["trust"], run: crate::trust::command },
 ];
 
 fn version() -> i32 {
@@ -58,15 +40,57 @@ fn help() -> i32 {
     0
 }
 
-fn theme_command(args: &[String]) -> i32 {
-    if args.first().is_some_and(|a| a != "list") {
-        eprintln!("usage: vigent theme list");
-        return 1;
+/// `vigent config init` (a commented config.toml) and `vigent config check`.
+fn config_command(args: &[String]) -> i32 {
+    match args.first().map(String::as_str) {
+        Some("init") => {
+            let file = config::config_path();
+            if file.exists() {
+                eprintln!("{} already exists", file.display());
+                return 1;
+            }
+            let r = file.parent().map(std::fs::create_dir_all).unwrap_or(Ok(())).and_then(|_| std::fs::write(&file, config::CONFIG_TEMPLATE));
+            if let Err(e) = r {
+                eprintln!("vigent: {e}");
+                return 1;
+            }
+            println!("created {}", file.display());
+            0
+        }
+        Some("check") => {
+            let file = config::config_path();
+            if !file.exists() {
+                println!("no config at {} (defaults in use). Create one with: vigent config init", file.display());
+                return 0;
+            }
+            let config::Loaded { config, mut warnings, .. } = config::load(&file, config::LoadOptions::default());
+            let (keymap, key_warnings) = keys::build_keymap(config.leader.as_deref(), &config.keys);
+            warnings.extend(key_warnings);
+            if let Some(t) = &config.theme {
+                let r = if crate::follow::is_follow(t) { crate::follow::follow_theme(t).map(|_| ()) } else { theme::load_def(t).map(|_| ()) };
+                if let Err(e) = r {
+                    warnings.push(e);
+                }
+            }
+            let mappings: usize = keys::KEY_MODES.iter().map(|m| keymap.bindings(*m).iter().filter(|b| b.user).count()).sum();
+            for w in &warnings {
+                println!("warning: {w}");
+            }
+            let status = if warnings.is_empty() { "ok".to_string() } else { format!("{} problem(s)", warnings.len()) };
+            println!(
+                "{}: {status} · theme {} · leader {} · {mappings} mapping(s) · {} highlight override(s)",
+                file.display(),
+                config.theme.as_deref().unwrap_or("default"),
+                config.leader.as_deref().unwrap_or("\\"),
+                config.highlights.len()
+            );
+            i32::from(!warnings.is_empty())
+        }
+        _ => {
+            // `vigent config` alone, or another word: a folder named config, as in TypeScript
+            start(std::iter::once("config".to_string()).chain(args.iter().cloned()).collect())
+        }
     }
-    for n in theme::names() {
-        println!("{n}  (built-in)");
-    }
-    0
 }
 
 /// `vigent worktree list | remove <branch> [--force] | prune | gc` (src/cli.ts worktreeCommand).
@@ -143,6 +167,8 @@ fn worktree_command(args: &[String]) -> i32 {
 #[derive(Debug, Default)]
 pub struct StartOptions {
     pub folder: Option<PathBuf>,
+    /// nothing here can run agents (no CLI, pi without a key): the demo starts by itself and says so
+    pub auto_demo: bool,
     pub theme: Option<String>,
     /// Engines area: the model for new agents on --engine
     pub model: Option<String>,
@@ -183,10 +209,23 @@ pub fn parse_start(args: &[String]) -> Result<StartOptions, String> {
 }
 
 pub fn main(args: Vec<String>) -> i32 {
+    // like the TypeScript vigent: --version and --help anywhere on the line
+    if args.iter().any(|a| a == "--version" || a == "-v") {
+        return version();
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return help();
+    }
     if let Some(first) = args.first()
-        && let Some(sub) = SUBCOMMANDS.iter().find(|s| s.names.contains(&first.as_str())) {
-            return (sub.run)(&args[1..]);
-        }
+        && let Some(sub) = SUBCOMMANDS.iter().find(|s| s.names.contains(&first.as_str()))
+    {
+        return (sub.run)(&args[1..]);
+    }
+    start(args)
+}
+
+/// Start the screen: `vigent [folder] [flags]`.
+fn start(args: Vec<String>) -> i32 {
     let opts = match parse_start(&args) {
         Ok(o) => o,
         Err(e) => {
@@ -195,28 +234,16 @@ pub fn main(args: Vec<String>) -> i32 {
         }
     };
     if let Some(f) = &opts.folder
-        && (!f.is_dir() || std::env::set_current_dir(f).is_err()) {
-            eprintln!("vigent: '{}' is not a folder (usage: vigent [folder])", f.display());
-            return 1;
-        }
+        && (!f.is_dir() || std::env::set_current_dir(f).is_err())
+    {
+        eprintln!("vigent: '{}' is not a folder (usage: vigent [folder])", f.display());
+        return 1;
+    }
     let cwd = std::env::current_dir().unwrap_or_default();
     let root = worktree::repo_root(&cwd);
     let config::Loaded { config, mut warnings, .. } = config::load_all(root.as_deref());
     let (keymap, key_warnings) = keys::build_keymap(config.leader.as_deref(), &config.keys);
     warnings.extend(key_warnings);
-    let theme_name = match (&opts.theme, &config.theme) {
-        (Some(t), _) if theme::load(t).is_none() => {
-            eprintln!("vigent: no theme '{t}' (vigent theme list)");
-            return 1;
-        }
-        (Some(t), _) => t.clone(),
-        (None, Some(t)) if theme::load(t).is_none() => {
-            warnings.push(format!("no theme '{t}' (from config); using default"));
-            "default".into()
-        }
-        (None, Some(t)) => t.clone(),
-        (None, None) => "default".into(),
-    };
     // engines of your own ([engines.<id>] command = [...]) are known everywhere engines are listed
     crate::engines::register_custom(&config.custom_engines);
     if let Some(e) = &opts.engine
@@ -225,12 +252,26 @@ pub fn main(args: Vec<String>) -> i32 {
         eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
         return 1;
     }
+    // theme = "nvim" / "vim": your editor's colorscheme (src/follow.ts)
+    let theme_name = opts.theme.clone().or_else(|| config.theme.clone()).unwrap_or_else(|| "default".into());
+    let loaded = if crate::follow::is_follow(&theme_name) { crate::follow::follow_theme(&theme_name) } else { theme::load_def(&theme_name) };
+    let theme_def = match loaded {
+        Ok(d) => d,
+        Err(e) if opts.theme.is_some() => {
+            eprintln!("vigent: {e}");
+            return 1;
+        }
+        Err(e) => {
+            warnings.push(format!("{e} (from config); using default"));
+            theme::load_def("default").expect("the default theme")
+        }
+    };
     for (flag, given) in [("--demo", opts.demo), ("--serve", opts.serve)] {
         if given {
             warnings.push(format!("{flag} isn't in this build yet (PORTING.md)"));
         }
     }
-    crate::tui::run(VERSION, cwd, &theme_name, config, keymap, warnings, &opts)
+    crate::tui::run(VERSION, cwd, theme_def, &theme_name, config, keymap, warnings, &opts)
 }
 
 #[cfg(test)]

@@ -32,7 +32,7 @@ pub static COMMANDS: &[Command] = &[
     Command { name: "marks", aliases: &[], also: None, run: |a, _| list_places(a, "marks") },
     Command { name: "jumps", aliases: &[], also: None, run: |a, _| list_places(a, "jumps") },
     Command { name: "history", aliases: &["his"], also: None, run: |a, _| list_places(a, "history") },
-    Command { name: "set", aliases: &["se"], also: None, run: set },
+    // :set is the Config area's (looks::exec_set: it reloads the theme for termguicolors / transparent)
     Command { name: "map", aliases: &[], also: Some(is_map), run: map },
     Command { name: "unmap", aliases: &[], also: Some(is_unmap), run: unmap },
     Command { name: "command", aliases: &["com"], also: None, run: |a, ex| exec_command(a, ex.arg, ex.bang) },

@@ -61,6 +61,25 @@ pub const EX_HELP: &[(&str, &str)] = &[
     (":permissions allow <rule>", "let Claude Code run something without asking, e.g. Bash(cargo:*) (remove <rule> takes it away)"),
 ];
 
+/// What a right-hand side does, for :help and :settings (the which-key panel's words).
+pub fn describe_rhs(rhs: &[Rhs]) -> String {
+    describe(rhs)
+}
+
+/// A key's job for :settings: an ex command with what :help says about it, else describe_rhs.
+pub fn rhs_label(rhs: &[Rhs]) -> String {
+    if let [Rhs::Ex { cmd, execute }] = rhs {
+        let word = cmd.split_whitespace().next().unwrap_or_default();
+        let help = EX_HELP.iter().find(|(c, _)| *c == format!(":{word}") || c.starts_with(&format!(":{word} ")));
+        let shown = format!(":{}{}", cmd.trim_end(), if *execute { "" } else { " …" });
+        return match help {
+            Some((_, d)) => format!("{} ({shown})", d.split(" (").next().unwrap_or(d)),
+            None => shown,
+        };
+    }
+    describe_rhs(rhs)
+}
+
 pub fn open(app: &mut App) {
     app.seq.reset();
     let mut lines: Vec<FloatLine> = vec![];

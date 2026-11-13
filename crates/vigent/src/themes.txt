@@ -77,6 +77,7 @@ VigentTool #8ec07c - -
 VigentToolOutput #928374 - -
 VigentSpinner #fe8019 - -
 theme tokyonight dark solid
+@palette {"bg":"#1a1b26","bg_dark":"#16161e","bg_alt":"#292e42","selection":"#283457","fg":"#c0caf5","muted":"#565f89","subtle":"#3b4261","red":"#f7768e","orange":"#ff9e64","yellow":"#e0af68","green":"#9ece6a","cyan":"#7dcfff","blue":"#7aa2f7","magenta":"#bb9af7","accent":"#ff9e64"}
 Normal #c0caf5 #1a1b26 -
 NormalFloat #c0caf5 #16161e -
 FloatBorder #3b4261 #16161e -
@@ -126,6 +127,7 @@ VigentTool #7dcfff - -
 VigentToolOutput #565f89 - -
 VigentSpinner #ff9e64 - -
 theme tokyonight-moon dark solid
+@palette {"bg":"#222436","bg_dark":"#1e2030","bg_alt":"#2f334d","selection":"#2d3f76","fg":"#c8d3f5","muted":"#636da6","subtle":"#3b4261","red":"#ff757f","orange":"#ff966c","yellow":"#ffc777","green":"#c3e88d","cyan":"#86e1fc","blue":"#82aaff","magenta":"#c099ff","accent":"#ff966c"}
 Normal #c8d3f5 #222436 -
 NormalFloat #c8d3f5 #1e2030 -
 FloatBorder #589ed7 #1e2030 -
@@ -176,6 +178,7 @@ VigentToolOutput #737aa2 - -
 VigentSpinner #ff966c - -
 NeoTreeNormal #c8d3f5 #1e2030 -
 theme lazyvim dark transparent
+@palette {"bg":"#222436","bg_dark":"#1e2030","bg_alt":"#2f334d","selection":"#2d3f76","fg":"#c8d3f5","muted":"#636da6","subtle":"#3b4261","red":"#ff757f","orange":"#ff966c","yellow":"#ffc777","green":"#c3e88d","cyan":"#86e1fc","blue":"#82aaff","magenta":"#c099ff","accent":"#ff966c"}
 Normal #c8d3f5 #222436 -
 NormalFloat #c8d3f5 #1e2030 -
 FloatBorder #589ed7 #1e2030 -
@@ -226,6 +229,7 @@ VigentToolOutput #737aa2 - -
 VigentSpinner #ff966c - -
 NeoTreeNormal #c8d3f5 #1e2030 -
 theme catppuccin dark solid
+@palette {"bg":"#1e1e2e","bg_dark":"#181825","bg_alt":"#313244","selection":"#45475a","fg":"#cdd6f4","muted":"#6c7086","subtle":"#585b70","red":"#f38ba8","orange":"#fab387","yellow":"#f9e2af","green":"#a6e3a1","cyan":"#94e2d5","blue":"#89b4fa","magenta":"#cba6f7","accent":"#b4befe"}
 Normal #cdd6f4 #1e1e2e -
 NormalFloat #cdd6f4 #181825 -
 FloatBorder #585b70 #181825 -
@@ -275,6 +279,7 @@ VigentTool #94e2d5 - -
 VigentToolOutput #6c7086 - -
 VigentSpinner #fab387 - -
 theme catppuccin-latte light solid
+@palette {"bg":"#eff1f5","bg_dark":"#e6e9ef","bg_alt":"#ccd0da","selection":"#bcc0cc","fg":"#4c4f69","muted":"#9ca0b0","subtle":"#acb0be","red":"#d20f39","orange":"#fe640b","yellow":"#df8e1d","green":"#40a02b","cyan":"#179299","blue":"#1e66f5","magenta":"#8839ef","accent":"#7287fd"}
 Normal #4c4f69 #eff1f5 -
 NormalFloat #4c4f69 #e6e9ef -
 FloatBorder #acb0be #e6e9ef -
@@ -324,6 +329,7 @@ VigentTool #179299 - -
 VigentToolOutput #9ca0b0 - -
 VigentSpinner #fe640b - -
 theme nord dark solid
+@palette {"bg":"#2e3440","bg_dark":"#272c36","bg_alt":"#3b4252","selection":"#434c5e","fg":"#d8dee9","muted":"#616e88","subtle":"#4c566a","red":"#bf616a","orange":"#d08770","yellow":"#ebcb8b","green":"#a3be8c","cyan":"#88c0d0","blue":"#81a1c1","magenta":"#b48ead","accent":"#88c0d0"}
 Normal #d8dee9 #2e3440 -
 NormalFloat #d8dee9 #272c36 -
 FloatBorder #4c566a #272c36 -
@@ -373,6 +379,7 @@ VigentTool #88c0d0 - -
 VigentToolOutput #616e88 - -
 VigentSpinner #d08770 - -
 theme rose-pine dark solid
+@palette {"bg":"#191724","bg_dark":"#1f1d2e","bg_alt":"#26233a","selection":"#403d52","fg":"#e0def4","muted":"#6e6a86","subtle":"#524f67","red":"#eb6f92","orange":"#ebbcba","yellow":"#f6c177","green":"#f6c177","cyan":"#9ccfd8","blue":"#ebbcba","magenta":"#c4a7e7","accent":"#f6c177"}
 Normal #e0def4 #191724 -
 NormalFloat #e0def4 #1f1d2e -
 FloatBorder #524f67 #1f1d2e -
@@ -422,6 +429,7 @@ VigentTool #9ccfd8 - -
 VigentToolOutput #6e6a86 - -
 VigentSpinner #ebbcba - -
 theme kanagawa dark solid
+@palette {"bg":"#1f1f28","bg_dark":"#16161d","bg_alt":"#2a2a37","selection":"#223249","fg":"#dcd7ba","muted":"#727169","subtle":"#54546d","red":"#e46876","orange":"#ffa066","yellow":"#e6c384","green":"#98bb6c","cyan":"#7fb4ca","blue":"#7e9cd8","magenta":"#957fb8","accent":"#ffa066"}
 Normal #dcd7ba #1f1f28 -
 NormalFloat #dcd7ba #16161d -
 FloatBorder #54546d #16161d -
@@ -471,6 +479,7 @@ VigentTool #7fb4ca - -
 VigentToolOutput #727169 - -
 VigentSpinner #ffa066 - -
 theme catppuccin-frappe dark solid
+@palette {"bg":"#303446","bg_dark":"#292c3c","bg_alt":"#414559","selection":"#51576d","fg":"#c6d0f5","muted":"#737994","subtle":"#626880","red":"#e78284","orange":"#ef9f76","yellow":"#e5c890","green":"#a6d189","cyan":"#81c8be","blue":"#8caaee","magenta":"#ca9ee6","accent":"#babbf1"}
 Normal #c6d0f5 #303446 -
 NormalFloat #c6d0f5 #292c3c -
 FloatBorder #626880 #292c3c -
@@ -520,6 +529,7 @@ VigentTool #81c8be - -
 VigentToolOutput #737994 - -
 VigentSpinner #ef9f76 - -
 theme catppuccin-macchiato dark solid
+@palette {"bg":"#24273a","bg_dark":"#1e2030","bg_alt":"#363a4f","selection":"#494d64","fg":"#cad3f5","muted":"#6e738d","subtle":"#5b6078","red":"#ed8796","orange":"#f5a97f","yellow":"#eed49f","green":"#a6da95","cyan":"#8bd5ca","blue":"#8aadf4","magenta":"#c6a0f6","accent":"#b7bdf8"}
 Normal #cad3f5 #24273a -
 NormalFloat #cad3f5 #1e2030 -
 FloatBorder #5b6078 #1e2030 -
@@ -569,6 +579,7 @@ VigentTool #8bd5ca - -
 VigentToolOutput #6e738d - -
 VigentSpinner #f5a97f - -
 theme tokyonight-storm dark solid
+@palette {"bg":"#24283b","bg_dark":"#1f2335","bg_alt":"#292e42","selection":"#2e3c64","fg":"#c0caf5","muted":"#565f89","subtle":"#3b4261","red":"#f7768e","orange":"#ff9e64","yellow":"#e0af68","green":"#9ece6a","cyan":"#7dcfff","blue":"#7aa2f7","magenta":"#bb9af7","accent":"#ff9e64"}
 Normal #c0caf5 #24283b -
 NormalFloat #c0caf5 #1f2335 -
 FloatBorder #3b4261 #1f2335 -
@@ -618,6 +629,7 @@ VigentTool #7dcfff - -
 VigentToolOutput #565f89 - -
 VigentSpinner #ff9e64 - -
 theme rose-pine-moon dark solid
+@palette {"bg":"#232136","bg_dark":"#2a273f","bg_alt":"#393552","selection":"#44415a","fg":"#e0def4","muted":"#6e6a86","subtle":"#56526e","red":"#eb6f92","orange":"#ea9a97","yellow":"#f6c177","green":"#3e8fb0","cyan":"#9ccfd8","blue":"#3e8fb0","magenta":"#c4a7e7","accent":"#f6c177"}
 Normal #e0def4 #232136 -
 NormalFloat #e0def4 #2a273f -
 FloatBorder #56526e #2a273f -
@@ -667,6 +679,7 @@ VigentTool #9ccfd8 - -
 VigentToolOutput #6e6a86 - -
 VigentSpinner #ea9a97 - -
 theme rose-pine-dawn light solid
+@palette {"bg":"#faf4ed","bg_dark":"#fffaf3","bg_alt":"#f2e9e1","selection":"#dfdad9","fg":"#575279","muted":"#9893a5","subtle":"#cecacd","red":"#b4637a","orange":"#d7827e","yellow":"#ea9d34","green":"#286983","cyan":"#56949f","blue":"#286983","magenta":"#907aa9","accent":"#ea9d34"}
 Normal #575279 #faf4ed -
 NormalFloat #575279 #fffaf3 -
 FloatBorder #cecacd #fffaf3 -
@@ -716,6 +729,7 @@ VigentTool #56949f - -
 VigentToolOutput #9893a5 - -
 VigentSpinner #d7827e - -
 theme dracula dark solid
+@palette {"bg":"#282a36","bg_dark":"#21222c","bg_alt":"#44475a","selection":"#44475a","fg":"#f8f8f2","muted":"#6272a4","subtle":"#4d5066","red":"#ff5555","orange":"#ffb86c","yellow":"#f1fa8c","green":"#50fa7b","cyan":"#8be9fd","blue":"#bd93f9","magenta":"#ff79c6","accent":"#ff79c6"}
 Normal #f8f8f2 #282a36 -
 NormalFloat #f8f8f2 #21222c -
 FloatBorder #4d5066 #21222c -
@@ -765,6 +779,7 @@ VigentTool #8be9fd - -
 VigentToolOutput #6272a4 - -
 VigentSpinner #ffb86c - -
 theme onedark dark solid
+@palette {"bg":"#282c34","bg_dark":"#21252b","bg_alt":"#2c313c","selection":"#3e4452","fg":"#abb2bf","muted":"#5c6370","subtle":"#4b5263","red":"#e06c75","orange":"#d19a66","yellow":"#e5c07b","green":"#98c379","cyan":"#56b6c2","blue":"#61afef","magenta":"#c678dd","accent":"#e5c07b"}
 Normal #abb2bf #282c34 -
 NormalFloat #abb2bf #21252b -
 FloatBorder #4b5263 #21252b -
@@ -814,6 +829,7 @@ VigentTool #56b6c2 - -
 VigentToolOutput #5c6370 - -
 VigentSpinner #d19a66 - -
 theme everforest dark solid
+@palette {"bg":"#2d353b","bg_dark":"#232a2e","bg_alt":"#343f44","selection":"#543a48","fg":"#d3c6aa","muted":"#859289","subtle":"#4f585e","red":"#e67e80","orange":"#e69875","yellow":"#dbbc7f","green":"#a7c080","cyan":"#83c092","blue":"#7fbbb3","magenta":"#d699b6","accent":"#a7c080"}
 Normal #d3c6aa #2d353b -
 NormalFloat #d3c6aa #232a2e -
 FloatBorder #4f585e #232a2e -
@@ -863,6 +879,7 @@ VigentTool #83c092 - -
 VigentToolOutput #859289 - -
 VigentSpinner #e69875 - -
 theme nightfox dark solid
+@palette {"bg":"#192330","bg_dark":"#131a24","bg_alt":"#29394f","selection":"#2b3b51","fg":"#cdcecf","muted":"#738091","subtle":"#39506d","red":"#c94f6d","orange":"#f4a261","yellow":"#dbc074","green":"#81b29a","cyan":"#63cdcf","blue":"#719cd6","magenta":"#9d79d6","accent":"#f4a261"}
 Normal #cdcecf #192330 -
 NormalFloat #cdcecf #131a24 -
 FloatBorder #39506d #131a24 -
@@ -912,6 +929,7 @@ VigentTool #63cdcf - -
 VigentToolOutput #738091 - -
 VigentSpinner #f4a261 - -
 theme solarized-dark dark solid
+@palette {"bg":"#002b36","bg_dark":"#00212b","bg_alt":"#073642","selection":"#0b4a5a","fg":"#93a1a1","muted":"#586e75","subtle":"#2c4f58","red":"#dc322f","orange":"#cb4b16","yellow":"#b58900","green":"#859900","cyan":"#2aa198","blue":"#268bd2","magenta":"#d33682","accent":"#b58900"}
 Normal #93a1a1 #002b36 -
 NormalFloat #93a1a1 #00212b -
 FloatBorder #2c4f58 #00212b -
@@ -961,6 +979,7 @@ VigentTool #2aa198 - -
 VigentToolOutput #586e75 - -
 VigentSpinner #cb4b16 - -
 theme solarized-light light solid
+@palette {"bg":"#fdf6e3","bg_dark":"#f5efdc","bg_alt":"#eee8d5","selection":"#e4ddc8","fg":"#586e75","muted":"#93a1a1","subtle":"#c9c3b0","red":"#dc322f","orange":"#cb4b16","yellow":"#b58900","green":"#859900","cyan":"#2aa198","blue":"#268bd2","magenta":"#d33682","accent":"#cb4b16"}
 Normal #586e75 #fdf6e3 -
 NormalFloat #586e75 #f5efdc -
 FloatBorder #c9c3b0 #f5efdc -
@@ -1010,6 +1029,7 @@ VigentTool #2aa198 - -
 VigentToolOutput #93a1a1 - -
 VigentSpinner #cb4b16 - -
 theme github-dark dark solid
+@palette {"bg":"#0d1117","bg_dark":"#010409","bg_alt":"#161b22","selection":"#1c3a5e","fg":"#e6edf3","muted":"#7d8590","subtle":"#30363d","red":"#ff7b72","orange":"#ffa657","yellow":"#d29922","green":"#3fb950","cyan":"#a5d6ff","blue":"#58a6ff","magenta":"#d2a8ff","accent":"#58a6ff"}
 Normal #e6edf3 #0d1117 -
 NormalFloat #e6edf3 #010409 -
 FloatBorder #30363d #010409 -
@@ -1059,6 +1079,7 @@ VigentTool #a5d6ff - -
 VigentToolOutput #7d8590 - -
 VigentSpinner #ffa657 - -
 theme github-light light solid
+@palette {"bg":"#ffffff","bg_dark":"#f6f8fa","bg_alt":"#eaeef2","selection":"#cce5ff","fg":"#1f2328","muted":"#656d76","subtle":"#d0d7de","red":"#cf222e","orange":"#bc4c00","yellow":"#9a6700","green":"#1a7f37","cyan":"#0a3069","blue":"#0969da","magenta":"#8250df","accent":"#0969da"}
 Normal #1f2328 #ffffff -
 NormalFloat #1f2328 #f6f8fa -
 FloatBorder #d0d7de #f6f8fa -
@@ -1108,6 +1129,7 @@ VigentTool #0a3069 - -
 VigentToolOutput #656d76 - -
 VigentSpinner #bc4c00 - -
 theme monokai-pro dark solid
+@palette {"bg":"#2d2a2e","bg_dark":"#221f22","bg_alt":"#403e41","selection":"#5b595c","fg":"#fcfcfa","muted":"#727072","subtle":"#5b595c","red":"#ff6188","orange":"#fc9867","yellow":"#ffd866","green":"#a9dc76","cyan":"#78dce8","blue":"#78dce8","magenta":"#ab9df2","accent":"#ffd866"}
 Normal #fcfcfa #2d2a2e -
 NormalFloat #fcfcfa #221f22 -
 FloatBorder #5b595c #221f22 -
@@ -1157,6 +1179,7 @@ VigentTool #78dce8 - -
 VigentToolOutput #727072 - -
 VigentSpinner #fc9867 - -
 theme ayu-mirage dark solid
+@palette {"bg":"#1f2430","bg_dark":"#1a1f29","bg_alt":"#242936","selection":"#33415e","fg":"#cccac2","muted":"#6c7380","subtle":"#3b4252","red":"#f28779","orange":"#ffa659","yellow":"#ffcc66","green":"#d5ff80","cyan":"#95e6cb","blue":"#73d0ff","magenta":"#dfbfff","accent":"#ffcc66"}
 Normal #cccac2 #1f2430 -
 NormalFloat #cccac2 #1a1f29 -
 FloatBorder #3b4252 #1a1f29 -
@@ -1206,6 +1229,8 @@ VigentTool #95e6cb - -
 VigentToolOutput #6c7380 - -
 VigentSpinner #ffa659 - -
 theme neon dark solid
+@palette {"bg":"#140b26","fg":"#ece0ff","red":"#ff5c8a","yellow":"#ffd166","green":"#4dffb8","cyan":"#2de2e6","blue":"#7aa2ff","magenta":"#ff4fd8","bg_dark":"#0e0720","muted":"#8a76b3","bg_alt":"#251c37","selection":"#313563","subtle":"#4a405c","orange":"#ffd166","accent":"#ffd166"}
+@style {"sidebar":"cards","messages":"bubbles","tool_icons":"unicode","icons":{"prompt":"» ","open_agent":"◆","worktree":"⑂ ","bullet":"▸","unread":"✦","idle":"◇","waiting":"◈","ok":"◆","warn":"◈","off":"◇","queued":"⋯"}}
 Normal #ece0ff #140b26 -
 NormalFloat #ece0ff #0e0720 -
 FloatBorder #4a405c #0e0720 -
@@ -1255,6 +1280,8 @@ VigentTool #2de2e6 - -
 VigentToolOutput #8a76b3 - -
 VigentSpinner #ffd166 - -
 theme zen dark solid
+@palette {"bg":"#1b1d1c","fg":"#c9cdc5","red":"#c4746e","yellow":"#c9b98c","green":"#8fa37e","cyan":"#8ea9a6","blue":"#8ba1b2","magenta":"#a593a8","muted":"#6d736e","bg_dark":"#151716","bg_alt":"#292b2a","selection":"#3a4246","subtle":"#474946","orange":"#c9b98c","accent":"#c9b98c"}
+@style {"sidebar":"compact","messages":"labeled","tool_icons":"nerd","separators":"round","user_label":"you","icons":{"prompt":"› ","bullet":"·","worktree":"↳ ","folded":"›","open":"⌄","open_agent":"›","idle":"·","waiting":"◌","ok":"•","warn":"◌","off":"·","unread":"•"},"nerd_icons":{"prompt":" ","worktree":" ","folded":"","open":"","open_agent":"","idle":"","waiting":"","paused":"","error":"","ok":"","warn":"","off":"","unread":"","queued":"","user":"","agent":""}}
 Normal #c9cdc5 #1b1d1c -
 NormalFloat #c9cdc5 #151716 -
 FloatBorder #474946 #151716 -
@@ -1304,6 +1331,8 @@ VigentTool #8ea9a6 - -
 VigentToolOutput #6d736e - -
 VigentSpinner #c9b98c - -
 theme nebula dark solid
+@palette {"bg":"#13131f","fg":"#cdd6f4","red":"#f38ba8","yellow":"#f9e2af","green":"#a6e3a1","cyan":"#89dceb","blue":"#89b4fa","magenta":"#cba6f7","bg_dark":"#0d0d17","bg_alt":"#232336","muted":"#7f849c","selection":"#34405c","subtle":"#424454","orange":"#f9e2af","accent":"#f9e2af"}
+@style {"sidebar":"tree","messages":"labeled","separators":"round","tool_icons":"nerd","icons":{"prompt":"❯ ","open_agent":"","unread":"","queued":""}}
 Normal #cdd6f4 #13131f -
 NormalFloat #cdd6f4 #0d0d17 -
 FloatBorder #424454 #0d0d17 -

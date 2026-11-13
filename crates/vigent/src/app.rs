@@ -91,11 +91,14 @@ pub struct App {
     pub serve: crate::serve::Serve,
     /// the Sessions area's (agents.rs): <C-^>, focus reporting, y/n questions
     pub agents: crate::agents::Agents,
+    /// Config area: open panels and pickers, demo mode, what :settings changed
+    pub cfg: crate::settings::ConfigState,
 }
 
 impl App {
     pub fn new(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, tx: Sender<Msg>) -> App {
-        let theme = theme::load(theme_name).or_else(|| theme::load("default")).expect("the default theme");
+        let def = theme::load_def(theme_name).or_else(|_| theme::load_def("default")).expect("the default theme");
+        let theme = crate::looks::startup_theme(def, &config);
         App {
             version,
             root: worktree::repo_root(&cwd),
@@ -121,6 +124,7 @@ impl App {
             windows: Default::default(),
             serve: Default::default(),
             agents: Default::default(),
+            cfg: Default::default(),
         }
     }
 
@@ -153,6 +157,11 @@ impl App {
     // -----------------------------------------------------------------
 
     pub fn key(&mut self, k: KeyEvent) {
+        // the Config area's :settings and :permissions panels and its pickers (themes, templates)
+        if crate::settings::is_open(self) {
+            crate::settings::key_any(self, k);
+            return;
+        }
         // the Review area's windows (:diff, :review, :dash, :cost, the race list)
         if crate::review::key(self, &k) {
             return;

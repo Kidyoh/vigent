@@ -308,9 +308,12 @@ pub fn load(file: &Path, opts: LoadOptions) -> Loaded {
 
 /// Whether this project file, with exactly this content, was trusted with :trust / `vigent trust`.
 /// (Config area: src/trust.ts: sha256 of the content in $XDG_STATE_HOME/vigent/trusted.json.)
-pub fn is_trusted(_file: &Path, _content: &str) -> bool {
-    false
+pub fn is_trusted(file: &Path, content: &str) -> bool {
+    crate::trust::is_trusted(file, content)
 }
+
+/// The commented config.toml `vigent config init` writes (src/config.ts CONFIG_TEMPLATE).
+pub const CONFIG_TEMPLATE: &str = include_str!("config_template.toml");
 
 /// Your config, then the project's .vigent.toml over it (what runs programs waits for trust).
 pub fn load_all(root: Option<&Path>) -> Loaded {
@@ -577,7 +580,7 @@ fn parse_templates(value: &Val, config: &mut Config, warnings: &mut Vec<String>)
     config.templates = out;
 }
 
-fn parse_style(value: &Val, w: &str, style: &mut StyleSpec, warnings: &mut Vec<String>) {
+pub fn parse_style(value: &Val, w: &str, style: &mut StyleSpec, warnings: &mut Vec<String>) {
     let Some(t) = value.as_table() else {
         warnings.push(format!("{w}: [style] should be a table, e.g. sidebar = \"cards\""));
         return;

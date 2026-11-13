@@ -435,18 +435,9 @@ impl App {
         Some(i)
     }
 
-    /// `:templates` with no name: what there is to start from (Windows area: a picker that starts one).
+    /// `:templates` with no name: what there is to start from (the Config area's picker; Enter starts one).
     pub fn list_templates(&mut self) {
-        let lines = all_templates(&self.config.templates)
-            .iter()
-            .map(|(t, builtin)| {
-                let how: Vec<String> = [t.engine.as_deref().map(engines::engine_name), t.model.clone(), t.effort.clone()].into_iter().flatten().collect();
-                let what = t.description.clone().unwrap_or_else(|| t.prompt.lines().next().unwrap_or("").to_string());
-                let how = if how.is_empty() { String::new() } else { format!(" ({})", how.join(" · ")) };
-                (format!("{:<10} {what}{how}{}", t.name, if *builtin { "" } else { " · yours" }), "NormalFloat")
-            })
-            .collect();
-        self.float = Some(Float::new("Start an agent from a template", lines));
+        crate::templates::open(self);
     }
 
     /// Put an agent in the list (focused or not): its slot.

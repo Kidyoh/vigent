@@ -122,6 +122,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // the Review area's windows (:diff, :review, :dash, :cost, the race list) and the Engines area's :model/:effort/:engine list
     crate::review::draw(f, app, area);
     crate::engines::picker::draw(f, app, area);
+    // the Config area's :settings and :permissions panels
+    crate::settings::draw_any(f, app, area);
     if app.float.is_some() {
         links.clear();
     }
