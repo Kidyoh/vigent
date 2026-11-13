@@ -696,12 +696,17 @@ impl App {
     pub fn on_engine(&mut self, i: usize, evs: Vec<engines::Ev>) {
         let focused = i == self.focus;
         let Some(a) = self.sessions.get_mut(i) else { return };
-        let before = a.resume_id.clone();
+        let (before, usage) = (a.resume_id.clone(), (a.tokens, a.cost));
         a.apply(evs, focused);
         let changed = a.resume_id != before;
+        // a run's totals can come after its turn ended (Claude Code's result): saved as they come, so a restart has them
+        let counted = (a.tokens, a.cost) != usage && a.state != State::Running;
         let done = a.done_seen;
         if changed {
             self.save_resume_id(i);
+        }
+        if counted {
+            self.persist(i);
         }
         if done {
             self.refresh_stat(i);
