@@ -263,6 +263,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn demo_races_three_scripted_agents() {
+        let mut app = crate::app::tests::app();
+        app.serve.demo = true;
+        crate::commands::exec(&mut app, "race add dark mode");
+        let names: Vec<&str> = app.sessions.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["add dark mode claude", "add dark mode codex", "add dark mode gemini"]);
+        assert!(app.sessions.iter().all(|s| s.state == State::Running), "{}", app.message.0);
+    }
+
+    #[test]
     fn three_scripted_agents() {
         let all = sessions();
         let names: Vec<&str> = all.iter().map(|(s, _)| s.name.as_str()).collect();
