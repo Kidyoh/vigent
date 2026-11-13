@@ -14,21 +14,46 @@ use crate::cli::StartOptions;
 use crate::config::Config;
 use crate::keys::Keymap;
 
-pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, mut warnings: Vec<String>, _opts: &StartOptions) -> i32 {
+pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, mut warnings: Vec<String>, opts: &StartOptions) -> i32 {
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP, signal_hook::consts::SIGINT] {
         let _ = signal_hook::flag::register(sig, Arc::clone(&stop));
     }
+    // A terminal that hung up (its window closed) leaves crossterm reading EOF in a
+    // loop, so the loop below never sees the signal: if it hasn't ended a moment after
+    // one, stop the agents vigent started (its process group: pi, a CLI's run) and exit.
+    #[cfg(unix)]
+    {
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            std::thread::sleep(Duration::from_millis(1500));
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let pgid = stat.rsplit(')').next().and_then(|r| r.split_whitespace().nth(2)).map(str::to_string);
+            // only a group vigent leads (a terminal's own session): never the script that started it
+            if pgid.as_deref() == Some(std::process::id().to_string().as_str()) {
+                let _ = std::process::Command::new("kill").args(["-TERM", "--", &format!("-{}", std::process::id())]).status();
+            }
+            std::process::exit(129);
+        });
+    }
     let (tx, rx) = channel();
     let mut app = App::new(version, cwd, theme_name, config, keymap, tx.clone());
+    // --engine / config's engine, and model and effort for new agents (before agents reopen: one saved
+    // on pi moves to the engine new agents use when pi isn't here)
+    crate::engines::select::startup(&mut app, opts.model.as_deref(), opts.engine.as_deref());
     // the agents that were open when vigent last quit (Sessions area); warnings are said after, over its message
     app.restore(&mut warnings);
     if !warnings.is_empty() {
         app.say(warnings.join(" · "), "WarningMsg");
     }
+    // installed? signed in? What's on PATH shows at once; the CLIs' sign-in checks take a moment
+    let env = app.engines.env.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(Msg::Engines(crate::engines::detect_all()));
+        let _ = tx.send(Msg::Engines(crate::engines::detect_all(&env, 8000)));
     });
 
     // ratatui::init restores the terminal on a panic too

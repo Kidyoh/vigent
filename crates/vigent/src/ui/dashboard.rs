@@ -42,10 +42,11 @@ pub fn lines(app: &App, area: Rect) -> Vec<Line<'static>> {
     let mut engines: Vec<Span<'static>> = vec![];
     let mut plain = String::new();
     for e in &app.engines.infos {
-        let (name, ready) = (&e.name, e.ready());
-        let piece = format!("{} {name}   ", if ready { "●" } else { "○" });
+        let name = &e.name;
+        let (glyph, group) = if e.connected { ("●", "String") } else if e.installed { ("◐", "WarningMsg") } else { ("○", "Comment") };
+        let piece = format!("{glyph} {name}   ");
         plain += &piece;
-        engines.push(Span::styled(piece, if ready { t.fg("String") } else { t.fg("Comment") }));
+        engines.push(Span::styled(piece, t.fg(group)));
     }
     engines.insert(0, Span::raw(center(plain.trim_end())));
     lines.push(Line::from(engines));

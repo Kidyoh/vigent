@@ -116,7 +116,7 @@ impl App {
             tx,
             started: Instant::now(),
             page: 20,
-            engines: Engines { infos: engines::quick() },
+            engines: Engines::default(),
             review: Default::default(),
             windows: Default::default(),
             serve: Default::default(),
@@ -138,29 +138,14 @@ impl App {
         self.sessions.get(self.focus).filter(|a| !a.closed)
     }
 
-    /// The engine new agents start on (Engines area: config's `engine`, --engine, :engine).
+    /// The engine new agents start on: config's `engine`, --engine or :engine, else auto's pick.
     pub fn new_agent_engine(&self) -> &'static str {
-        // a built-in engine chosen in config.toml or with --engine (Engines area: custom engines, :engine)
-        if let Some(spec) = self.config.engine.as_deref().filter(|e| *e != "auto").and_then(|e| engines::KNOWN.iter().find(|s| s.id == e)) {
-            return spec.id;
-        }
-        engines::default_engine(&self.engines.infos).and_then(|e| engines::KNOWN.iter().find(|s| s.id == e.id)).map(|s| s.id).unwrap_or("claude")
+        self.engines.default_engine()
     }
 
-    /// Why a new agent can't start, if it can't.
+    /// Why a new agent can't start on the default engine, if it can't.
     pub fn cant_start(&self) -> Option<String> {
-        let e = self.engines.get(self.new_agent_engine())?;
-        if e.checking {
-            return None;
-        }
-        if !e.installed {
-            return Some(format!("{} isn't installed: {}", e.name, e.install));
-        }
-        if !e.connected {
-            let how = e.connect.clone().unwrap_or_else(|| engines::spec(&e.id).bin.to_string());
-            return Some(format!("{} isn't signed in: run  {how}  once to sign in, then :checkhealth", e.name));
-        }
-        None
+        engines::select::cant_start(self, None)
     }
 
     // -----------------------------------------------------------------
@@ -170,6 +155,9 @@ impl App {
     pub fn key(&mut self, k: KeyEvent) {
         if self.answer(&k) {
             return;
+        }
+        if self.engines.picker.is_some() {
+            return engines::picker::key(self, k);
         }
         if self.float.is_some() {
             return crate::ui::floats::key(self, k);
@@ -274,7 +262,10 @@ impl App {
             "T" => self.list_templates(),
             "?" => crate::help::open(self),
             "q" => crate::commands::exec(self, "q"),
-            // Config/Engines areas: t (themes), s (settings), m (model), e (effort), E (engine)
+            "m" => engines::select::open_model_picker(self),
+            "e" => engines::select::open_effort_picker(self),
+            "E" => engines::select::open_engine_picker(self),
+            // Config area: t (themes), s (settings)
             _ => return false,
         }
         true
@@ -338,9 +329,13 @@ impl App {
     }
 
     pub fn send(&mut self, i: usize, text: String) {
+        // pi: one long-running process per agent (engines/pi.rs); the CLIs: one process per turn
+        if self.sessions[i].engine == "pi" {
+            return engines::pi::send(self, i, text);
+        }
         let tx = self.tx.clone();
-        let info = self.engines.get(&self.sessions[i].engine).cloned();
-        self.sessions[i].send(text, info.as_ref(), tx);
+        let launch = engines::select::launch(self, &self.sessions[i].engine);
+        self.sessions[i].send(text, &launch, tx);
     }
 
     /// The next queued prompt, once the agent is free.
@@ -397,15 +392,26 @@ impl App {
             if a.closed {
                 continue;
             }
+            // its output (and stderr) read to the end first, so the exit is judged with all of it
+            if !a.stream_ended {
+                continue;
+            }
             let Some(child) = a.child.as_mut() else { continue };
             let Ok(Some(status)) = child.try_wait() else { continue };
             match a.exited(status) {
                 // a prompt sent while it was wrapping up
                 Some(next) => {
-                    let (tx, info) = (self.tx.clone(), self.engines.get(&a.engine).cloned());
-                    self.sessions[i].run(next, info.as_ref(), tx);
+                    let (tx, launch) = (self.tx.clone(), engines::select::launch(self, &self.sessions[i].engine));
+                    self.sessions[i].run(next, &launch, tx);
                 }
-                None => self.drain(i),
+                None => {
+                    self.refresh_stat(i);
+                    if self.sessions[i].ask.is_some() {
+                        engines::select::ask_to_allow(self, i);
+                        continue;
+                    }
+                    self.drain(i);
+                }
             }
         }
         self.watch_states();

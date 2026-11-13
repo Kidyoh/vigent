@@ -32,7 +32,7 @@ pub fn draw(f: &mut Frame, app: &App, r: Rect) {
             }
             let open = app.open();
             let waiting = open.iter().filter(|&&i| app.sessions[i].busy()).count();
-            right = format!("{}  {}  {waiting}/{} ", a.model.as_deref().unwrap_or(""), a.usage(), open.len());
+            right = format!("{}  {}  {waiting}/{} ", crate::engines::shown_model(a), a.usage(), open.len());
         }
         None => left.push(Span::styled(" [no session]", sl)),
     }

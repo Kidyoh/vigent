@@ -68,4 +68,5 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     statusline::draw(f, app, Rect::new(0, body_h, area.width, 1));
     statusline::draw_message(f, app, Rect::new(0, body_h + 1, area.width, 1));
     floats::draw(f, app, area, body_h);
+    crate::engines::picker::draw(f, app, area);
 }

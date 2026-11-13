@@ -326,65 +326,37 @@ impl App {
     // starting agents
     // -----------------------------------------------------------------
 
-    /// The engine `:new` uses when it isn't given one is "auto" (Engines area: --engine, :engine).
-    fn engine_is_auto(&self) -> bool {
-        self.config.engine.as_deref().is_none_or(|e| e == "auto")
-    }
-
     /// "no engine is signed in: run claude auth login or codex login · :checkhealth" (src/app.ts noEngineReady)
     pub fn no_engine_ready(&self) -> String {
-        let logins: Vec<String> = self.engines.infos.iter().filter(|e| e.id != "pi" && e.installed).filter_map(|e| e.connect.clone()).collect();
-        let pi = self.engines.get("pi").and_then(|e| e.connect.clone());
-        let mut ways = vec![];
-        if !logins.is_empty() {
-            ways.push(format!("run {}", logins.join(" or ")));
-        }
-        if let Some(p) = pi {
-            ways.push(format!("for pi {p}"));
-        }
-        let ways = ways.join(", or ");
-        format!("no engine is signed in{} · :checkhealth", if ways.is_empty() { String::new() } else { format!(": {ways}") })
+        engines::select::no_engine_ready(self)
     }
 
-    /// The model and effort new agents of an engine start with ([engines.<id>] model / effort).
-    fn new_agent_settings(&self, engine: &str) -> (Option<String>, Option<String>) {
-        let o = self.config.engine_options(engine);
-        (o.and_then(|o| o.model.clone()), o.and_then(|o| o.effort.clone()))
+    /// The model new agents of an engine start with ([engines.<id>] model, `model`, --model, or :model with no agent).
+    fn new_agent_model(&self, engine: &str) -> Option<String> {
+        self.engines.new_model.get(engine).cloned().filter(|m| m != "default")
     }
 
     /// A new agent, in a worktree of its own made in the background (src/app.ts startAgent).
     /// Its slot, or None (and why, on the message line).
     pub fn start_agent(&mut self, name: &str, o: NewAgent) -> Option<usize> {
-        let engine = o.engine.clone().unwrap_or_else(|| self.new_agent_engine().to_string());
-        if !self.config.is_engine_id(&engine) {
-            self.say(format!("unknown engine '{engine}': pi, claude, codex or opencode"), "ErrorMsg");
-            return None;
-        }
-        if let Some(info) = self.engines.get(&engine) {
-            if !info.installed {
-                let msg = format!("{} isn't installed: {} · :checkhealth", info.name, info.install);
-                self.say(msg, "ErrorMsg");
+        // the engine (what's asked, else :engine / --engine / config, else auto's pick), or why it can't start
+        let opts = engines::select::StartOpts { engine: o.engine.clone(), model: o.model.clone(), effort: o.effort.clone() };
+        let engine = match engines::select::engine_for_new(self, &opts) {
+            Ok(e) => e,
+            Err(why) => {
+                self.say(why, "ErrorMsg");
                 return None;
             }
-            // auto lands on an engine that isn't ready only when none is; an agent started there could never answer
-            if o.engine.is_none() && self.engine_is_auto() && !info.connected && !info.checking {
-                let msg = self.no_engine_ready();
-                self.say(msg, "ErrorMsg");
-                return None;
-            }
-        }
-        let with_worktree = o.worktree != Some(false) && self.config.worktree.enabled;
-        let (model, effort) = {
-            let (m, e) = self.new_agent_settings(&engine);
-            (o.model.clone().or(m), o.effort.clone().or(e))
         };
+        let with_worktree = o.worktree != Some(false) && self.config.worktree.enabled;
         let index = self.sessions.len();
-        let mut s = Session::new(index, name, &engine, self.cwd.clone());
+        let mut s = Session::new(index, name, engine, self.cwd.clone());
+        // model and effort: what's asked, else what :model / :effort / config set for its engine
+        engines::select::configure_new(self, &mut s, &opts);
+        s.effort = s.effort.take().filter(|e| e != "default");
         if engine != "pi" {
-            s.requested_model = model.clone();
-            s.model = model.clone();
+            s.model = s.requested_model.clone();
         }
-        s.effort = effort.clone().filter(|e| e != "default");
         let by = if engine != "pi" { format!(" · {}", engines::engine_name(&engine)) } else { String::new() };
         let root = self.root.clone().filter(|_| with_worktree);
         match root {
@@ -506,7 +478,7 @@ impl App {
                 a.created_at = records::iso_now();
                 let meta = AgentMeta {
                     name: a.name.clone(),
-                    model: if a.engine == "pi" { a.model.clone().unwrap_or_default() } else { a.requested_model.clone().unwrap_or_default() },
+                    model: if a.engine == "pi" { a.requested_model.clone().or_else(|| a.model.clone()).unwrap_or_default() } else { a.requested_model.clone().unwrap_or_default() },
                     base: Some(a.base.clone()),
                     created_at: a.created_at.clone(),
                     engine: (a.engine != "pi").then(|| a.engine.clone()),
@@ -684,7 +656,7 @@ impl App {
         let (model, requested, usage) = if cli {
             (a.requested_model.clone().unwrap_or_default(), a.requested_model.clone(), Some((a.tokens, a.cost)))
         } else {
-            (a.model.clone().unwrap_or_default(), None, None)
+            (a.requested_model.clone().or_else(|| a.model.clone()).unwrap_or_default(), None, None)
         };
         let effort = a.effort.clone();
         records::update(&a.path, |m| {
@@ -733,7 +705,7 @@ impl App {
             None | Some("pi") => true,
             Some(e) => !self.config.is_engine_id(e),
         };
-        on_pi && !engines::on_path("pi")
+        on_pi && !engines::detect::on_path("pi", &self.engines.env)
     }
 
     /// A pi agent can never answer without pi: the record that moves it to the engine you do have, if there is one.
@@ -746,7 +718,7 @@ impl App {
         Some(AgentMeta {
             engine: Some(engine.to_string()),
             model: String::new(),
-            requested_model: self.new_agent_settings(engine).0,
+            requested_model: self.new_agent_model(engine),
             effort: None,
             resume_id: None,
             detached: false,
@@ -788,7 +760,7 @@ impl App {
             }
         } else {
             s.model = Some(meta.model.clone()).filter(|m| !m.is_empty());
-            if engines::adapter("pi").is_none() && !engines::on_path("pi") {
+            if !engines::detect::on_path("pi", &self.engines.env) {
                 // pi would fail to start: say so now, as the TypeScript vigent does when it starts pi
                 s.items.push(Item::Info(format!("error: pi isn't installed: {PI_INSTALL}")));
                 s.items.push(Item::Info(PI_MISSING_HINT.into()));
@@ -811,7 +783,7 @@ impl App {
         }
         // a stranded agent moves for good, so wait to learn which engine is signed in
         if r.agents.iter().any(|a| self.stranded(&a.meta)) {
-            self.engines.infos = engines::detect_all();
+            self.engines.infos = engines::detect_all(&self.engines.env, 8000);
         }
         for a in &r.agents {
             let s = self.reopen(&a.meta, &a.branch, &a.path, a.backend.clone());

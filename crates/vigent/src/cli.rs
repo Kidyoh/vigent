@@ -22,10 +22,12 @@ usage:
 
 engines (what runs new agents; :checkhealth shows which are signed in):
   claude    your installed Claude Code CLI, with its own login
-
-This is the native build (Rust, milestone 1 of #168): Claude Code agents in riftri
-worktrees. Codex, OpenCode, Gemini CLI, Cursor CLI and pi come in milestone 2;
-until then the npm package (npm install -g @vigent/cli) runs them all.
+  codex     your installed Codex CLI, with its own login
+  opencode  your installed OpenCode CLI, with its own login
+  gemini    your installed Gemini CLI, with its own login
+  cursor    your installed Cursor CLI (cursor-agent), with its own login
+  pi        your installed pi (pi --mode rpc), with its keys or login
+  <id>      any agent CLI from [engines.<id>] in config.toml
 
 keys: i to type a task (Enter starts an agent), j/k gg G to scroll, ]s [s to switch,
       :new <task>, :kill, :theme <name>, :checkhealth, :help, :q";
@@ -199,7 +201,7 @@ pub fn main(args: Vec<String>) -> i32 {
         }
     let cwd = std::env::current_dir().unwrap_or_default();
     let root = worktree::repo_root(&cwd);
-    let config::Loaded { mut config, mut warnings, .. } = config::load_all(root.as_deref());
+    let config::Loaded { config, mut warnings, .. } = config::load_all(root.as_deref());
     let (keymap, key_warnings) = keys::build_keymap(config.leader.as_deref(), &config.keys);
     warnings.extend(key_warnings);
     let theme_name = match (&opts.theme, &config.theme) {
@@ -215,21 +217,15 @@ pub fn main(args: Vec<String>) -> i32 {
         (None, Some(t)) => t.clone(),
         (None, None) => "default".into(),
     };
-    if let Some(e) = &opts.engine {
-        // Engines area: run what --engine names (src/cli.ts), custom engines included
-        if !config.is_engine_id(e) {
-            eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
-            return 1;
-        }
-        // pi's agents still reopen (they say pi isn't there, or how to reach :new) before this build runs pi
-        if crate::engines::adapter(e).is_none() && e != "pi" {
-            eprintln!("vigent: {} doesn't run in this build yet (PORTING.md)", crate::engines::engine_name(e));
-            return 1;
-        }
-        // what --engine names wins over config.toml's `engine`
-        config.engine = Some(e.clone());
+    // engines of your own ([engines.<id>] command = [...]) are known everywhere engines are listed
+    crate::engines::register_custom(&config.custom_engines);
+    if let Some(e) = &opts.engine
+        && !crate::engines::is_engine_id(e)
+    {
+        eprintln!("vigent: unknown engine '{e}' (pi, claude, codex or opencode)");
+        return 1;
     }
-    for (flag, given) in [("--model", opts.model.is_some()), ("--demo", opts.demo), ("--serve", opts.serve)] {
+    for (flag, given) in [("--demo", opts.demo), ("--serve", opts.serve)] {
         if given {
             warnings.push(format!("{flag} isn't in this build yet (PORTING.md)"));
         }

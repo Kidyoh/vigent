@@ -67,15 +67,22 @@ pub fn lines(app: &App, area: Rect) -> Vec<Line<'static>> {
     let default = app.new_agent_engine();
     for e in &app.engines.infos {
         let name = e.name.as_str();
-        let (icon, status, group) = match () {
-            _ if !e.ported() && e.installed => ("○", "next milestone", "Comment"),
-            _ if !e.ported() => ("○", "not installed", "Comment"),
-            _ if e.checking => ("…", "checking", "Comment"),
-            _ if !e.installed => ("○", "not installed", "Comment"),
-            _ if !e.connected => ("◐", "sign in", "WarningMsg"),
-            _ if e.id == default => ("●", "default", "String"),
-            _ => ("●", "ready", "String"),
+        // TS: connected ● (default), installed ◐ (checking…, how to sign in), else ○ not installed
+        let (icon, group) = if e.connected { ("●", "String") } else if e.installed { ("◐", "WarningMsg") } else { ("○", "Comment") };
+        let note = if e.checking {
+            "checking…".to_string()
+        } else if e.connected {
+            if e.id == default { "default".into() } else { String::new() }
+        } else if e.id == "pi" && e.installed {
+            "no API key".into()
+        } else if e.installed {
+            e.connect.clone().unwrap_or_else(|| "not signed in".into())
+        } else {
+            "not installed".into()
         };
+        let room = w.saturating_sub(width(&format!("  {icon} {name}")) + 1);
+        let status = if note.is_empty() { note } else { fit(&note, room.saturating_sub(1)) };
+        let status = status.as_str();
         let left = format!("  {icon} {name}");
         bottom.push(Line::from(vec![
             Span::styled(format!("  {icon} "), t.fg(group)),

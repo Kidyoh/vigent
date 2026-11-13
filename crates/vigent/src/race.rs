@@ -237,16 +237,19 @@ impl App {
             self.start_race(&task, &prompt, parsed.racers);
             return;
         };
-        // which engine runs a model comes from the engines' own lists (Engines area: Adapter::models), off the UI thread
+        // which engine runs a model comes from the engines' own lists (engines::choices), off the UI thread
         let infos = self.engines.infos.clone();
+        let env = self.engines.env.clone();
         let tx = self.tx.clone();
         let asked = parsed.racers.unwrap_or_default();
         std::thread::spawn(move || {
-            let known: Vec<(String, Vec<String>)> = engines::KNOWN
-                .iter()
-                .map(|s| {
-                    let list = engines::adapter(s.id).map(|a| a.models().into_iter().map(|c| c.id).filter(|v| v != "default").collect()).unwrap_or_default();
-                    (s.id.to_string(), list)
+            let known: Vec<(String, Vec<String>)> = engines::all_ids()
+                .into_iter()
+                .map(|e| {
+                    // an engine that isn't installed can't list its models; Claude Code's and Gemini CLI's lists are fixed
+                    let missing = infos.iter().find(|i| i.id == e).is_some_and(|i| !i.installed) && e != "claude" && e != "gemini";
+                    let list = if missing { vec![] } else { engines::choices::model_choices(e, &env).into_iter().map(|c| c.value).filter(|v| v != "default").collect() };
+                    (e.to_string(), list)
                 })
                 .collect();
             let blocked = |e: &str| -> Option<String> {
