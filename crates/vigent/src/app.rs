@@ -1,14 +1,25 @@
-//! vigent's state and what each key and command does. Drawing is in ui.rs.
+//! vigent's state and the loop's three inputs: keys, messages from the
+//! threads, and the clock. What keys and commands *do* is in actions/ and
+//! commands/; agents are session.rs; drawing is ui/.
+//!
+//! EXTENSION POINTS:
+//! - area state: each area keeps its own struct on the App ([`App::review`],
+//!   [`App::windows`], [`App::serve`], [`App::engines`]); add fields there, in
+//!   the area's file, not here.
+//! - background work: send `Msg::Run(Box::new(move |app| ...))` from any
+//!   thread to change the App on the UI thread, without a new Msg variant.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::VecDeque;
+use crossterm::event::KeyEvent;
 use std::path::PathBuf;
-use std::process::Child;
 use std::sync::mpsc::Sender;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::engine::{self, Claude, Ev};
+use crate::config::Config;
+use crate::engines::{self, EngineInfo, Engines, Ev};
+use crate::keys::{self, Binding, KeyMode, Keymap, Rhs, Sequencer, Step};
+use crate::session::{Item, Session, State, Submitted};
 use crate::theme::{self, Theme};
+use crate::ui::floats::Float;
 use crate::worktree::{self, Made};
 
 /// What comes back from the threads: engines, worktrees, git.
@@ -18,79 +29,44 @@ pub enum Msg {
     Stderr(usize, String),
     WorktreeMade(usize, Result<Made, String>),
     Stat(usize, (usize, usize)),
-    Claude(Claude),
+    /// detection came back: every known engine
+    Engines(Vec<EngineInfo>),
+    /// anything else: run on the UI thread with the App
+    Run(Box<dyn FnOnce(&mut App) + Send>),
 }
 
-pub enum Item {
-    User(String),
-    Text(String),
-    Tool { id: String, name: String, summary: String },
-    Info(String),
-    Error(String),
-}
-
+/// vim's modes, as the statusline names them.
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum State {
-    /// its worktree is being made; prompts wait
-    Making,
-    Idle,
-    Running,
-    /// finished while you looked elsewhere
-    Waiting,
-    Failed,
-}
-
-pub struct Agent {
-    pub name: String,
-    pub branch: Option<String>,
-    pub path: PathBuf,
-    pub base: String,
-    pub made: Option<Made>,
-    pub state: State,
-    pub items: Vec<Item>,
-    streaming: Option<usize>,
-    pub queue: VecDeque<String>,
-    session: Option<String>,
-    pub model: Option<String>,
-    pub tokens: u64,
-    pub cost: f64,
-    pub stat: (usize, usize),
-    child: Option<Child>,
-    done_seen: bool,
-    stream_ended: bool,
-    stderr: String,
-    /// :kill'd: hidden, but its slot stays so the threads' messages still find the right agent
-    pub closed: bool,
-}
-
-#[derive(Clone, Copy, PartialEq)]
 pub enum Mode {
     Normal,
     Insert,
     Command,
+    /// / and ? (Windows area)
+    #[allow(dead_code)]
+    Search,
+    /// V (Windows area)
+    #[allow(dead_code)]
+    Visual,
 }
 
-/// A window over the screen: :checkhealth, :help.
-pub struct Float {
-    pub title: String,
-    pub lines: Vec<(String, &'static str)>,
-    pub top: usize,
+impl Mode {
+    /// The keymap a mode reads.
+    pub fn keys(self) -> KeyMode {
+        match self {
+            Mode::Normal => KeyMode::Normal,
+            Mode::Insert => KeyMode::Insert,
+            Mode::Command | Mode::Search => KeyMode::Command,
+            Mode::Visual => KeyMode::Visual,
+        }
+    }
 }
-
-pub const ENGINES: [(&str, &str, &str); 6] = [
-    ("pi", "pi", "npm install -g @mariozechner/pi-coding-agent"),
-    ("Claude Code", "claude", "npm install -g @anthropic-ai/claude-code"),
-    ("Codex", "codex", "npm install -g @openai/codex"),
-    ("OpenCode", "opencode", "npm install -g opencode-ai"),
-    ("Gemini CLI", "gemini", "npm install -g @google/gemini-cli"),
-    ("Cursor CLI", "cursor-agent", "curl https://cursor.com/install -fsS | bash"),
-];
 
 pub struct App {
     pub version: &'static str,
     pub root: Option<PathBuf>,
     pub cwd: PathBuf,
-    pub agents: Vec<Agent>,
+    /// every agent, by slot (a :kill'd one stays, closed, so messages still find theirs)
+    pub sessions: Vec<Session>,
     pub focus: usize,
     pub mode: Mode,
     pub input: String,
@@ -99,53 +75,30 @@ pub struct App {
     /// lines up from the bottom of the transcript (0: follow it)
     pub scroll: usize,
     pub theme: Theme,
-    /// None while it's being checked
-    pub claude: Option<Claude>,
-    pub installed: [bool; 6],
+    pub config: Config,
+    pub keymap: Keymap,
+    pub seq: Sequencer,
     pub float: Option<Float>,
-    pending: Option<char>,
     pub quit: bool,
-    tx: Sender<Msg>,
+    pub tx: Sender<Msg>,
     pub started: Instant,
     /// the transcript pane's height, from the last draw (for half-page scrolls)
     pub page: usize,
-}
-
-fn tokens_text(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1e6)
-    } else if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1e3)
-    } else {
-        n.to_string()
-    }
-}
-
-impl Agent {
-    pub fn usage(&self) -> String {
-        if self.tokens == 0 && self.cost == 0.0 {
-            return String::new();
-        }
-        let mut s = format!("{} tok", tokens_text(self.tokens));
-        if self.cost > 0.0 {
-            s += &format!(" · ${:.2}", self.cost);
-        }
-        s
-    }
-    pub fn busy(&self) -> bool {
-        matches!(self.state, State::Making | State::Running) || self.child.is_some()
-    }
+    // each area's own state
+    pub engines: Engines,
+    pub review: crate::review::Review,
+    pub windows: crate::windows::Windows,
+    pub serve: crate::serve::Serve,
 }
 
 impl App {
-    pub fn new(version: &'static str, cwd: PathBuf, theme_name: &str, tx: Sender<Msg>) -> App {
+    pub fn new(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, tx: Sender<Msg>) -> App {
         let theme = theme::load(theme_name).or_else(|| theme::load("default")).expect("the default theme");
-        let installed = ENGINES.map(|(_, bin, _)| engine::on_path(bin));
         App {
             version,
             root: worktree::repo_root(&cwd),
             cwd,
-            agents: vec![],
+            sessions: vec![],
             focus: 0,
             mode: Mode::Normal,
             input: String::new(),
@@ -153,37 +106,54 @@ impl App {
             message: (":help for keys".into(), "Comment"),
             scroll: 0,
             theme,
-            claude: None,
-            installed,
+            config,
+            keymap,
+            seq: Sequencer::default(),
             float: None,
-            pending: None,
             quit: false,
             tx,
             started: Instant::now(),
             page: 20,
+            engines: Engines { infos: engines::quick() },
+            review: Default::default(),
+            windows: Default::default(),
+            serve: Default::default(),
         }
     }
 
-    fn say(&mut self, text: impl Into<String>, group: &'static str) {
+    pub fn say(&mut self, text: impl Into<String>, group: &'static str) {
         self.message = (text.into(), group);
     }
 
     /// The open agents' slots, in order: what the sidebar numbers 1, 2, 3...
     pub fn open(&self) -> Vec<usize> {
-        (0..self.agents.len()).filter(|&i| !self.agents[i].closed).collect()
+        (0..self.sessions.len()).filter(|&i| !self.sessions[i].closed).collect()
     }
 
     /// The agent on screen, if any.
-    pub fn focused(&self) -> Option<&Agent> {
-        self.agents.get(self.focus).filter(|a| !a.closed)
+    pub fn focused(&self) -> Option<&Session> {
+        self.sessions.get(self.focus).filter(|a| !a.closed)
     }
 
-    pub fn claude_ready(&self) -> bool {
-        self.claude.as_ref().is_some_and(|c| c.version.is_some() && c.signed_in)
+    /// The engine new agents start on (Engines area: config's `engine`, --engine, :engine).
+    pub fn new_agent_engine(&self) -> &'static str {
+        engines::default_engine(&self.engines.infos).and_then(|e| engines::KNOWN.iter().find(|s| s.id == e.id)).map(|s| s.id).unwrap_or("claude")
     }
 
-    pub fn engines_ready(&self) -> usize {
-        usize::from(self.claude_ready())
+    /// Why a new agent can't start, if it can't.
+    pub fn cant_start(&self) -> Option<String> {
+        let e = self.engines.get(self.new_agent_engine())?;
+        if e.checking {
+            return None;
+        }
+        if !e.installed {
+            return Some(format!("{} isn't installed: {}", e.name, e.install));
+        }
+        if !e.connected {
+            let how = e.connect.clone().unwrap_or_else(|| engines::spec(&e.id).bin.to_string());
+            return Some(format!("{} isn't signed in: run  {how}  once to sign in, then :checkhealth", e.name));
+        }
+        None
     }
 
     // -----------------------------------------------------------------
@@ -192,134 +162,109 @@ impl App {
 
     pub fn key(&mut self, k: KeyEvent) {
         if self.float.is_some() {
-            return self.float_key(k);
+            return crate::ui::floats::key(self, k);
         }
+        let Some(token) = keys::token_from_event(&k) else { return };
+        if self.dashboard_key(&token) {
+            return;
+        }
+        self.feed(token);
+    }
+
+    /// A key through the keymap: run what it's bound to (or wait for more keys).
+    pub fn feed(&mut self, token: String) {
+        let timeout = Duration::from_millis(self.config.ui.timeoutlen);
+        let step = self.seq.feed(&self.keymap, self.mode.keys(), token, timeout);
+        self.run_step(step);
+    }
+
+    fn run_step(&mut self, step: Step) {
+        for (b, keys) in step.run {
+            self.run_binding(b, &keys);
+        }
+        for k in step.refeed {
+            self.feed(k);
+        }
+    }
+
+    fn run_binding(&mut self, binding: Option<Binding>, keys: &[String]) {
+        match binding {
+            // unmapped: in INSERT and on the command line, keys type themselves
+            None => {
+                for k in keys {
+                    if let Some(t) = keys::token_text(k) {
+                        self.type_text(&t);
+                    }
+                }
+            }
+            Some(b) => {
+                for rhs in b.rhs {
+                    self.run_rhs(rhs);
+                }
+            }
+        }
+    }
+
+    pub fn run_rhs(&mut self, rhs: Rhs) {
+        match rhs {
+            Rhs::Action { name, arg } => crate::actions::run(self, &name, arg.as_deref()),
+            Rhs::Ex { cmd, execute: true } => crate::commands::exec(self, &cmd),
+            Rhs::Ex { cmd, execute: false } => {
+                self.mode = Mode::Command;
+                self.cmd = cmd;
+            }
+            Rhs::Keys(list) => {
+                let mut rest: &[String] = &list;
+                while !rest.is_empty() {
+                    let (b, n) = keys::replay_next(&self.keymap, self.mode.keys(), rest);
+                    self.run_binding(b, &rest[..n]);
+                    rest = &rest[n..];
+                }
+            }
+            Rhs::Nop => {}
+        }
+    }
+
+    fn type_text(&mut self, text: &str) {
         match self.mode {
-            Mode::Insert => self.insert_key(k),
-            Mode::Command => self.command_key(k),
-            Mode::Normal => self.normal_key(k),
+            Mode::Insert => self.input.push_str(text),
+            Mode::Command | Mode::Search => self.cmd.push_str(text),
+            _ => {}
         }
+    }
+
+    /// The start screen's one-key actions, while no agent is open (src/app.ts dashboardKey).
+    fn dashboard_key(&mut self, token: &str) -> bool {
+        if self.focused().is_some() || self.mode != Mode::Normal || !self.seq.pending.is_empty() {
+            return false;
+        }
+        match token {
+            "n" => {
+                self.mode = Mode::Command;
+                self.cmd = "new ".into();
+            }
+            "c" => crate::health::open(self),
+            "?" => crate::help::open(self),
+            "q" => crate::commands::exec(self, "q"),
+            // Config/Engines/Sessions areas: t (themes), s (settings), m (model), e (effort), E (engine), T (templates)
+            _ => return false,
+        }
+        true
     }
 
     pub fn paste(&mut self, text: &str) {
         match self.mode {
             Mode::Insert => self.input.push_str(text),
             Mode::Command => self.cmd.push_str(&text.replace('\n', " ")),
-            Mode::Normal => {}
+            _ => {}
         }
     }
 
-    fn scroll_by(&mut self, up: isize) {
+    pub fn scroll_by(&mut self, up: isize) {
         self.scroll = (self.scroll as isize + up).max(0) as usize;
     }
 
-    fn normal_key(&mut self, k: KeyEvent) {
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let pending = self.pending.take();
-        match (pending, k.code) {
-            (_, KeyCode::Char('c')) if ctrl => self.say("Type  :q  and press <Enter> to exit vigent", "Comment"),
-            (_, KeyCode::Char('d')) if ctrl => self.scroll_by(-((self.page / 2).max(1) as isize)),
-            (_, KeyCode::Char('u')) if ctrl => self.scroll_by((self.page / 2).max(1) as isize),
-            (Some('g'), KeyCode::Char('g')) => self.scroll = usize::MAX / 2,
-            (Some(']'), KeyCode::Char('s')) => self.switch(1),
-            (Some('['), KeyCode::Char('s')) => self.switch(-1),
-            (Some(' '), KeyCode::Char(c @ '1'..='9')) => self.focus_agent(c as usize - '1' as usize),
-            (_, KeyCode::Char(c @ ('g' | ']' | '[' | ' '))) => self.pending = Some(c),
-            (_, KeyCode::Char('i') | KeyCode::Char('a')) => self.enter_insert(),
-            (_, KeyCode::Char(':')) => {
-                self.mode = Mode::Command;
-                self.cmd.clear();
-            }
-            (_, KeyCode::Char('j') | KeyCode::Down) => self.scroll_by(-1),
-            (_, KeyCode::Char('k') | KeyCode::Up) => self.scroll_by(1),
-            (_, KeyCode::Char('G') | KeyCode::End) => self.scroll = 0,
-            (_, KeyCode::Char('?')) => self.open_help(),
-            (_, KeyCode::Char('c')) if self.focused().is_none() => self.open_health(),
-            (_, KeyCode::Char('q')) if self.focused().is_none() => self.quit = true,
-            (_, KeyCode::Char('q')) => self.say("Type  :q  and press <Enter> to exit vigent", "Comment"),
-            _ => {}
-        }
-    }
-
-    fn enter_insert(&mut self) {
-        if self.focused().is_none() {
-            if let Some(why) = self.cant_start() {
-                return self.say(why, "ErrorMsg");
-            }
-        }
-        self.mode = Mode::Insert;
-    }
-
-    /// Why a new agent can't start, if it can't.
-    fn cant_start(&self) -> Option<String> {
-        match &self.claude {
-            Some(c) if c.version.is_none() => Some(format!("Claude Code isn't installed: {}", ENGINES[1].2)),
-            Some(c) if !c.signed_in => Some("Claude Code isn't signed in: run  claude  once to sign in, then :checkhealth".into()),
-            _ => None,
-        }
-    }
-
-    fn insert_key(&mut self, k: KeyEvent) {
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        match k.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
-            KeyCode::Char('c') if ctrl => {
-                self.input.clear();
-                self.mode = Mode::Normal;
-            }
-            KeyCode::Char('u') if ctrl => self.input.clear(),
-            KeyCode::Char('w') if ctrl => {
-                let t = self.input.trim_end().len();
-                let cut = self.input[..t].rfind(' ').map(|i| i + 1).unwrap_or(0);
-                self.input.truncate(cut);
-            }
-            KeyCode::Enter => self.submit(),
-            KeyCode::Backspace => {
-                self.input.pop();
-            }
-            KeyCode::Char(c) if !ctrl => self.input.push(c),
-            _ => {}
-        }
-    }
-
-    fn command_key(&mut self, k: KeyEvent) {
-        match k.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
-            KeyCode::Enter => {
-                self.mode = Mode::Normal;
-                let cmd = std::mem::take(&mut self.cmd);
-                self.exec(cmd.trim());
-            }
-            KeyCode::Backspace => {
-                if self.cmd.pop().is_none() {
-                    self.mode = Mode::Normal;
-                }
-            }
-            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => self.cmd.push(c),
-            _ => {}
-        }
-    }
-
-    fn float_key(&mut self, k: KeyEvent) {
-        let pending = self.pending.take();
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let page = self.page.max(2);
-        let Some(f) = self.float.as_mut() else { return };
-        let max = f.lines.len().saturating_sub(1);
-        match (pending, k.code) {
-            (_, KeyCode::Char('q') | KeyCode::Esc) => self.float = None,
-            (Some('g'), KeyCode::Char('g')) => f.top = 0,
-            (_, KeyCode::Char('g')) => self.pending = Some('g'),
-            (_, KeyCode::Char('G')) => f.top = max,
-            (_, KeyCode::Char('d')) if ctrl => f.top = (f.top + page / 2).min(max),
-            (_, KeyCode::Char('u')) if ctrl => f.top = f.top.saturating_sub(page / 2),
-            (_, KeyCode::Char('j') | KeyCode::Down) => f.top = (f.top + 1).min(max),
-            (_, KeyCode::Char('k') | KeyCode::Up) => f.top = f.top.saturating_sub(1),
-            _ => {}
-        }
-    }
-
-    fn switch(&mut self, by: isize) {
+    pub fn switch(&mut self, by: isize) {
         let open = self.open();
         if open.is_empty() {
             return;
@@ -329,11 +274,11 @@ impl App {
     }
 
     /// Focus the n-th open agent (0-based, as the sidebar numbers them from 1).
-    fn focus_agent(&mut self, n: usize) {
+    pub fn focus_agent(&mut self, n: usize) {
         let Some(&i) = self.open().get(n) else { return };
         self.focus = i;
         self.scroll = 0;
-        let a = &mut self.agents[i];
+        let a = &mut self.sessions[i];
         if a.state == State::Waiting {
             a.state = State::Idle;
         }
@@ -343,7 +288,8 @@ impl App {
     // agents
     // -----------------------------------------------------------------
 
-    fn submit(&mut self) {
+    /// Enter in INSERT: the prompt goes to the focused agent (the first one starts an agent).
+    pub fn submit(&mut self) {
         let text = std::mem::take(&mut self.input).trim().to_string();
         self.mode = Mode::Normal;
         if text.is_empty() {
@@ -351,60 +297,39 @@ impl App {
         }
         if self.focused().is_none() {
             let name = crate::names::agent_name_from(&text);
-            if !self.start_agent(&name) {
+            if self.start_agent(&name).is_none() {
                 return;
             }
         }
         let i = self.focus;
         self.scroll = 0;
-        let a = &mut self.agents[i];
-        if a.busy() || !a.queue.is_empty() {
-            a.queue.push_back(text);
-            let waiting = a.queue.len();
-            let after = if a.state == State::Making { "once its worktree is ready" } else { "after the current run" };
-            let msg = format!("queued: '{}' gets it {after} ({waiting} waiting)", a.name);
-            self.say(msg, "Comment");
-        } else {
-            self.send(i, text);
+        match self.sessions[i].submit(text) {
+            Submitted::Now(text) => self.send(i, text),
+            Submitted::Queued(waiting) => {
+                let a = &self.sessions[i];
+                let after = if a.held() { "once its worktree is ready" } else { "after the current run" };
+                let msg = format!("queued: '{}' gets it {after} ({waiting} waiting)", a.name);
+                self.say(msg, "Comment");
+            }
         }
     }
 
-    /// A new agent, in a worktree of its own made in the background.
-    fn start_agent(&mut self, name: &str) -> bool {
+    /// A new agent, in a worktree of its own made in the background. Its slot, or None (and why, on the message line).
+    pub fn start_agent(&mut self, name: &str) -> Option<usize> {
         if let Some(why) = self.cant_start() {
             self.say(why, "ErrorMsg");
-            return false;
+            return None;
         }
-        let taken: Vec<PathBuf> = self.agents.iter().map(|a| a.path.clone()).collect();
-        let mut agent = Agent {
-            name: name.to_string(),
-            branch: None,
-            path: self.cwd.clone(),
-            base: String::new(),
-            made: None,
-            state: State::Idle,
-            items: vec![],
-            streaming: None,
-            queue: VecDeque::new(),
-            session: None,
-            model: None,
-            tokens: 0,
-            cost: 0.0,
-            stat: (0, 0),
-            child: None,
-            done_seen: false,
-            stream_ended: false,
-            stderr: String::new(),
-            closed: false,
-        };
-        let index = self.agents.len();
+        let taken: Vec<PathBuf> = self.sessions.iter().map(|a| a.path.clone()).collect();
+        let index = self.sessions.len();
+        let mut agent = Session::new(index, name, self.new_agent_engine(), self.cwd.clone());
         match &self.root {
             Some(root) => match worktree::plan(root, name, &taken) {
                 Ok(p) => {
                     agent.branch = Some(p.branch.clone());
                     agent.path = p.path.clone();
                     agent.base = p.base.clone();
-                    agent.state = State::Making;
+                    agent.hold("making its worktree");
                     let (root, tx) = (root.clone(), self.tx.clone());
                     std::thread::spawn(move || {
                         let r = worktree::make(&root, &p);
@@ -414,54 +339,35 @@ impl App {
                 }
                 Err(e) => {
                     self.say(format!("can't make a worktree for '{name}': {e}"), "ErrorMsg");
-                    return false;
+                    return None;
                 }
             },
             None => agent.items.push(Item::Info("not a git repository: this agent works in this folder".into())),
         }
-        self.agents.push(agent);
+        self.sessions.push(agent);
         self.focus = index;
-        true
+        Some(index)
     }
 
-    fn send(&mut self, i: usize, text: String) {
-        let drop_key = self.claude.as_ref().and_then(|c| c.method.as_deref()) == Some("claude.ai");
+    pub fn send(&mut self, i: usize, text: String) {
         let tx = self.tx.clone();
-        let a = &mut self.agents[i];
-        a.items.push(Item::User(text.clone()));
-        a.streaming = None;
-        a.done_seen = false;
-        a.stream_ended = false;
-        a.stderr.clear();
-        match engine::start(i, a.path.clone(), &text, a.session.as_deref(), drop_key, tx) {
-            Ok(child) => {
-                a.child = Some(child);
-                a.state = State::Running;
-            }
-            Err(e) => {
-                a.items.push(Item::Error(format!("couldn't start Claude Code: {e}")));
-                a.state = State::Failed;
-            }
-        }
+        let info = self.engines.get(&self.sessions[i].engine).cloned();
+        self.sessions[i].send(text, info.as_ref(), tx);
     }
 
     /// The next queued prompt, once the agent is free.
-    fn drain(&mut self, i: usize) {
-        let a = &mut self.agents[i];
-        // busy, closed, or its worktree couldn't be made: nothing to run it in
-        if a.busy() || a.closed || (a.branch.is_some() && a.made.is_none()) {
-            return;
-        }
-        if let Some(next) = a.queue.pop_front() {
+    pub fn drain(&mut self, i: usize) {
+        if let Some(next) = self.sessions[i].next_prompt() {
             self.send(i, next);
         }
     }
 
     pub fn on_msg(&mut self, m: Msg) {
         match m {
-            Msg::Claude(c) => self.claude = Some(c),
+            Msg::Engines(v) => self.engines.infos = v,
+            Msg::Run(f) => f(self),
             Msg::WorktreeMade(i, r) => {
-                let Some(a) = self.agents.get_mut(i) else { return };
+                let Some(a) = self.sessions.get_mut(i) else { return };
                 match r {
                     Ok(made) => {
                         let how = match &made {
@@ -471,13 +377,14 @@ impl App {
                         let msg = format!("'{}' on {} in {}{how}", a.name, a.branch.as_deref().unwrap_or(""), a.path.display());
                         let group = if matches!(made, Made::Git(_)) { "WarningMsg" } else { "ModeMsg" };
                         a.made = Some(made);
-                        a.state = State::Idle;
+                        a.release();
                         self.say(msg, group);
                         self.refresh_stat(i);
                         self.drain(i);
                     }
                     Err(e) => {
-                        a.state = State::Failed;
+                        a.hold_reason = None;
+                        a.state = State::Error;
                         a.items.push(Item::Error(format!("couldn't make its worktree: {e}")));
                         let msg = format!("'{}': couldn't make its worktree", a.name);
                         self.say(msg, "ErrorMsg");
@@ -485,79 +392,33 @@ impl App {
                 }
             }
             Msg::Stat(i, s) => {
-                if let Some(a) = self.agents.get_mut(i) {
+                if let Some(a) = self.sessions.get_mut(i) {
                     a.stat = s;
                 }
             }
             Msg::Stderr(i, s) => {
-                if let Some(a) = self.agents.get_mut(i) {
+                if let Some(a) = self.sessions.get_mut(i) {
                     a.stderr = s;
                 }
             }
             Msg::StreamEnd(i) => {
-                if let Some(a) = self.agents.get_mut(i) {
+                if let Some(a) = self.sessions.get_mut(i) {
                     a.stream_ended = true;
                 }
             }
             Msg::Engine(i, evs) => {
                 let focused = i == self.focus;
-                let Some(a) = self.agents.get_mut(i) else { return };
-                for ev in evs {
-                    match ev {
-                        Ev::Session(id) => a.session = Some(id),
-                        Ev::Model(m) => a.model = Some(m),
-                        Ev::TextDelta(t) => match a.streaming {
-                            Some(j) => {
-                                if let Some(Item::Text(s)) = a.items.get_mut(j) {
-                                    s.push_str(&t);
-                                }
-                            }
-                            None => {
-                                a.items.push(Item::Text(t));
-                                a.streaming = Some(a.items.len() - 1);
-                            }
-                        },
-                        Ev::Text(t) => match a.streaming.take() {
-                            Some(j) => a.items[j] = Item::Text(t),
-                            None => a.items.push(Item::Text(t)),
-                        },
-                        Ev::Tool { id, name, summary } => {
-                            a.streaming = None;
-                            // the same tool, filled in, within this turn (after the last prompt)
-                            let found = a.items.iter_mut().rev().take_while(|it| !matches!(it, Item::User(_))).find_map(|it| match it {
-                                Item::Tool { id: tid, summary: s, .. } if *tid == id => Some(s),
-                                _ => None,
-                            });
-                            match found {
-                                Some(s) => *s = summary,
-                                None => a.items.push(Item::Tool { id, name, summary }),
-                            }
-                        }
-                        Ev::ToolResult { .. } => {}
-                        Ev::Usage { tokens, cost } => {
-                            a.tokens += tokens;
-                            a.cost += cost.unwrap_or(0.0);
-                        }
-                        Ev::Done { ok, error } => {
-                            a.done_seen = true;
-                            a.streaming = None;
-                            if !ok {
-                                a.items.push(Item::Error(error.unwrap_or_else(|| "failed".into())));
-                            }
-                            // done for you; Claude Code may still wrap up before it exits
-                            a.state = if !ok { State::Failed } else if focused { State::Idle } else { State::Waiting };
-                        }
-                    }
-                }
-                if self.agents[i].done_seen {
+                let Some(a) = self.sessions.get_mut(i) else { return };
+                a.apply(evs, focused);
+                if a.done_seen {
                     self.refresh_stat(i);
                 }
             }
         }
     }
 
-    fn refresh_stat(&self, i: usize) {
-        let a = &self.agents[i];
+    pub fn refresh_stat(&self, i: usize) {
+        let a = &self.sessions[i];
         if a.branch.is_none() || a.made.is_none() {
             return;
         }
@@ -567,92 +428,41 @@ impl App {
         });
     }
 
-    /// Reap finished CLIs; the next queued prompt goes once the last one has exited.
+    /// Every frame: pending keys that timed out, and finished CLIs (the next
+    /// queued prompt goes once the last one has exited).
     pub fn tick(&mut self) {
-        for i in 0..self.agents.len() {
-            let a = &mut self.agents[i];
+        let step = self.seq.tick(&self.keymap, self.mode.keys());
+        self.run_step(step);
+        for i in 0..self.sessions.len() {
+            let a = &mut self.sessions[i];
             if a.closed {
                 continue;
             }
             let Some(child) = a.child.as_mut() else { continue };
             let Ok(Some(status)) = child.try_wait() else { continue };
-            a.child = None;
-            if !a.done_seen {
-                let why = if a.stderr.is_empty() { format!("Claude Code stopped ({status})") } else { a.stderr.clone() };
-                a.items.push(Item::Error(why));
-                a.state = State::Failed;
-            }
+            a.exited(status);
             self.drain(i);
         }
     }
 
     pub fn shutdown(&mut self) {
-        for a in &mut self.agents {
-            if let Some(c) = a.child.as_mut() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
+        for a in &mut self.sessions {
+            a.kill_child();
         }
     }
 
-    // -----------------------------------------------------------------
-    // commands
-    // -----------------------------------------------------------------
-
-    fn exec(&mut self, cmd: &str) {
-        let (name, arg) = cmd.split_once(' ').map(|(n, a)| (n, a.trim())).unwrap_or((cmd, ""));
-        let running = self.agents.iter().any(|a| !a.closed && a.busy());
-        match name {
-            "" => {}
-            "q" | "quit" | "qa" | "qall" | "wq" | "x" if running => self.say("E37: an agent is still running (add ! to quit anyway)", "ErrorMsg"),
-            "q" | "quit" | "qa" | "qall" | "wq" | "x" | "q!" | "quit!" | "qa!" | "qall!" => self.quit = true,
-            "new" => {
-                if arg.is_empty() {
-                    return self.say("usage: :new <task>", "ErrorMsg");
-                }
-                let name = crate::names::agent_name_from(arg);
-                if self.start_agent(&name) {
-                    let i = self.agents.len() - 1;
-                    self.agents[i].queue.push_back(arg.to_string());
-                    self.drain(i);
-                }
-            }
-            "checkhealth" | "health" => self.open_health(),
-            "help" | "h" => self.open_help(),
-            "theme" | "colorscheme" | "colo" => {
-                if arg.is_empty() {
-                    let msg = format!("{} (:theme <name>; vigent theme list)", self.theme.name);
-                    return self.say(msg, "Comment");
-                }
-                match theme::load(arg) {
-                    Some(t) => {
-                        self.theme = t;
-                        self.say(format!("colorscheme {arg}"), "Comment");
-                    }
-                    None => self.say(format!("E185: Cannot find color scheme '{arg}'"), "ErrorMsg"),
-                }
-            }
-            "kill" | "kill!" => self.kill(name == "kill!"),
-            _ => self.say(format!("E492: Not an editor command: {cmd}"), "ErrorMsg"),
-        }
-    }
-
-    /// Stop the focused agent and close it. Its worktree is kept, unless :kill!.
-    fn kill(&mut self, remove: bool) {
+    /// Stop the focused agent and close it. Its worktree is kept, unless `remove` (:kill!).
+    pub fn kill_focused(&mut self, remove: bool) {
         if self.focused().is_none() {
             return self.say("no agent to kill", "ErrorMsg");
         }
-        let a = &mut self.agents[self.focus];
-        if let Some(c) = a.child.as_mut() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-        a.child = None;
+        let a = &mut self.sessions[self.focus];
+        a.kill_child();
         a.closed = true;
         a.queue.clear();
         let (name, branch, path) = (a.name.clone(), a.branch.clone(), a.path.clone());
         let open = self.open();
-        self.focus = open.iter().rev().find(|&&i| i < self.focus).or(open.first()).copied().unwrap_or(self.agents.len());
+        self.focus = open.iter().rev().find(|&&i| i < self.focus).or(open.first()).copied().unwrap_or(self.sessions.len());
         self.scroll = 0;
         match (self.root.clone(), branch.as_deref(), remove) {
             (Some(root), Some(branch), true) => match worktree::remove(&root, &path, true) {
@@ -663,140 +473,94 @@ impl App {
             _ => self.say(format!("'{name}' killed"), "Comment"),
         }
     }
-
-    fn open_help(&mut self) {
-        let keys = [
-            ("i", "type a prompt; Enter sends it (the first one starts an agent)"),
-            ("Esc", "back to NORMAL"),
-            ("j / k", "scroll the transcript"),
-            ("Ctrl-d / Ctrl-u", "half a page down / up"),
-            ("gg / G", "top / bottom (G follows it again)"),
-            ("]s / [s", "next / previous agent"),
-            ("Space 1-9", "agent by number"),
-            (":new <task>", "another agent, in its own worktree"),
-            (":kill  :kill!", "close the agent (! also removes its worktree)"),
-            (":theme <name>", "change colors (vigent theme list)"),
-            (":checkhealth", "engines and worktrees"),
-            (":q  :q!", "quit (! even with agents running)"),
-        ];
-        let mut lines: Vec<(String, &'static str)> = vec![("vigent keys".into(), "Title"), (String::new(), "Normal")];
-        lines.extend(keys.iter().map(|(k, d)| (format!("{k:<18}{d}"), "Normal")));
-        lines.push((String::new(), "Normal"));
-        lines.push(("This Rust build runs Claude Code; the other engines come in milestone 2 (#168).".into(), "Comment"));
-        self.float = Some(Float { title: "keys".into(), lines, top: 0 });
-    }
-
-    fn open_health(&mut self) {
-        let mut l: Vec<(String, &'static str)> = vec![
-            ("vigent: agent engines".into(), "Title"),
-            ("Each CLI runs as installed, with its own login; vigent never reads credentials.".into(), "Comment"),
-            (String::new(), "Normal"),
-        ];
-        for (n, (name, _, install)) in ENGINES.iter().enumerate() {
-            if n == 1 {
-                match &self.claude {
-                    None => l.push(("… Claude Code  checking".into(), "Comment")),
-                    Some(c) if c.version.is_none() => {
-                        l.push(("○ Claude Code".into(), "Normal"));
-                        l.push(("    not installed".into(), "Comment"));
-                        l.push((format!("    install: {install}"), "Comment"));
-                    }
-                    Some(c) => {
-                        let v = c.version.clone().unwrap_or_default();
-                        l.push((format!("{} Claude Code  {v}  (default for :new)", if c.signed_in { "●" } else { "◐" }), "Normal"));
-                        if c.signed_in {
-                            let how = if c.method.as_deref() == Some("claude.ai") { " (Claude account)" } else { "" };
-                            l.push((format!("    OK signed in{how}"), "ModeMsg"));
-                        } else {
-                            l.push(("    WARNING not signed in: run  claude  once to sign in".into(), "WarningMsg"));
-                        }
-                    }
-                }
-            } else if self.installed[n] {
-                l.push((format!("○ {name}"), "Normal"));
-                l.push(("    installed; this Rust build runs Claude Code only so far (milestone 2 adds the rest)".into(), "Comment"));
-            } else {
-                l.push((format!("○ {name}"), "Normal"));
-                l.push(("    not installed".into(), "Comment"));
-                l.push((format!("    install: {install}"), "Comment"));
-            }
-            l.push((String::new(), "Normal"));
-        }
-        l.push(("vigent: agent worktrees".into(), "Title"));
-        l.push((String::new(), "Normal"));
-        l.push(("● lightweight worktrees  copy-on-write: agents share unchanged files".into(), "Normal"));
-        l.push(("    OK riftri is built into this binary".into(), "ModeMsg"));
-        let mut seen = vec![];
-        for a in &self.agents {
-            match &a.made {
-                Some(Made::Riftri(b)) if !seen.contains(b) => {
-                    seen.push(b.clone());
-                    l.push((format!("    OK copy-on-write worktrees ({b})"), "ModeMsg"));
-                }
-                Some(Made::Git(why)) => l.push((format!("    WARNING '{}' got a full copy: {why}", a.name), "WarningMsg")),
-                _ => {}
-            }
-        }
-        if self.root.is_none() {
-            l.push(("    not in a git repository: agents work in this folder".into(), "Comment"));
-        }
-        self.float = Some(Float { title: "checkhealth".into(), lines: l, top: 0 });
-    }
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
     use std::sync::mpsc::channel;
 
-    fn app() -> App {
-        let (tx, _rx) = channel();
-        std::mem::forget(_rx);
-        let mut a = App::new("0.0.0", std::env::temp_dir(), "default", tx);
-        a.claude = Some(Claude { version: Some("2".into()), signed_in: true, method: None });
+    /// An App with Claude Code signed in, outside any repository.
+    pub fn app() -> App {
+        let (tx, rx) = channel();
+        std::mem::forget(rx);
+        let mut a = App::new("0.0.0", std::env::temp_dir(), "default", Config::default(), Keymap::default(), tx);
+        a.root = None;
+        for e in &mut a.engines.infos {
+            e.checking = false;
+            if e.id == "claude" {
+                (e.installed, e.connected, e.version) = (true, true, Some("2".into()));
+            }
+        }
         a
     }
 
-    #[test]
-    fn a_reply_streams_in_and_settles() {
-        let mut a = app();
-        a.root = None;
-        assert!(a.start_agent("x"));
-        a.on_msg(Msg::Engine(0, vec![Ev::TextDelta("Hel".into()), Ev::TextDelta("lo".into())]));
-        assert!(matches!(&a.agents[0].items[1], Item::Text(t) if t == "Hello"));
-        a.on_msg(Msg::Engine(0, vec![Ev::Text("Hello!".into()), Ev::Tool { id: "t".into(), name: "Write".into(), summary: "".into() }]));
-        a.on_msg(Msg::Engine(0, vec![Ev::Tool { id: "t".into(), name: "Write".into(), summary: "/x".into() }, Ev::Usage { tokens: 74_800, cost: Some(0.25) }, Ev::Done { ok: true, error: None }]));
-        assert_eq!(a.agents[0].items.len(), 3, "the final text replaces the streamed one, the tool fills in");
-        assert!(matches!(&a.agents[0].items[2], Item::Tool { summary, .. } if summary == "/x"));
-        assert_eq!(a.agents[0].usage(), "74.8k tok · $0.25");
-        assert_eq!(a.agents[0].state, State::Idle);
-        // a later turn's tool gets its own line, even with an id seen before
-        a.agents[0].items.push(Item::User("again".into()));
-        a.on_msg(Msg::Engine(0, vec![Ev::Tool { id: "t".into(), name: "Write".into(), summary: "/y".into() }]));
-        assert!(matches!(a.agents[0].items.last(), Some(Item::Tool { summary, .. }) if summary == "/y"));
+    fn press(a: &mut App, keys: &str) {
+        for c in keys.chars() {
+            let code = match c {
+                '\r' => KeyCode::Enter,
+                '\x1b' => KeyCode::Esc,
+                c => KeyCode::Char(c),
+            };
+            a.key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
     }
 
     #[test]
     fn prompts_wait_for_the_worktree() {
         let mut a = app();
-        a.agents.push(Agent {
-            name: "w".into(), branch: Some("feat/w".into()), path: "/nope".into(), base: "main".into(), made: None, state: State::Making,
-            items: vec![], streaming: None, queue: VecDeque::new(), session: None, model: None, tokens: 0, cost: 0.0, stat: (0, 0),
-            child: None, done_seen: false, stream_ended: false, stderr: String::new(), closed: false,
-        });
+        let mut s = Session::new(0, "w", "claude", "/nope".into());
+        s.branch = Some("feat/w".into());
+        s.hold("making its worktree");
+        a.sessions.push(s);
         a.input = "go".into();
         a.submit();
         assert_eq!(a.message.0, "queued: 'w' gets it once its worktree is ready (1 waiting)");
-        assert_eq!(a.agents[0].queue.len(), 1);
+        assert_eq!(a.sessions[0].queue.len(), 1);
     }
 
     #[test]
     fn quitting_with_a_running_agent_needs_a_bang() {
         let mut a = app();
-        a.exec("q");
+        crate::commands::exec(&mut a, "q");
         assert!(a.quit);
         let mut a = app();
-        a.exec("bogus");
-        assert!(a.message.0.starts_with("E492"));
+        let mut s = Session::new(0, "r", "claude", "/nope".into());
+        s.state = State::Running;
+        a.sessions.push(s);
+        crate::commands::exec(&mut a, "qa");
+        assert_eq!(a.message.0, "E37: 1 agent is still running (add ! to quit anyway)");
+        assert!(!a.quit);
+        crate::commands::exec(&mut a, "qa!");
+        assert!(a.quit);
+        let mut a = app();
+        crate::commands::exec(&mut a, "bogus arg");
+        assert_eq!(a.message.0, "E492: Not an editor command: bogus");
+    }
+
+    #[test]
+    fn keys_go_through_the_keymap() {
+        let mut a = app();
+        press(&mut a, ":theme nord\r");
+        assert_eq!(a.theme.name, "nord");
+        assert_eq!(a.mode, Mode::Normal);
+        // the start screen's n opens :new
+        press(&mut a, "n");
+        assert_eq!((a.mode, a.cmd.as_str()), (Mode::Command, "new "));
+        press(&mut a, "\x1b");
+        // a mapping of your own, to an ex command
+        a.keymap.set(KeyMode::Normal, "<leader>x", &keys::RhsValue::Str(":colorscheme gruvbox<CR>".into())).unwrap();
+        a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        press(&mut a, "x");
+        assert_eq!(a.theme.name, "gruvbox");
+        // INSERT types, <C-w> deletes a word, Esc leaves
+        press(&mut a, "i");
+        assert_eq!(a.mode, Mode::Insert);
+        press(&mut a, "fix the bug");
+        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(a.input, "fix the ");
+        press(&mut a, "\x1b");
+        assert_eq!(a.mode, Mode::Normal);
     }
 }

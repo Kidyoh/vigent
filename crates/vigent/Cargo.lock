@@ -969,6 +969,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "riftri-core",
+ "serde",
  "serde_json",
  "signal-hook",
  "unicode-width",

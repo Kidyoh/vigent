@@ -1,26 +1,37 @@
 //! Claude Code, run as installed (`claude -p --output-format stream-json`), in
 //! the agent's worktree. Its JSON lines become events, the same way
-//! src/cli-engines.ts reads them.
+//! src/cli-engines.ts (claudeAdapter) reads them.
 
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::Sender;
+use std::process::{Command, Stdio};
 
-use crate::app::Msg;
+use super::{Adapter, Choice, EngineInfo, Ev, Parser, RunOpts};
 
-/// What one line of Claude Code's stream says.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Ev {
-    Session(String),
-    Model(String),
-    TextDelta(String),
-    Text(String),
-    Tool { id: String, name: String, summary: String },
-    ToolResult { id: String, output: String },
-    Usage { tokens: u64, cost: Option<f64> },
-    Done { ok: bool, error: Option<String> },
+pub struct Claude;
+
+impl Adapter for Claude {
+    fn id(&self) -> &'static str {
+        "claude"
+    }
+    // -p can't ask before a tool runs; edits are allowed, other tools follow your Claude Code settings
+    fn default_args(&self) -> &'static [&'static str] {
+        &["--permission-mode", "acceptEdits"]
+    }
+    fn args(&self, prompt: &str, o: &RunOpts) -> Vec<String> {
+        args(prompt, o)
+    }
+    fn parser(&self) -> Parser {
+        Box::new(parse)
+    }
+    fn can_fork(&self) -> bool {
+        true
+    }
+    fn models(&self) -> Vec<Choice> {
+        vec![] // Engines area: src/choices.ts CLAUDE_MODELS
+    }
+    fn detect(&self) -> EngineInfo {
+        detect()
+    }
 }
 
 fn summarize(input: &Value) -> String {
@@ -57,11 +68,10 @@ pub fn parse(e: &Value) -> Vec<Ev> {
         }
         Some("stream_event") => {
             let ev = &e["event"];
-            if ev["type"] == "content_block_delta" && ev["delta"]["type"] == "text_delta" {
-                if let Some(t) = ev["delta"]["text"].as_str().filter(|t| !t.is_empty()) {
+            if ev["type"] == "content_block_delta" && ev["delta"]["type"] == "text_delta"
+                && let Some(t) = ev["delta"]["text"].as_str().filter(|t| !t.is_empty()) {
                     out.push(Ev::TextDelta(t.into()));
                 }
-            }
         }
         Some("assistant") => {
             for b in blocks(e) {
@@ -108,77 +118,61 @@ pub fn parse(e: &Value) -> Vec<Ev> {
 }
 
 /// The arguments for one turn, like the TypeScript claudeAdapter.
-pub fn args(prompt: &str, resume: Option<&str>) -> Vec<String> {
-    let mut a: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    if let Some(id) = resume {
-        a.extend(["--resume".into(), id.into()]);
+pub fn args(prompt: &str, o: &RunOpts) -> Vec<String> {
+    let mut a: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"].iter().map(|s| s.to_string()).collect();
+    match &o.extra_args {
+        Some(extra) => a.extend(extra.iter().cloned()),
+        None => a.extend(Claude.default_args().iter().map(|s| s.to_string())),
+    }
+    if !o.allowed_tools.is_empty() {
+        a.push("--allowedTools".into());
+        a.extend(o.allowed_tools.iter().cloned());
+    }
+    if let Some(m) = &o.model {
+        a.extend(["--model".into(), m.clone()]);
+    }
+    if let Some(e) = &o.effort {
+        a.extend(["--effort".into(), e.clone()]);
+    }
+    if let Some(id) = &o.resume {
+        a.extend(["--resume".into(), id.clone()]);
+        if o.fork {
+            a.push("--fork-session".into());
+            if let Some(at) = &o.fork_at {
+                a.extend(["--resume-session-at".into(), at.clone()]);
+            }
+        }
     }
     a.extend(["--".into(), prompt.into()]);
     a
 }
 
-/// Start one turn. Its events, then its exit, come back as messages for `agent`.
-pub fn start(agent: usize, cwd: PathBuf, prompt: &str, resume: Option<&str>, drop_api_key: bool, tx: Sender<Msg>) -> std::io::Result<Child> {
-    let mut cmd = Command::new("claude");
-    cmd.args(args(prompt, resume)).current_dir(&cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    if drop_api_key {
-        // signed in with a Claude account: a stray key would be billed (or fail) instead
-        cmd.env_remove("ANTHROPIC_API_KEY");
-    }
-    let mut child = cmd.spawn()?;
-    let stdout = child.stdout.take().expect("piped stdout");
-    let mut stderr = child.stderr.take().expect("piped stderr");
-    let err_tx = tx.clone();
-    std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = stderr.read_to_string(&mut s);
-        let last: Vec<&str> = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-        let tail = last[last.len().saturating_sub(3)..].join("\n");
-        let _ = err_tx.send(Msg::Stderr(agent, tail));
-    });
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                let evs = parse(&v);
-                if !evs.is_empty() && tx.send(Msg::Engine(agent, evs)).is_err() {
-                    return;
-                }
-            }
-        }
-        let _ = tx.send(Msg::StreamEnd(agent));
-    });
-    Ok(child)
-}
-
 /// Claude Code on this machine: its version, and whether (and how) it's signed in.
-#[derive(Clone, Debug, Default)]
-pub struct Claude {
-    pub version: Option<String>,
-    pub signed_in: bool,
-    pub method: Option<String>,
-}
-
-pub fn detect_claude() -> Claude {
+/// (Engines area: port src/engines.ts detectClaude, API-key fallbacks included.)
+pub fn detect() -> EngineInfo {
+    let spec = super::spec("claude");
+    let base = EngineInfo { connect: Some("claude".into()), ..EngineInfo::from_path(spec) };
     let run = |args: &[&str]| Command::new("claude").args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success());
-    let Some(v) = run(&["--version"]) else { return Claude::default() };
+    let Some(v) = run(&["--version"]) else {
+        return EngineInfo { installed: false, detail: "not installed".into(), ..base };
+    };
     let version = String::from_utf8_lossy(&v.stdout).split_whitespace().next().map(str::to_string);
     let status = run(&["auth", "status", "--json"]).and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok());
     let signed_in = status.as_ref().and_then(|s| s["loggedIn"].as_bool()).unwrap_or(false);
-    let method = status.as_ref().and_then(|s| s["authMethod"].as_str().map(str::to_string));
-    Claude { version, signed_in, method }
-}
-
-/// Whether `bin` is on PATH.
-pub fn on_path(bin: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&path).any(|d| {
-        let f = d.join(bin);
-        f.is_file() || (cfg!(windows) && d.join(format!("{bin}.exe")).is_file())
-    })
+    let account = status.as_ref().and_then(|s| s["authMethod"].as_str()) == Some("claude.ai");
+    if !signed_in {
+        return EngineInfo { installed: true, version, detail: "not signed in".into(), ..base };
+    }
+    EngineInfo {
+        installed: true,
+        connected: true,
+        version,
+        detail: if account { "signed in (Claude account)".into() } else { "signed in".into() },
+        // signed in with a Claude account: a stray key would be billed (or fail) instead
+        drop_env: if account { vec!["ANTHROPIC_API_KEY".into()] } else { vec![] },
+        connect: None,
+        ..base
+    }
 }
 
 #[cfg(test)]
@@ -187,7 +181,7 @@ mod tests {
 
     #[test]
     fn reads_the_recorded_claude_code_stream() {
-        let fixture = include_str!("../../../test/fixtures/claude-tool.jsonl");
+        let fixture = include_str!("../../../../test/fixtures/claude-tool.jsonl");
         let evs: Vec<Ev> = fixture.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).flat_map(|v| parse(&v)).collect();
         assert!(evs.contains(&Ev::Session("3b248a3e-43fd-4fd1-98b5-f36e06e02d85".into())));
         assert!(evs.contains(&Ev::Model("claude-fable-5".into())));
@@ -198,7 +192,12 @@ mod tests {
 
     #[test]
     fn follow_ups_resume_the_conversation() {
-        assert_eq!(&args("go", Some("abc"))[7..], ["--resume", "abc", "--", "go"]);
-        assert_eq!(args("-x", None).last().unwrap(), "-x");
+        let resume = RunOpts { resume: Some("abc".into()), ..Default::default() };
+        assert_eq!(&args("go", &resume)[7..], ["--resume", "abc", "--", "go"]);
+        assert_eq!(args("-x", &RunOpts::default()).last().unwrap(), "-x");
+        let fork = RunOpts { resume: Some("abc".into()), fork: true, fork_at: Some("m1".into()), model: Some("opus".into()), ..Default::default() };
+        let a = args("go", &fork);
+        assert!(a.windows(2).any(|w| w == ["--model", "opus"]));
+        assert!(a.windows(3).any(|w| w == ["--fork-session", "--resume-session-at", "m1"]));
     }
 }
