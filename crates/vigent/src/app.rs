@@ -355,6 +355,8 @@ impl App {
             }
             Msg::Engine(i, evs) => self.on_engine(i, evs),
         }
+        // every change of state is seen, even one undone within a frame (agents.rs)
+        self.watch_states();
     }
 
     pub fn refresh_stat(&self, i: usize) {

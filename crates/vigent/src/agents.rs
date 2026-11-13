@@ -39,11 +39,13 @@ pub struct Agents {
     /// the message shown while a worktree is made, replaced once it's there (unless something else was said since)
     making: Vec<(usize, String)>,
     last_stat: Option<Instant>,
+    /// races started this time (race.rs)
+    pub races: Vec<crate::race::Race>,
 }
 
 impl Default for Agents {
     fn default() -> Self {
-        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None }
+        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None, races: vec![] }
     }
 }
 
@@ -266,7 +268,7 @@ impl App {
     }
 
     /// "no engine is signed in: run claude auth login or codex login · :checkhealth" (src/app.ts noEngineReady)
-    fn no_engine_ready(&self) -> String {
+    pub fn no_engine_ready(&self) -> String {
         let logins: Vec<String> = self.engines.infos.iter().filter(|e| e.id != "pi" && e.installed).filter_map(|e| e.connect.clone()).collect();
         let pi = self.engines.get("pi").and_then(|e| e.connect.clone());
         let mut ways = vec![];
@@ -433,7 +435,7 @@ impl App {
                 let (path, branch, base) = (a.path.clone(), a.branch.clone(), a.base.clone());
                 worktree::remove(&root, &path, branch.as_deref(), Some(&base), true);
             }
-            return;
+            return self.race_worktree_settled(i);
         }
         match r {
             Ok(made) => {
@@ -480,6 +482,7 @@ impl App {
                 self.say(format!("'{name}' couldn't start: {e}"), "ErrorMsg");
             }
         }
+        self.race_worktree_settled(i);
     }
 
     /// Take an agent out (it couldn't start, or was killed): stop it and close its slot.
@@ -785,18 +788,17 @@ impl App {
                 continue;
             }
             self.sessions[i].seen = now;
-            if before != State::Running {
-                continue;
+            if before == State::Running {
+                // its usage totals, for after a restart
+                self.persist(i);
+                if matches!(now, State::Idle | State::Error | State::Waiting) {
+                    self.agent_finished_hook(i);
+                }
+                if now != State::Paused {
+                    self.notify_stopped(i);
+                }
             }
-            // its usage totals, for after a restart
-            self.persist(i);
-            if matches!(now, State::Idle | State::Error | State::Waiting) {
-                self.agent_finished_hook(i);
-            }
-            if now == State::Paused {
-                continue;
-            }
-            self.notify_stopped(i);
+            self.watch_race(i);
         }
         if self.agents.last_stat.is_none_or(|t| t.elapsed() >= STAT_EVERY) {
             self.agents.last_stat = Some(Instant::now());
@@ -1223,6 +1225,98 @@ mod tests {
         crate::commands::exec(&mut a, "new -t fix");
         assert_eq!(a.message.0, "template 'fix' needs a task: :new -t fix <what>");
         assert_eq!(a.cmd, "new -t fix ");
+    }
+
+    /// A git repository in a temp folder, and an App in it whose messages the test reads.
+    fn repo_app(name: &str) -> (App, std::sync::mpsc::Receiver<Msg>, PathBuf) {
+        let base = std::env::temp_dir().join(format!("vigent-agents-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo = base.join("shop");
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |args: &[&str]| {
+            let ok = Command::new("git").args(args).current_dir(&repo).env("GIT_AUTHOR_NAME", "T").env("GIT_AUTHOR_EMAIL", "t@e.com").env("GIT_COMMITTER_NAME", "T").env("GIT_COMMITTER_EMAIL", "t@e.com").output().unwrap();
+            assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+        };
+        g(&["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.js"), "1\n").unwrap();
+        g(&["add", "a.js"]);
+        g(&["commit", "-qm", "init"]);
+        let mut config = crate::config::Config::default();
+        config.worktree.backend = "git".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut a = App::new("0.0.0", repo.clone(), "default", config, crate::keys::Keymap::default(), tx);
+        for e in &mut a.engines.infos {
+            e.checking = false;
+            if e.id == "claude" {
+                (e.installed, e.connected) = (true, true);
+            }
+        }
+        a.agents.alerts = Some(vec![]);
+        (a, rx, base)
+    }
+
+    /// Handle what the threads send until `done` says so.
+    fn pump(a: &mut App, rx: &std::sync::mpsc::Receiver<Msg>, done: impl Fn(&App) -> bool) {
+        let until = Instant::now() + Duration::from_secs(20);
+        while !done(a) {
+            assert!(Instant::now() < until, "timed out: {}", a.message.0);
+            if let Ok(m) = rx.recv_timeout(Duration::from_millis(50)) {
+                a.on_msg(m);
+            }
+        }
+    }
+
+    #[test]
+    fn an_agent_is_saved_killed_attached_and_reopened() {
+        let (mut a, rx, base) = repo_app("life");
+        crate::commands::exec(&mut a, "new perf cache warmup");
+        assert_eq!(a.message.0, "'perf cache warmup' · Claude Code on perf/cache-warmup · making its worktree…");
+        pump(&mut a, &rx, |a| a.sessions[0].made.is_some());
+        let path = a.sessions[0].path.clone();
+        assert_eq!(a.message.0, "'perf cache warmup' · Claude Code on perf/cache-warmup in ../shop-worktrees/perf-cache-warmup (from main)");
+        let meta = records::load(&path).unwrap();
+        assert_eq!((meta.name.as_str(), meta.engine.as_deref(), meta.base.as_deref()), ("perf cache warmup", Some("claude"), Some("main")));
+        assert!(meta.created_at.ends_with('Z') && meta.created_at.len() == 24);
+        // the conversation id is saved as soon as the CLI says it, the totals when a run ends
+        a.sessions[0].state = State::Running;
+        a.watch_states();
+        a.on_engine(0, vec![Ev::Session("s-1".into()), Ev::Usage { tokens: 1200, cost: Some(0.5) }, Ev::Done { ok: true, error: None }]);
+        a.watch_states();
+        let meta = records::load(&path).unwrap();
+        assert_eq!((meta.resume_id.as_deref(), meta.usage), (Some("s-1"), Some((1200, Some(0.5)))));
+
+        crate::commands::exec(&mut a, "kill");
+        assert_eq!(a.message.0, "killed 'perf cache warmup' · kept perf/cache-warmup (:attach perf/cache-warmup reopens it, :worktree remove deletes it)");
+        assert!(records::load(&path).unwrap().detached);
+        let root = a.root.clone().unwrap();
+        assert!(records::restorable(&root, &a.config.worktree).is_empty());
+        crate::commands::exec(&mut a, "worktree remove perf/cache-warmup");
+        assert!(a.message.0.starts_with("removed ") || a.message.0.contains("has uncommitted"), "{}", a.message.0);
+        // the record is gone with the worktree when it's removed; this one was, so make another
+        crate::commands::exec(&mut a, "new docs readme");
+        pump(&mut a, &rx, |a| a.sessions.last().unwrap().made.is_some());
+        crate::commands::exec(&mut a, "kill");
+        crate::commands::exec(&mut a, "attach docs/readme");
+        assert_eq!(a.message.0, "attached 'docs readme' to docs/readme");
+        assert!(!records::load(&a.focused().unwrap().path).unwrap().detached);
+        let n = a.open().len();
+        crate::commands::exec(&mut a, "attach docs/readme");
+        assert_eq!(a.open().len(), n, "already open: just focus it");
+        crate::commands::exec(&mut a, "attach nope");
+        assert_eq!(a.message.0, "no worktree 'nope' (see :worktrees)");
+        crate::commands::exec(&mut a, "worktree remove docs/readme");
+        assert_eq!(a.message.0, "'docs readme' is working in docs/readme; stop it first (:kill or :kill!)");
+
+        // a restart: the agent is back, and says which conversation it continues
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut b = App::new("0.0.0", root.clone(), "default", a.config.clone(), crate::keys::Keymap::default(), tx);
+        let mut warnings = vec![];
+        b.restore(&mut warnings);
+        assert_eq!(b.message.0, "reopened 1 agent from last time");
+        assert_eq!(b.sessions[0].name, "docs readme");
+        crate::commands::exec(&mut b, "kill!");
+        assert!(b.message.0.starts_with("killed 'docs readme' · removed "), "{}", b.message.0);
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

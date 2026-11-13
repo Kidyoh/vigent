@@ -16,6 +16,7 @@ pub static COMMANDS: &[Command] = &[
     Command { name: "worktrees", aliases: &["worktree", "wt"], also: None, run: worktrees },
     Command { name: "tree", aliases: &[], also: None, run: tree },
     Command { name: "templates", aliases: &["template", "tpl"], also: None, run: templates },
+    Command { name: "race", aliases: &[], also: None, run: |app, ex| app.race_cmd(ex.arg, ex.bang) },
 ];
 
 /// :templates lists them; :templates <name> starts one (:new -t <name>).

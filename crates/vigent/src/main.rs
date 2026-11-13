@@ -18,6 +18,7 @@ mod health;
 mod help;
 mod keys;
 mod names;
+mod race;
 mod records;
 mod review;
 mod serve;
