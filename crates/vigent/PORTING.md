@@ -150,7 +150,16 @@ area consumes yet (remove your flag from that list when you wire it).
   first prompt*; TypeScript's `:new <name>` only starts an agent by that name.
   Sessions area: match TypeScript (check `test/e2e.test.mjs` and the help text).
 - `:new!` (an agent in your checkout) says `E477: No ! allowed` for now.
-- `:theme` with no name shows the theme name; TypeScript opens the picker.
+- Config area notes: `:templates`, `:permissions` and `--demo` were ported by
+  the Config area (its task listed them); `templates::start(app, name, task,
+  StartOpts)` is what Sessions' `:new -t` should call, and `permissions::reload`
+  / `engine_args` are what an engine reads at each prompt. A demo agent can't
+  be stopped with <C-c> yet (its script plays on a thread). The theme picker
+  filters with "the letters in order" rather than pi-tui's fuzzy score. `:hi
+  Group` shows the attributes but not the colored `xxx` sample. The style's
+  cards / compact sidebar and labeled / bubble messages are resolved
+  (`style::resolve`, `style::icons`) but drawn the tree / plain way until the
+  sidebar and transcript read them (Windows).
 - Claude detection is the milestone-1 version (version + `auth status`); port
   `detectClaude`'s API-key fallbacks and `detail` strings.
 - The Claude parser doesn't emit `Message`, `Thinking`, `TurnEnd`,
