@@ -59,7 +59,7 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `names.rs` | `agentNameFrom`, `slugify`, `branchName` | names | Sessions |
 | `health.rs` | `App.openHealth` | `:checkhealth` | Engines (engines part), Sessions (worktrees part) |
 | `help.rs` | `App.openHelp` | `:help` | Config |
-| `review.rs` | `src/review.ts`, `hunks.ts`, `hunk-review.ts`, `diffview.ts`, `export.ts` | `Review` state (stub) | Review |
+| `review/` | `src/review.ts`, `hunks.ts`, `hunk-review.ts`, `diffview.ts`, `export.ts`, `race.ts`, `hooks.ts`, `float.ts` (TextFloat) | `Review` state; `land.rs` merge/PR, `hunks.rs` diff + drop/restore, `diffview.rs`, `hunk_review.rs` (`:review` window), `float.rs` (selectable/jumping float), `views.rs` (`:diff` `:review` `:merge` `:pr` `:dash` `:cost`), `race.rs` + `races.rs` (`:race`), `hooks.rs`, `export.rs` (`:w`), `usage.rs`. Hooks into the App: `review::key` first in `App::key`, `review::draw` last in `ui::draw`, `review::watch` in `App::tick`, `hooks::set_up_worktree` when a worktree is made | Review |
 | `windows.rs` | `src/windows.ts`, `line-edit.ts`, `search.ts`, `completion.ts` | `Windows` state (stub) | Windows |
 | `serve.rs` | `src/serve.ts`, `serve-page.ts`, `demo.ts`, `notify.ts` | `Serve` state (stub) | Serve |
 | `ui/mod.rs` | `App.render` | lays out the parts below | Windows |
@@ -134,6 +134,16 @@ area consumes yet (remove your flag from that list when you wire it).
 
 ## Differences to know about
 
+- Review: Rust's `Session.cost` is an f64, not TypeScript's `cost?: number`;
+  `review::usage::cost_of` treats an agent as priced once it has a cost, or once
+  an engine that prices its tokens (claude, opencode, pi) has used some. `:dash`
+  marks waiting agents (and failed ones you aren't on) as new, for TypeScript's
+  `unread` set. Racers start through `App::start_agent` and then take their
+  engine and model, so a race needs the default engine able to start (Sessions:
+  give `start_agent` engine/model options and use them in `review/races.rs`).
+  The y/n question (`review::ask`) and the float (`review/float.rs`) are this
+  area's own; Windows can fold them into `ui/floats.rs` and a shared confirm.
+
 - Rust's `:new <task>` names the agent after the task *and sends it as the
   first prompt*; TypeScript's `:new <name>` only starts an agent by that name.
   Sessions area: match TypeScript (check `test/e2e.test.mjs` and the help text).
@@ -204,7 +214,7 @@ Core / windows and buffers:
 - [ ] `:split` `:sp`, `:vsplit` `:vs` `:vsp` (with an agent: fork) — **Windows**
 - [ ] `:only` `:on`, `:close` `:clo`, `:wincmd` `:winc` — **Windows**
 - [ ] `:bnext` `:bn`, `:bprevious` `:bprev` `:bp` `:bNext` `:bN`, `:buffer` `:b <agent>` — **Windows**
-- [ ] `:ls` `:buffers` `:files`, `:dash` `:dashboard` — **Windows**
+- [ ] `:ls` `:buffers` `:files` — **Windows**; [x] `:dash` `:dashboard` (and `app.dashboard`) — **Review**
 - [ ] `:noh` `:nohl` `:nohlsearch` — **Windows**
 - [ ] `:marks`, `:jumps`, `:his` `:history` — **Windows**
 
@@ -213,7 +223,7 @@ Sessions:
 - [~] `:kill` `:kill!` `:bdelete` `:bd` — **Sessions**
 - [ ] `:queue [prompt]` — **Sessions**
 - [ ] `:pause`, `:resume` (session.rs has pause/resume/hold/release) — **Sessions**
-- [ ] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` — **Sessions**
+- [x] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` — **Review** (`--models` reads `Adapter::models()`, empty until Engines fills them; `--demo` races aren't ported: Serve)
 - [ ] `:templates` `:template` `:tpl [name]` — **Sessions**
 - [ ] `:tree` (and fork from a point) — **Sessions**
 - [ ] `:worktrees` `:worktree` `:wt`, `:worktree remove[!] <branch>` — **Sessions**
@@ -228,11 +238,11 @@ Engines:
 - [ ] `:pi` `:extensions` — **Engines**
 
 Review:
-- [ ] `:diff`, `:diff split|vert|vertical|side` — **Review**
-- [ ] `:review` `:hunks` — **Review**
-- [ ] `:merge [--no-squash]` (before_merge hook) — **Review**
-- [ ] `:pr` (before_merge hook) — **Review**
-- [ ] `:w` `:write [file]`, `:w!` `:write!` (transcript as Markdown) — **Review**
+- [x] `:diff`, `:diff split|vert|vertical|side` (`]c` `[c` jump, `s` switches layout; no Nerd Font file icons yet) — **Review**
+- [x] `:review` `:hunks` (`x` drop hunk, `X` drop file, `u` undo, `j/k ]c [c n N Tab`, `J/K`, `g G`, `q`) — **Review**
+- [x] `:merge [--no-squash]` (before_merge hook; rolls back on conflict; commits what the agent left) — **Review**
+- [x] `:pr` (before_merge hook; gh, else the compare URL) — **Review**
+- [x] `:w` `:write [file]`, `:w!` `:write!` (transcript as Markdown; tool output isn't kept by Rust's Session yet, so tool blocks are empty) — **Review**
 
 Config:
 - [~] `:colorscheme` `:colo` `:theme [name]` (picker without a name), `:theme save[!] [name]` — **Config**
@@ -248,7 +258,7 @@ Config:
 
 Serve:
 - [ ] `:serve [port] [local]`, `:serve stop`, serve info float — **Serve**
-- [ ] `:cost` `:usage` — **Serve**
+- [x] `:cost` `:usage` (usage float) — **Review**
 
 ### Keys (`src/keys.ts` `DEFAULT_KEYS`; every one is bound, handlers below)
 
@@ -297,7 +307,7 @@ below means it's also *used*.
 - [ ] `[highlights]` (tables, `:hi` strings, links) — **Config**
 - [ ] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
 - [ ] `[templates.<name>]` `prompt`, `description`, `engine`, `model`, `effort`, `worktree` (+ built-ins fix, test, review, explain) — **Sessions**
-- [ ] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions**; `before_merge` — **Review**
+- [x] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished`, `before_merge` — **Review** (`review/hooks.rs`)
 - [ ] `[statusline]` / `[winbar]` `left`, `right` — **Windows**
 - [ ] `[commands]` — **Config**
 - [ ] `[style]` `sidebar`, `messages`, `tool_icons`, `separators`, `user_label`, `[style.icons]`, `[style.nerd_icons]` — **Windows**
@@ -326,12 +336,12 @@ below means it's also *used*.
 - [x] waiting state when an agent finishes while you look elsewhere — **Sessions**
 - [ ] agent records saved and reopened (`records.rs` has the format) — **Sessions**
 - [ ] `:kill` marks the record detached; `:attach` reopens — **Sessions**
-- [ ] races (`src/race.ts`) — **Sessions**
+- [x] races (`src/race.ts`) — **Review**
 - [ ] conversation tree (`src/tree.ts`) — **Sessions**
 - [ ] riftri storage health in `:checkhealth` (`riftriHealth`) — **Sessions**
-- [ ] diff view, hunk review, merge, PR, transcript export — **Review**
+- [x] diff view, hunk review, merge, PR, transcript export, dashboard, usage — **Review**
 - [ ] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`), icons (`src/icons.ts`), styles (`src/style.ts`), pickers (`src/picker.ts`), confirm prompts — **Windows**
 - [ ] desktop notification / bell when an agent finishes elsewhere, focus reporting (`src/notify.ts`) — **Serve**
 - [ ] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`) — **Serve**
 - [ ] demo sessions (`src/demo.ts`, `DemoSession`) — **Serve**
-- [ ] usage float (`:usage`) — **Serve**
+- [x] usage float (`:usage`) — **Review**

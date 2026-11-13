@@ -161,6 +161,9 @@ impl App {
     // -----------------------------------------------------------------
 
     pub fn key(&mut self, k: KeyEvent) {
+        if crate::review::key(self, &k) {
+            return;
+        }
         if self.float.is_some() {
             return crate::ui::floats::key(self, k);
         }
@@ -380,7 +383,10 @@ impl App {
                         a.release();
                         self.say(msg, group);
                         self.refresh_stat(i);
-                        self.drain(i);
+                        // a worktree_created hook holds it again until the worktree is set up
+                        if !crate::review::hooks::set_up_worktree(self, i) {
+                            self.drain(i);
+                        }
                     }
                     Err(e) => {
                         a.hold_reason = None;
@@ -443,6 +449,7 @@ impl App {
             a.exited(status);
             self.drain(i);
         }
+        crate::review::watch(self);
     }
 
     pub fn shutdown(&mut self) {
