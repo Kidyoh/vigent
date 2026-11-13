@@ -117,9 +117,9 @@ pub struct Session {
 /// 74800 -> "74.8k tok" (src/app.ts formatTokens)
 pub fn format_tokens(n: u64) -> String {
     if n >= 1_000_000 {
-        format!("{:.1}M tok", n as f64 / 1e6)
+        format!("{:.1}M tok", js_round(n as f64 / 1e6, 1))
     } else if n >= 1000 {
-        format!("{:.1}k tok", n as f64 / 1e3)
+        format!("{:.1}k tok", js_round(n as f64 / 1e3, 1))
     } else {
         format!("{n} tok")
     }
@@ -127,7 +127,14 @@ pub fn format_tokens(n: u64) -> String {
 
 /// US dollars: cents, or a tenth of a cent below one cent (src/app.ts formatCost)
 pub fn format_cost(usd: f64) -> String {
-    if usd > 0.0 && usd < 0.01 { format!("${usd:.3}") } else { format!("${usd:.2}") }
+    if usd > 0.0 && usd < 0.01 { format!("${:.3}", js_round(usd, 3)) } else { format!("${:.2}", js_round(usd, 2)) }
+}
+
+/// JavaScript's toFixed rounds half away from zero on the decimal it prints; Rust's
+/// formatter rounds half to even on the binary value. Close enough once nudged.
+fn js_round(x: f64, places: i32) -> f64 {
+    let m = 10f64.powi(places);
+    (x * m + 1e-9_f64.copysign(x)).round() / m
 }
 
 /// "12.4k tok · $0.31", or just the tokens when the engine reports no price (src/app.ts formatUsage)

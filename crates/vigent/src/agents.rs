@@ -43,11 +43,20 @@ pub struct Agents {
     pub races: Vec<crate::race::Race>,
     /// can agent worktrees be copy-on-write here (riftri)? None until checked
     pub storage: Option<worktree::Health>,
+    /// what runs hooks (None: run_hook; tests put a stand-in here, as TypeScript's app.hookRunner)
+    pub hook_runner: Option<HookRunner>,
 }
 
 impl Default for Agents {
     fn default() -> Self {
-        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None, races: vec![], storage: None }
+        Agents { alt: 0, terminal_focused: true, confirm: None, alerts: None, making: vec![], last_stat: None, races: vec![], storage: None, hook_runner: None }
+    }
+}
+
+impl Agents {
+    /// What runs hooks: worktree_created, agent_finished, and the Review area's before_merge.
+    pub fn runner(&self) -> HookRunner {
+        self.hook_runner.clone().unwrap_or_else(|| std::sync::Arc::new(run_hook))
     }
 }
 
@@ -186,6 +195,7 @@ fn real_env(k: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// What a hook did.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct HookResult {
     pub ok: bool,
     /// exit code; None when it was stopped (timeout) or couldn't start
@@ -195,6 +205,9 @@ pub struct HookResult {
     pub took: Duration,
     pub timed_out: bool,
 }
+
+/// Runs a hook: (command, cwd, environment, timeout). Blocking: call it off the UI thread.
+pub type HookRunner = std::sync::Arc<dyn Fn(&str, &Path, &[(String, String)], Duration) -> HookResult + Send + Sync>;
 
 /// Run a hook's command with a shell in `cwd`. Blocking: run it off the UI thread.
 pub fn run_hook(command: &str, cwd: &Path, env: &[(String, String)], timeout: Duration) -> HookResult {
@@ -562,9 +575,9 @@ impl App {
         let a = &mut self.sessions[i];
         a.hold("setting up");
         a.items.push(Item::Info(format!("setting up the worktree: {cmd}")));
-        let (cwd, tx) = (a.path.clone(), self.tx.clone());
+        let (cwd, tx, run) = (a.path.clone(), self.tx.clone(), self.agents.runner());
         std::thread::spawn(move || {
-            let r = run_hook(&cmd, &cwd, &env, WORKTREE_CREATED_TIMEOUT);
+            let r = run(&cmd, &cwd, &env, WORKTREE_CREATED_TIMEOUT);
             let _ = tx.send(Msg::Run(Box::new(move |app: &mut App| {
                 let a = &mut app.sessions[i];
                 if r.ok {
@@ -585,7 +598,7 @@ impl App {
     }
 
     /// The environment hooks see (src/app.ts hookEnv).
-    fn hook_env(&self, i: usize, hook: &str, extra: &[(&str, &str)]) -> Vec<(String, String)> {
+    pub fn hook_env(&self, i: usize, hook: &str, extra: &[(&str, &str)]) -> Vec<(String, String)> {
         let a = &self.sessions[i];
         let works_in = self.works_in(i);
         let mut env = vec![
@@ -624,9 +637,9 @@ impl App {
         };
         let env = self.hook_env(i, "agent_finished", &[("VIGENT_STATE", state)]);
         let cwd = self.works_in(i).map(|w| w.1.clone()).or_else(|| self.root.clone()).unwrap_or_else(|| self.cwd.clone());
-        let tx = self.tx.clone();
+        let (tx, run) = (self.tx.clone(), self.agents.runner());
         std::thread::spawn(move || {
-            let r = run_hook(&cmd, &cwd, &env, AGENT_FINISHED_TIMEOUT);
+            let r = run(&cmd, &cwd, &env, AGENT_FINISHED_TIMEOUT);
             if r.ok {
                 return;
             }

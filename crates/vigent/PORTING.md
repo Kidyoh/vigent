@@ -39,7 +39,8 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 and riftri's inspect/repair/storage accounting (~90 KB of that is
 `storage_accounting` for the "N worktrees: X of files in Y on disk" line;
 `riftri_health` uses riftri's storage probe instead of `doctor`, which would
-add ~100 KB more).
+add ~100 KB more). With Engines (every adapter, pi's RPC session, pickers) and Review
+(diff, hunk review, landing, dashboard) merged on top it is 2,595,432 bytes.
 
 ## Module map
 
@@ -75,7 +76,7 @@ add ~100 KB more).
 | `names.rs` | `agentNameFrom`, `slugify`, `branchName` | names | Sessions |
 | `health.rs` | `App.openHealth` | `:checkhealth` | Engines (engines part), Sessions (worktrees part) |
 | `help.rs` | `App.openHelp` | `:help` | Config |
-| `review.rs` | `src/review.ts`, `hunks.ts`, `hunk-review.ts`, `diffview.ts`, `export.ts` | `Review` state (stub) | Review |
+| `review/` | `src/review.ts`, `hunks.ts`, `hunk-review.ts`, `diffview.ts`, `export.ts`, `hooks.ts` (before_merge), `float.ts` (TextFloat) | `Review` state; `land.rs` merge/PR, `hunks.rs` diff + drop/restore, `diffview.rs`, `hunk_review.rs` (`:review` window), `float.rs` (selectable/jumping float, also the `:race` window), `views.rs` (`:diff` `:review` `:merge` `:pr` `:dash` `:cost`), `hooks.rs` (before_merge), `export.rs` (`:w`), `usage.rs`. Hooks into the App: `review::key` in `App::key`, `review::draw` in `ui::draw` | Review |
 | `windows.rs` | `src/windows.ts`, `line-edit.ts`, `search.ts`, `completion.ts` | `Windows` state (stub) | Windows |
 | `serve.rs` | `src/serve.ts`, `serve-page.ts`, `demo.ts`, `notify.ts` | `Serve` state (stub) | Serve |
 | `ui/mod.rs` | `App.render` | lays out the parts below | Windows |
@@ -150,6 +151,18 @@ area consumes yet (remove your flag from that list when you wire it).
 
 ## Differences to know about
 
+- Review: `:dash` marks waiting agents (and failed ones you aren't on) as new,
+  for TypeScript's `unread` set. `:race` is the Sessions area's (`race.rs`,
+  through `App::start_agent` with each racer's engine and model); its window is
+  Review's `TextFloat` (j/k, Enter opens a racer). Hooks have one runner,
+  `agents::run_hook` (`App::agents.hook_runner` in tests): worktree_created and
+  agent_finished run from agents.rs, before_merge from `review/hooks.rs`. The y/n
+  question is `App::ask` (agents.rs); Review's float (`review/float.rs`) is its
+  own, and Windows can fold it into `ui/floats.rs`. Tab completion after `:race
+  --engines/--models` isn't ported (Windows' completer). The Review area's tests
+  in `test/` (review, hunks, race, counts, usage, and project-config's hook
+  tests) import `dist/`; their cases are mirrored as Rust unit tests under
+  `review/` (counts are the Windows area's).
 - `:theme` with no name shows the theme name; TypeScript opens the picker.
 - `:help` may still have milestone-1 wording (Config area); `:checkhealth`'s
   engines part, the sidebar's and the start screen's engines use the TypeScript text.
@@ -162,9 +175,9 @@ area consumes yet (remove your flag from that list when you wire it).
     `Err` is the message to show; refuse first while it's running, as
     `splitWindow` does) and adds the fork with `app.add_session(fork, true)`.
     `App::on_screen(slot)` is the focused agent only; make it count every
-    window of a split (notifications and races read it). The race and queue
-    lists, `:worktrees` and `:templates` are plain floats until pickers exist
-    (Enter doesn't open/start one yet). `ask()` shows its y/n question as the
+    window of a split (notifications and races read it). The queue list,
+    `:worktrees` and `:templates` are plain floats until pickers exist (Enter
+    doesn't open/start one yet); the race list is Review's selectable float. `ask()` shows its y/n question as the
     message; the TypeScript draws it on the command line with a cursor.
   - Engines: `:model`/`:effort` save to the agent's record through
     `engines::select::persist`, which is `App::persist`, so a restart keeps
@@ -175,8 +188,9 @@ area consumes yet (remove your flag from that list when you wire it).
     `App::restore`, so `--engine` and config's `engine` decide where they move.
     `:tree` rows come from `tree::flatten`; the pi session doesn't hand it
     pi's tree yet.
-  - Serve: `:usage`/`:cost` read `Session::tokens`/`cost` (restored from the
-    record) and `session::total_usage`/`format_usage`.
+  - Review: `:dash`/`:cost`/`:usage` read `Session::tokens`/`cost` (restored
+    from the record; `cost` is `None` until the engine prices a run) and
+    `session::total_usage`/`format_usage`.
 - Kill keeps the slot (`Session::closed`): `App::open()` is the list the
   TypeScript's `sessions` array is; forks name their original by slot (`fork_of`).
 - An agent that finishes goes idle, and unread (◆) when you weren't looking,
@@ -240,7 +254,7 @@ Core / windows and buffers:
 - [ ] `:split` `:sp`, `:vsplit` `:vs` `:vsp` (with an agent: fork) — **Windows**
 - [ ] `:only` `:on`, `:close` `:clo`, `:wincmd` `:winc` — **Windows**
 - [ ] `:bnext` `:bn`, `:bprevious` `:bprev` `:bp` `:bNext` `:bN`, `:buffer` `:b <agent>` — **Windows**
-- [ ] `:ls` `:buffers` `:files`, `:dash` `:dashboard` — **Windows**
+- [ ] `:ls` `:buffers` `:files` — **Windows**; [x] `:dash` `:dashboard` (and `app.dashboard`) — **Review**
 - [ ] `:noh` `:nohl` `:nohlsearch` — **Windows**
 - [ ] `:marks`, `:jumps`, `:his` `:history` — **Windows**
 
@@ -249,7 +263,7 @@ Sessions:
 - [x] `:kill` `:kill!` `:bdelete` `:bd` — **Sessions**
 - [x] `:queue [prompt]` (the list is a float, not a picker) — **Sessions**
 - [x] `:pause`, `:resume` — **Sessions**
-- [~] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` (`:race` is a float: no Enter to open a racer; Tab completion is Windows'; `--models` reads `Adapter::models`) — **Sessions**
+- [x] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` (the race window is Review's: Enter opens a racer; Tab completion is Windows'; `--models` reads `engines::choices`; `--demo` races aren't ported: Serve) — **Sessions**, window **Review**
 - [~] `:templates` `:template` `:tpl [name]` (no name: a float listing them, not a picker) — **Sessions**
 - [~] `:tree` (and fork from a point): what CLI agents say; the tree itself is pi's (src/tree.ts, with the pi session) — **Sessions** with **Engines**
 - [x] `:worktrees` `:worktree` `:wt`, `:worktree remove[!] <branch>` — **Sessions**
@@ -264,11 +278,11 @@ Engines:
 - [~] `:pi` `:extensions` (the float lists what pi loaded; Enter doesn't start a prompt yet) — **Engines**
 
 Review:
-- [ ] `:diff`, `:diff split|vert|vertical|side` — **Review**
-- [ ] `:review` `:hunks` — **Review**
-- [ ] `:merge [--no-squash]` (before_merge hook) — **Review**
-- [ ] `:pr` (before_merge hook) — **Review**
-- [ ] `:w` `:write [file]`, `:w!` `:write!` (transcript as Markdown) — **Review**
+- [x] `:diff`, `:diff split|vert|vertical|side` (`]c` `[c` jump, `s` switches layout; no Nerd Font file icons yet) — **Review**
+- [x] `:review` `:hunks` (`x` drop hunk, `X` drop file, `u` undo, `j/k ]c [c n N Tab`, `J/K`, `g G`, `q`) — **Review**
+- [x] `:merge [--no-squash]` (before_merge hook; rolls back on conflict; commits what the agent left) — **Review**
+- [x] `:pr` (before_merge hook; gh, else the compare URL) — **Review**
+- [x] `:w` `:write [file]`, `:w!` `:write!` (transcript as Markdown; tool output isn't kept by Rust's Session yet, so tool blocks are empty) — **Review**
 
 Config:
 - [~] `:colorscheme` `:colo` `:theme [name]` (picker without a name), `:theme save[!] [name]` — **Config**
@@ -284,7 +298,7 @@ Config:
 
 Serve:
 - [ ] `:serve [port] [local]`, `:serve stop`, serve info float — **Serve**
-- [ ] `:cost` `:usage` — **Serve**
+- [x] `:cost` `:usage` (usage float) — **Review**
 
 ### Keys (`src/keys.ts` `DEFAULT_KEYS`; every one is bound, handlers below)
 
@@ -333,7 +347,7 @@ below means it's also *used*.
 - [ ] `[highlights]` (tables, `:hi` strings, links) — **Config**
 - [x] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
 - [x] `[templates.<name>]` `prompt`, `description`, `engine`, `model`, `effort`, `worktree` (+ built-ins fix, test, review, explain) — **Sessions**
-- [x] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions** (`agents::run_hook`); [ ] `before_merge` — **Review**
+- [x] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions** (`agents::run_hook`); `before_merge` — **Review** (`review/hooks.rs`)
 - [ ] `[statusline]` / `[winbar]` `left`, `right` — **Windows**
 - [ ] `[commands]` — **Config**
 - [ ] `[style]` `sidebar`, `messages`, `tool_icons`, `separators`, `user_label`, `[style.icons]`, `[style.nerd_icons]` — **Windows**
@@ -362,12 +376,12 @@ below means it's also *used*.
 - [x] an agent that finishes while you look elsewhere is unread (◆) until you open it; `waiting` is "needs you", as in TypeScript — **Sessions**
 - [x] agent records saved (made, conversation id, totals and settings at the end of each run) and reopened; usage totals survive a restart — **Sessions**
 - [x] `:kill` marks the record detached; `:attach` reopens — **Sessions**
-- [x] races (`src/race.ts`): racers start when every worktree is made, the race-over message ranks them, the bell for unseen ones — **Sessions**
+- [x] races (`src/race.ts`): racers start when every worktree is made, the race-over message ranks them, the bell for unseen ones — **Sessions**; the race window — **Review**
 - [ ] conversation tree (`src/tree.ts`): pi's, waits for the pi session — **Sessions** with **Engines**
 - [x] riftri storage health in `:checkhealth` (`riftriHealth`) and the `:worktrees` footer — **Sessions**
-- [ ] diff view, hunk review, merge, PR, transcript export — **Review**
+- [x] diff view, hunk review, merge, PR, transcript export, dashboard, usage — **Review**
 - [ ] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`), icons (`src/icons.ts`), styles (`src/style.ts`), pickers (`src/picker.ts`), confirm prompts — **Windows**
 - [x] desktop notification / bell when an agent finishes elsewhere, focus reporting, `[ui] notify` (`src/notify.ts`, in agents.rs) — **Sessions**
 - [ ] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`) — **Serve**
 - [ ] demo sessions (`src/demo.ts`, `DemoSession`) — **Serve**
-- [ ] usage float (`:usage`) — **Serve**
+- [x] usage float (`:usage`) — **Review**

@@ -10,7 +10,6 @@ use crate::agents::{NewAgent, alert_sequence, took};
 use crate::app::App;
 use crate::engines;
 use crate::session::{Item, State};
-use crate::ui::floats::Float;
 
 /// One entrant: an engine, and a model for it when you asked for one (`claude:opus`).
 #[derive(Clone, Debug, PartialEq)]
@@ -424,58 +423,76 @@ impl App {
 
     /// `:race`: the racers side by side, first to finish first.
     pub fn open_race(&mut self) {
+        use crate::review::float::{FLine, TextFloat};
+        use crate::review::{plain_preview, screen, state_glyph, state_group, state_name};
+        use crate::ui::text::{fit, pad};
         let focused = self.focused().map(|s| s.slot);
         let Some(ri) = self.race_of(focused).or_else(|| self.race_of(None)) else {
             return self.say("no race yet (:race <task> runs it on every engine you're signed in to)", "Comment");
         };
         let r = &self.agents.races[ri];
-        let cell = |t: &str, w: usize| format!("{:<w$}", crate::ui::text::fit(t, w - 1));
-        let mut lines: Vec<(String, &'static str)> = vec![(format!("task  {}", crate::ui::text::fit(&r.task.replace('\n', " "), 96)), "NormalFloat"), (String::new(), "Normal")];
-        lines.push((format!("   {}{}{}{}usage", cell("racer", 26), cell("state", 10), cell("time", 10), cell("changes", 22)), "Comment"));
-        for (n, &i) in r.order().iter().enumerate() {
+        let cell = |t: &str, w: usize| pad(&fit(t, w - 1), w);
+        let mut lines: Vec<FLine> = vec![
+            vec![("task  ".into(), "Comment"), (fit(&plain_preview(&r.task), 96), "NormalFloat")],
+            vec![],
+            vec![(format!("   {}{}{}{}usage", cell("racer", 26), cell("state", 10), cell("time", 10), cell("changes", 22)), "Comment")],
+        ];
+        let mut rows = vec![];
+        let order = r.order();
+        for (n, &i) in order.iter().enumerate() {
             let s = &self.sessions[i];
             let done = r.finished_at(i);
-            let glyph = match s.state {
-                State::Running => "●",
-                State::Waiting => "◐",
-                State::Idle => "○",
-                State::Paused => "‖",
-                State::Error => "✗",
-            };
-            let state = if done.is_none() && s.state != State::Running {
+            let g = state_group(s.state);
+            let word = if done.is_none() && s.state != State::Running {
                 "starting"
+            } else if s.state == State::Idle {
+                "done"
             } else {
-                match s.state {
-                    State::Idle => "done",
-                    State::Running => "running",
-                    State::Waiting => "waiting",
-                    State::Paused => "paused",
-                    State::Error => "error",
-                }
+                state_name(s.state)
             };
+            // files too, from the worktree; the sidebar's +/- otherwise
+            let (files, added, removed) = if s.made.is_some() && s.path.is_dir() { crate::review::hunks::diff_stat(&s.path, &s.base) } else { (0, s.stat.0, s.stat.1) };
             let time = took(done.unwrap_or_else(Instant::now).duration_since(r.started));
-            let changes = if s.stat.0 > 0 || s.stat.1 > 0 { format!("+{} −{}", s.stat.0, s.stat.1) } else { "no changes".into() };
-            let usage = if s.tokens > 0 { crate::session::format_usage(s.tokens, s.cost) } else { String::new() };
-            let num = if done.is_none() { " ".to_string() } else { (n + 1).to_string() };
-            let group = match s.state {
-                State::Running => "String",
-                State::Waiting => "WarningMsg",
-                State::Error => "ErrorMsg",
-                _ => "NormalFloat",
-            };
-            lines.push((format!("{num} {glyph} {}{}{}{}{usage}", cell(&r.label(i), 25), cell(state, 10), cell(&time, 10), cell(&changes, 22)), group));
+            rows.push(lines.len());
+            let mut line: FLine = vec![
+                (format!("{} ", if done.is_none() { " ".to_string() } else { (n + 1).to_string() }), "LineNr"),
+                (state_glyph(self, s.state).to_string(), g),
+                (format!(" {}", cell(&r.label(i), 25)), "Title"),
+                (cell(word, 10), g),
+                (cell(&time, 10), if done.is_none() { "Comment" } else { "NormalFloat" }),
+            ];
+            if added > 0 || removed > 0 || files > 0 {
+                let head = format!("+{added} −{removed} ");
+                line.push((format!("+{added} "), "Added"));
+                line.push((format!("−{removed} "), "Removed"));
+                let what = if files == 1 { "1 file".to_string() } else { format!("{files} files") };
+                line.push((cell(&what, 1.max(22usize.saturating_sub(head.chars().count()))), "Comment"));
+            } else {
+                line.push((cell("no changes", 22), "Comment"));
+            }
+            line.push((if s.tokens > 0 { crate::session::format_usage(s.tokens, s.cost) } else { String::new() }, "Comment"));
+            lines.push(line);
             let last = s.items.iter().rev().find_map(|it| match it {
-                Item::Text(t) => Some(t.replace('\n', " ")),
+                Item::Text(t) => Some(t.as_str()),
                 _ => None,
             });
-            lines.push((format!("     {}", last.map(|t| crate::ui::text::fit(&t, 96)).unwrap_or_else(|| "(no reply yet)".into())), "Comment"));
+            lines.push(vec![("     ".into(), "NormalFloat"), (last.map(|t| fit(&plain_preview(t), 96)).unwrap_or_else(|| "(no reply yet)".into()), "Comment")]);
         }
-        lines.push((String::new(), "Normal"));
+        lines.push(vec![]);
         let running = r.racers.iter().filter(|&&i| r.finished_at(i).is_none()).count();
-        let head = if running > 0 { format!("{running} of {} still running · ", r.racers.len()) } else { format!("{} racers, all done · ", r.racers.len()) };
-        lines.push((format!("{head}then :diff, :review · :race pick keeps the one you're on"), "Comment"));
-        let title = format!("Race · {}", crate::ui::text::fit(&crate::names::agent_name_from(&r.task), 40));
-        self.float = Some(Float::new(&title, lines));
+        let total = r.racers.len();
+        lines.push(vec![
+            (if running > 0 { format!("{running} of {total} still running · ") } else { format!("{total} racers, all done · ") }, "Comment"),
+            ("j/k move · Enter open · then :diff, :review · ".into(), "Comment"),
+            (":race pick".into(), "Special"),
+            (" keeps the one you're on".into(), "Comment"),
+        ]);
+        let at = focused.and_then(|f| order.iter().position(|&s| s == f)).unwrap_or(0);
+        let initial = rows.get(at).copied();
+        let title = format!("Race · {}", fit(&crate::names::agent_name_from(&r.task), 40));
+        let width = 112.min(screen().0.saturating_sub(4));
+        // the Review area's window: j/k pick a racer, Enter opens it
+        crate::review::open(self, TextFloat::new(title, lines, width).select_rows(rows, order, initial));
     }
 
     /// `:race pick`: keep the focused racer; the others go, with their worktrees and branches.

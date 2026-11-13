@@ -156,6 +156,10 @@ impl App {
         if self.answer(&k) {
             return;
         }
+        // the Review area's windows (:diff, :review, :dash, :cost, the race list)
+        if crate::review::key(self, &k) {
+            return;
+        }
         if self.engines.picker.is_some() {
             return engines::picker::key(self, k);
         }
