@@ -142,18 +142,26 @@ area consumes yet (remove your flag from that list when you wire it).
 
 ## Differences to know about
 
+- The binary ignores `RIFTRI_BINARY` (riftri is built in), so pty tests that set
+  it to a missing path to get plain git worktrees get riftri mounts instead, and
+  their `after` hooks fail with `EBUSY` deleting the temp folder (custom-engines,
+  pi-live, ...). Unmount what a run leaves. Sessions area: treat a missing
+  `RIFTRI_BINARY` as "no riftri", as src/riftri.ts does.
+- When the terminal hangs up, crossterm reads EOF in a loop; tui.rs now exits
+  1.5 s after SIGHUP/SIGTERM/SIGINT if the loop hasn't, and stops vigent's
+  process group (its agents) when it leads one. Before, a killed pty left vigent
+  spinning, with its pi still running.
+- `:model` in an agent changes the model it uses from its next prompt;
+  agent records (`records.rs`) are updated through `engines::select::persist`
+  once Sessions writes them.
+
 - Rust's `:new <task>` names the agent after the task *and sends it as the
   first prompt*; TypeScript's `:new <name>` only starts an agent by that name.
   Sessions area: match TypeScript (check `test/e2e.test.mjs` and the help text).
 - `:new!` (an agent in your checkout) says `E477: No ! allowed` for now.
 - `:theme` with no name shows the theme name; TypeScript opens the picker.
-- Claude detection is the milestone-1 version (version + `auth status`); port
-  `detectClaude`'s API-key fallbacks and `detail` strings.
-- The Claude parser doesn't emit `Message`, `Thinking`, `TurnEnd`,
-  `TurnStart`, `Denied` or the early `content_block_start` tool line yet.
-- `:checkhealth`, `:help`, the sidebar and the start screen keep milestone-1
-  wording ("next milestone", "milestone 2 adds the rest"); replace it with the
-  TypeScript text as engines land.
+- `:help` may still have milestone-1 wording (Config area); `:checkhealth`'s
+  engines part, the sidebar's and the start screen's engines use the TypeScript text.
 
 ## Pty tests and where they stand
 
