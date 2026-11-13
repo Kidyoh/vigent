@@ -54,7 +54,19 @@ reader account for the rest. `toml_edit` would have added ~170 KB, and
 | `commands/` | `App.exec` | ex commands, one file per area | each area its file |
 | `config.rs` | `src/config.ts`, `templates.ts`, `commands.ts`, `layout.ts`, `style.ts`, `hooks.ts` (names) | every section into structs, warnings, gating, project layering | Config |
 | `toml.rs` | smol-toml | TOML reader into `Val` (ordered tables) | Config |
-| `theme.rs`, `themes.txt` | `src/theme.ts`, `src/builtin-themes.ts` | built-in themes (themes.txt is written by `scripts/export-themes.mjs`) | Config |
+| `trust.rs` | `src/trust.ts` | trusted project files (sha256), `:trust`, `vigent trust` | Config |
+| `config_edit.rs` | `src/config-edit.ts` | one value set in config.toml, comments kept | Config |
+| `settings.rs` | `src/settings.ts`, `openSettings` | the settings panel (also :permissions'), `ConfigState` (`app.cfg`) | Config |
+| `permissions.rs` | `src/permissions.ts`, `openPermissions` | permission helpers, the panel, saving and reloading | Config |
+| `looks.rs` | `openThemePicker`, `saveTheme`, `execHighlight`, `applySetCommand` | :colorscheme picker, :theme save, :hi, :set | Config |
+| `style.rs` | `src/style.ts`, `src/icons.ts`, `ICONS` | the style in effect and the glyphs (`style::icons(app)`) | Config |
+| `layout.rs` | `src/layout.ts`, `renderStatusline`, `renderWinbar` | statusline and winbar parts | Config |
+| `templates.rs` | `src/templates.ts` | templates, `:templates` picker, `templates::start` | Config |
+| `usercmd.rs` | `src/commands.ts`, `runShell`, `src/hooks.ts` runHook | your commands, `:!cmd`, `run_hook` | Config |
+| `demo.rs` | `src/demo.ts`, `DemoSession` | scripted agents for `--demo` | Config |
+| `color.rs`, `vimcolors.rs`, `suggest.rs` | `src/color.ts`, `src/vimcolors.ts`, `src/suggest.ts` | colors, :hi syntax and .vim files, did-you-mean | Config |
+| `import.rs`, `follow.rs`, `themecli.rs` | `src/import.ts`, `src/follow.ts`, `src/theme-new.ts`, themeCommand | `vigent theme import/new/path/list`, following the editor | Config |
+| `theme.rs`, `themes.txt` | `src/theme.ts`, `src/palette.ts`, `src/builtin-themes.ts` | the theme engine (links, derived groups, overrides, transparency, 256 colors), theme files, palettes; themes.txt (with `@palette`/`@style` lines) is written by `scripts/export-themes.mjs` | Config |
 | `worktree.rs` | `src/worktree.ts`, `src/riftri.ts` | plan/make/list/remove worktrees, diff stat | Sessions |
 | `names.rs` | `agentNameFrom`, `slugify`, `branchName` | names | Sessions |
 | `health.rs` | `App.openHealth` | `:checkhealth` | Engines (engines part), Sessions (worktrees part) |
@@ -157,14 +169,14 @@ non-binary parts of the others. These fail and are the areas' targets:
 | custom-engines 7: the real vigent runs a custom engine from config.toml | Engines |
 | e2e 2: first run ... follows up, and comes back after a restart | Sessions (Restore), Engines |
 | e2e 3: @ in a prompt: pick a file | Windows (line editor, attach picker) |
-| e2e 5: no agent CLI and no API key: the demo starts | Serve (demo) |
+| e2e 5: no agent CLI and no API key: the demo starts | Config (done) |
 | fork 5: a split forks once | Windows (splits), Sessions (fork) |
-| layout 6: sidebar on the right and a statusline of your own | Windows |
-| permissions-panel 4: two vigents open at once | Engines |
+| layout 6: sidebar on the right and a statusline of your own | Config (done) |
+| permissions-panel 4: two vigents open at once | Config (done) |
 | pi-live 1: vigent --engine pi | Engines |
-| project-config 12: untrusted .vigent.toml, :trust, vigent trust | Config |
+| project-config 12: untrusted .vigent.toml, :trust, vigent trust | Config (done) |
 | reopen-without-pi 1-4 | Sessions (Restore), Engines |
-| user-commands 5: a [commands] shell command from config.toml | Config |
+| user-commands 5: a [commands] shell command from config.toml | Config (done) |
 | worktree-background 2: keys while a worktree is made, the prompt waits | Sessions |
 
 ## Parity checklist
@@ -174,33 +186,33 @@ non-binary parts of the others. These fail and are the areas' targets:
 ### CLI (`src/cli.ts`)
 
 - [x] `vigent --version` / `-v` / `version` (no stale-build warning: a binary has no clone) — **Config**
-- [x] `vigent --help` / `-h` (Rust's own text; TypeScript's lists every subcommand) — **Config**
+- [x] `vigent --help` / `-h` (src/cli.ts's text word for word, `help.txt`; `--help`/`--version` anywhere on the line) — **Config**
 - [~] `vigent [folder]` — **Sessions**
 - [x] `--theme <name>` — **Config**
 - [~] `--engine <id>`: unknown engine exits 1 as in TypeScript; a known engine this build can't run exits 1 too; `claude` runs — **Engines**
 - [ ] `--model <id>` — **Engines**
-- [ ] `--demo` (and the automatic demo when nothing can run agents) — **Serve**
+- [x] `--demo` (and the automatic demo when nothing can run agents; `demo.rs`) — **Config**
 - [ ] `--serve [--local]` — **Serve**
-- [x] `vigent theme list` (built-ins; installed themes in `~/.config/vigent/themes` too) — **Config** `[~]`
-- [ ] `vigent theme path` — **Config**
-- [ ] `vigent theme new <name> [--from <theme>] [--palette] [--transparent|--no-transparent]` — **Config**
-- [ ] `vigent theme import [name|file] [--as <name>] [--vim|--nvim] [--light|--dark] [--clean]` — **Config**
+- [x] `vigent theme list` (built-ins marked, installed themes in `~/.config/vigent/themes` too) — **Config**
+- [x] `vigent theme path` — **Config**
+- [x] `vigent theme new <name> [--from <theme>] [--palette] [--transparent|--no-transparent]` — **Config**
+- [x] `vigent theme import [name|file] [--as <name>] [--vim|--nvim] [--light|--dark] [--clean]` — **Config**
 - [x] `vigent worktree list` (`worktrees`, `wt`) — **Sessions**
 - [x] `vigent worktree remove|rm <branch> [--force]` — **Sessions**
 - [ ] `vigent worktree prune` — **Sessions**
 - [ ] `vigent worktree gc` — **Sessions**
-- [ ] `vigent config init` (writes `CONFIG_TEMPLATE`) — **Config**
-- [ ] `vigent config check` — **Config**
-- [ ] `vigent trust` — **Config**
-- [~] startup: config + project config + keymap warnings on the message line (`app.notify`) — **Config**
+- [x] `vigent config init` (writes `CONFIG_TEMPLATE`, `config_template.toml` exported from dist/config.js) — **Config**
+- [x] `vigent config check` — **Config**
+- [x] `vigent trust` — **Config**
+- [x] startup: config + project config + keymap warnings on the message line (`app.notify`), the demo note first — **Config**
 - [ ] startup: reopen agents whose worktrees remain (`reopenableAgents`, riftri views first), engine fallback when pi is gone — **Sessions**
-- [ ] startup: `theme = "nvim"|"vim"` follows your editor (`src/follow.ts`) — **Config**
+- [x] startup: `theme = "nvim"|"vim"` follows your editor (`follow.rs`) — **Config**
 
 ### Ex commands (`App.exec` in `src/app.ts`)
 
 Core / windows and buffers:
 - [x] `:q` `:quit` `:x` `:wq` `:qa` `:qall` `:xa` `:wqa` (E37 when running), `:q!` `:quit!` `:qa!` `:qall!` — core; closing a split first is **Windows**
-- [x] `:help` `:h` (list every binding, yours too) — **Config** `[~]`
+- [x] `:help` `:h` (every binding from the keymap, yours first, then EX_HELP) — **Config**
 - [ ] `:split` `:sp`, `:vsplit` `:vs` `:vsp` (with an agent: fork) — **Windows**
 - [ ] `:only` `:on`, `:close` `:clo`, `:wincmd` `:winc` — **Windows**
 - [ ] `:bnext` `:bn`, `:bprevious` `:bprev` `:bp` `:bNext` `:bN`, `:buffer` `:b <agent>` — **Windows**
@@ -214,7 +226,7 @@ Sessions:
 - [ ] `:queue [prompt]` — **Sessions**
 - [ ] `:pause`, `:resume` (session.rs has pause/resume/hold/release) — **Sessions**
 - [ ] `:race <task> [--engines a,b] [--models x,y] [-t tpl]`, `:race`, `:race pick`, `:race! pick` — **Sessions**
-- [ ] `:templates` `:template` `:tpl [name]` — **Sessions**
+- [x] `:templates` `:template` `:tpl [name]` (`templates.rs`; `templates::start` is what `:new -t` calls) — **Config**
 - [ ] `:tree` (and fork from a point) — **Sessions**
 - [ ] `:worktrees` `:worktree` `:wt`, `:worktree remove[!] <branch>` — **Sessions**
 - [ ] `:attach <branch>` — **Sessions**
@@ -224,7 +236,7 @@ Engines:
 - [ ] `:model` `:mo [model]` (picker without an argument) — **Engines**
 - [ ] `:engine` `:eng [id]` — **Engines**
 - [ ] `:effort` `:think [level]` — **Engines**
-- [ ] `:permissions` `:permission` `:perms` `:perm`, `allow <rule>`, `remove <rule>` — **Engines**
+- [x] `:permissions` `:permission` `:perms` `:perm`, `allow <rule>`, `remove <rule>` (`permissions.rs`: saved at once, reloaded first so two vigents don't undo each other) — **Config**
 - [ ] `:pi` `:extensions` — **Engines**
 
 Review:
@@ -235,16 +247,16 @@ Review:
 - [ ] `:w` `:write [file]`, `:w!` `:write!` (transcript as Markdown) — **Review**
 
 Config:
-- [~] `:colorscheme` `:colo` `:theme [name]` (picker without a name), `:theme save[!] [name]` — **Config**
-- [ ] `:hi` `:highlight` `:hi!` `:highlight!` (`Group guifg=… guibg=… gui=…`, `link A B`, `clear`) — **Config**
-- [ ] `:set` `:se` (`applySetCommand`: `opt`, `noopt`, `opt!`, `invopt`, `opt=val`, `opt?`, `opt&`) — **Config**
-- [ ] `:settings` `:options` `:prefs` — **Config**
-- [ ] `:let mapleader = "<key>"` — **Config**
-- [ ] `:map` `:nmap` `:imap` `:cmap` `:vmap` `:xmap` and `…noremap` — **Config**
-- [ ] `:unmap` `:nunmap` `:iunmap` `:cunmap` `:vunmap` `:xunmap` — **Config**
-- [ ] `:command[!]` `:com[!]`, `:delcommand` `:delc`, user commands (`Name args`) — **Config**
-- [ ] `:!{command}` (in the agent's worktree) — **Config**
-- [ ] `:trust` — **Config**
+- [x] `:colorscheme` `:colo` `:theme [name]` (picker with live preview without a name), `:theme save[!] [name]` — **Config**
+- [x] `:hi` `:highlight` `:hi!` `:highlight!` (`Group guifg=… guibg=… gui=…`, `link A B`, `clear`) — **Config**
+- [x] `:set` `:se` (`applySetCommand`: `opt`, `noopt`, `opt!`, `invopt`, `opt=val`, `opt?`, `opt&`) — **Config**
+- [x] `:settings` `:options` `:prefs` (`settings.rs`; w saves with `config_edit.rs`, comments kept) — **Config**
+- [x] `:let mapleader = "<key>"` — **Config**
+- [x] `:map` `:nmap` `:imap` `:cmap` `:vmap` `:xmap` and `…noremap` — **Config**
+- [x] `:unmap` `:nunmap` `:iunmap` `:cunmap` `:vunmap` `:xunmap` — **Config**
+- [x] `:command[!]` `:com[!]`, `:delcommand` `:delc`, user commands (`Name args`) — **Config**
+- [x] `:!{command}` (in the agent's worktree; `usercmd.rs`) — **Config**
+- [x] `:trust` — **Config**
 
 Serve:
 - [ ] `:serve [port] [local]`, `:serve stop`, serve info float — **Serve**
@@ -268,7 +280,7 @@ Normal mode:
 - [ ] `<C-h>` `<BS>` `<C-l>` `<C-j>` `<C-k>`, all `<C-w>…` window keys, `<leader>|` `<leader>-` — **Windows**
 - [ ] `<leader>e` sidebar.focus and the sidebar's own keys (j k Enter Esc l o d a p w …) — **Windows**
 - [ ] `<leader>n` `:new `, `<leader>q` `:queue ` (open the command line: works), `<leader>d` `:diff`, `<leader>m` `:merge`, `<leader>p` `:pr`, `<leader>D` `:dash`, `<leader>s` `:settings`, `<leader>r` `:review`, `<leader>T` `:templates`, `<leader>M` `:model`, `<leader>R` `:effort`, `<leader>E` `:engine` — each command's area
-- [ ] `<leader>t` theme.picker — **Config**; `<leader>u` session.tree — **Sessions**
+- [x] `<leader>t` theme.picker — **Config**; `<leader>u` session.tree — **Sessions**
 - [x] `ZZ` `ZQ` app.quit / app.quit_force, `q` app.quit_hint — core
 - [~] start screen keys: [x] `i` `n` `c` `?` `q`; [ ] `T` `t` `s` `m` `e` `E` — each area
 - [ ] which-key hint after `<leader>` (`[ui] whichkey`) — **Windows**
@@ -290,19 +302,19 @@ below means it's also *used*.
 - [ ] `model` (pi's model) — **Engines**
 - [ ] `engine` (`auto`, a built-in, or a custom one) — **Engines**
 - [x] `leader` / `mapleader` — **Config**
-- [ ] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position`, `number`, `tilde`, `icons`, `termguicolors`, `transparent`, `whichkey` — **Windows** (`[x]` `timeoutlen`); `notify` — **Serve**
+- [~] `[ui]` `sidebar`, `sidebar_width`, `sidebar_position` (`[x]`, ui/mod.rs), `termguicolors`, `transparent` (`[x]`, theme.rs), `icons` (`[x]` glyph tables in style.rs), `number`, `tilde`, `whichkey` — **Windows** (`[x]` `timeoutlen`); `notify` — **Serve**
 - [ ] `[engines.<id>]` `args`, `model`, `effort` — **Engines**; `allow`, `ask` — **Engines**
 - [ ] `[engines.<id>]` with `command`: `name`, `output`, `model_args`, `models`, `resume_args` — **Engines**
 - [x] `[keys]`, `[keys.normal|insert|visual|command]` — **Config**
-- [ ] `[highlights]` (tables, `:hi` strings, links) — **Config**
+- [x] `[highlights]` (tables, `:hi` strings, links) — **Config**
 - [ ] `[worktree]` `enabled`, `dir`, `branch`, `base`, `backend` — **Sessions**
 - [ ] `[templates.<name>]` `prompt`, `description`, `engine`, `model`, `effort`, `worktree` (+ built-ins fix, test, review, explain) — **Sessions**
 - [ ] `[hooks]` `worktree_created` (holds the first prompt), `agent_finished` — **Sessions**; `before_merge` — **Review**
-- [ ] `[statusline]` / `[winbar]` `left`, `right` — **Windows**
-- [ ] `[commands]` — **Config**
-- [ ] `[style]` `sidebar`, `messages`, `tool_icons`, `separators`, `user_label`, `[style.icons]`, `[style.nerd_icons]` — **Windows**
-- [~] project `.vigent.toml` layered over yours, gated until trusted (`is_trusted` stub) — **Config**
-- [ ] theme files in `~/.config/vigent/themes` (`.toml`, `.json`, `.vim`), `extends`, palettes, `[style]` in themes — **Config**
+- [x] `[statusline]` / `[winbar]` `left`, `right`, powerline shapes (`layout.rs`) — **Config**
+- [x] `[commands]` — **Config**
+- [~] `[style]` `sidebar`, `messages`, `tool_icons`, `separators`, `user_label`, `[style.icons]`, `[style.nerd_icons]`: resolved with the theme's (`style::resolve`, `style::icons`), separators drawn; cards/compact sidebar and labeled/bubble messages are for the sidebar and transcript to draw — **Windows**
+- [x] project `.vigent.toml` layered over yours, gated until trusted (`trust.rs`: sha256 in `$XDG_STATE_HOME/vigent/trusted.json`) — **Config**
+- [x] theme files in `~/.config/vigent/themes` (`.toml`, `.json`, `.vim`), `extends`, palettes, `[style]` in themes — **Config**
 
 ### Engines
 
@@ -333,5 +345,5 @@ below means it's also *used*.
 - [ ] splits, sidebar focus, search, VISUAL, folds, marks, jumps, tool output folding, markdown (`src/markdown.ts`), icons (`src/icons.ts`), styles (`src/style.ts`), pickers (`src/picker.ts`), confirm prompts — **Windows**
 - [ ] desktop notification / bell when an agent finishes elsewhere, focus reporting (`src/notify.ts`) — **Serve**
 - [ ] `:serve` web page over std's `TcpListener` (`src/serve.ts`, `src/serve-page.ts`) — **Serve**
-- [ ] demo sessions (`src/demo.ts`, `DemoSession`) — **Serve**
+- [x] demo sessions (`src/demo.ts`, `DemoSession`; `demo.rs`) — **Config**
 - [ ] usage float (`:usage`) — **Serve**

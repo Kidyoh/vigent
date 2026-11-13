@@ -1,0 +1,157 @@
+# vigent config: ~/.config/vigent/config.toml
+# Reference: https://github.com/farming-labs/vigent/blob/main/docs/config.md
+# Check it any time with:  vigent config check
+
+# --- Theme -----------------------------------------------------------------
+# Built-in: default, lazyvim (transparent), tokyonight, tokyonight-moon, gruvbox,
+# catppuccin, catppuccin-latte, nord, rose-pine, kanagawa. Or any theme in ~/.config/vigent/themes, e.g. one made
+# with  vigent theme import  (your nvim/vim colorscheme) or  vigent theme new.
+# "nvim" (or "vim") follows your editor: the colorscheme your config and plugins
+# set (AstroNvim, LazyVim, NvChad...), updated each time vigent starts.
+theme = "default"
+
+# Model used for new pi agents.
+# model = "claude-sonnet-4-5"
+
+# --- Engines ---------------------------------------------------------------
+# What runs new agents: a coding agent you already have installed and signed
+# in: "claude" (Claude Code), "codex", "opencode", "pi", or one of your own.
+# "auto" picks the first signed-in CLI (your own login), else pi if it has an API key.
+# Per agent: :new fix the race --engine codex.   Status: :checkhealth
+engine = "auto"
+
+# Each CLI runs as it is, with its own login. Extra arguments and a model:
+# [engines.claude]
+# args = ["--permission-mode", "acceptEdits"]   # the default
+# model = "sonnet"
+# allow = ["Bash(gh:*)", "Bash(cargo:*)"]   # commands Claude Code may run without asking
+# ask = true   # when it's refused a command: allow once / always / no, then retry
+# [engines.codex]
+# args = ["-c", 'sandbox_mode="workspace-write"']  # the default
+# [engines.opencode]
+# model = "anthropic/claude-sonnet-4-5"
+# Any other agent CLI, with a command; {prompt} is the prompt:
+# [engines.gemini]
+# name = "Gemini CLI"
+# command = ["gemini", "--yolo", "-p", "{prompt}"]
+# model_args = ["-m", "{model}"]
+# models = ["gemini-2.5-pro", "gemini-2.5-flash"]
+
+# --- Hooks -----------------------------------------------------------------
+# Commands at points in an agent's life, run in its worktree. They see
+# VIGENT_AGENT, VIGENT_BRANCH, VIGENT_WORKTREE, VIGENT_REPO, VIGENT_ENGINE
+# (and VIGENT_STATE for agent_finished). A project can set them in its own
+# .vigent.toml too, once you :trust it.
+# [hooks]
+# worktree_created = "npm ci"     # before the agent's first prompt goes out
+# before_merge = "npm test"       # :merge and :pr only if it passes
+# agent_finished = "say done"     # whenever an agent stops
+
+# --- Commands --------------------------------------------------------------
+# Your own ex commands, like vim's :command. Names start with a capital letter;
+# {args} is what you type after the name. "!" runs a shell command in the
+# agent's worktree (from a project's .vigent.toml, once you :trust it).
+# [commands]
+# Review = "new -t review {args}"
+# Test = "!npm test"
+# Land = ["!npm test", "pr"]      # one after another; a failing shell step stops the rest
+
+# --- Templates -------------------------------------------------------------
+# Prompts you start agents with often. :new -t fix <task> starts an agent and
+# sends the prompt, {task} replaced by what you typed; :templates picks one.
+# Built in: fix, test, review, explain (one of yours with the same name
+# replaces it). engine, model, effort and worktree are optional.
+# [templates.migrate]
+# description = "a database migration, with a rollback"
+# prompt = "Write a migration that {task}. Include the rollback, and test both."
+# engine = "claude"
+# effort = "high"
+
+# --- Leader ----------------------------------------------------------------
+# What <leader> means in [keys]. Vim's default is "\".
+leader = "<Space>"
+
+# --- Options (also live: :set nonumber, :set sidebar_width=40, ...) --------
+[ui]
+sidebar = true
+sidebar_width = 30
+sidebar_position = "left"   # or "right"
+number = true          # session numbers in the sidebar
+tilde = true           # ~ on empty sidebar rows
+icons = "unicode"      # "nerd" for Nerd Font icons (like AstroNvim/LazyVim), "ascii" for fonts without box-drawing characters
+timeoutlen = 1000      # ms to wait for the rest of a multi-key mapping
+# termguicolors = false  # for terminals without 24-bit color: use the nearest of 256
+# transparent = true    # use the terminal's background with any theme ("auto": the theme decides)
+whichkey = true          # after <leader>, show what each next key does (like which-key.nvim)
+notify = "auto"          # an agent finished while you looked elsewhere: "auto", "bell", "desktop", "off"
+
+# --- Statusline and winbar -------------------------------------------------
+# What each shows, in order. Statusline parts: mode, agent, branch, engine,
+# model, effort, usage, agents, path, clock. Winbar parts: agent, model,
+# engine, effort, status, path, branch, usage.
+# [statusline]
+# left = ["mode", "agent", "branch"]
+# right = ["model", "usage", "agents"]
+# [winbar]
+# left = ["agent", "model", "status"]
+# right = []
+
+# --- Style: layout and icons (themes neon and zen set their own) -------------
+# [style]
+# sidebar = "cards"        # tree (default), cards, compact
+# messages = "bubbles"     # plain (default), labeled, bubbles
+# tool_icons = "unicode"   # none, unicode, nerd
+# separators = "round"     # lualine-style statusline (needs icons = "nerd")
+# [style.icons]
+# worktree = "⑂ "
+
+# --- Colors (also live: :hi Group guifg=#... guibg=#...) -------------------
+# Applied on top of whichever theme is active. A value is a table, a vim
+# :hi string, or the name of a group to link to.
+[highlights]
+# Normal = { bg = "NONE" }                 # use the terminal's background
+# CursorLine = "guibg=#2a2f3a"
+# Comment = "gui=NONE"                      # no italic comments
+# VigentModeNormal = { fg = "#1a1b26", bg = "#7aa2f7", bold = true }
+
+# --- Worktrees --------------------------------------------------------------
+# Each agent gets its own git worktree and branch, so agents never touch your
+# checkout or each other. ":new fix flaky checkout test" creates the branch
+# fix/flaky-checkout-test in ../<repo>-worktrees/fix-flaky-checkout-test.
+[worktree]
+enabled = true
+dir = "../{repo}-worktrees"     # relative to the repo root
+branch = "{type}/{name}"        # {type} = feat, fix, docs, refactor, ... from the agent's name
+# base = "main"                 # default: the branch you have checked out
+# With riftri installed (https://riftri.dev), unchanged files in agent
+# worktrees share copy-on-write storage, so each new agent costs almost no
+# disk. "auto" uses riftri when it can and git otherwise; "git" turns it off.
+backend = "auto"
+
+# --- Keys (also live: :nmap, :imap, :cmap, :unmap; list them with :help) ---
+# Left side: vim notation, e.g. j  gg  <C-d>  <S-Tab>  <M-x>  <CR>  <leader>t
+# Right side:
+#   "session.next"                       an action (all of them: :help)
+#   ":colorscheme nord<CR>"              run an ex command
+#   ":new "                              open the command line with that text
+#   "gg"                                 other keys, with their built-in meaning
+#   ["fold.open_all", "scroll.bottom"]   several, in order
+#   false                                unbind a built-in key
+
+[keys.normal]
+"<leader>n" = ":new "              # type a name, then Enter
+"<leader>x" = ":kill<CR>"
+"<leader>t" = "theme.picker"
+"<leader>h" = "app.help"
+"<Tab>" = "session.next"
+"<S-Tab>" = "session.prev"
+# "J" = "scroll.half_down"
+# "K" = "scroll.half_up"
+# "q" = false                       # stop q from showing the quit hint
+
+[keys.insert]
+# "jk" = "<Esc>"                    # leave INSERT by typing jk quickly
+# "<C-s>" = "edit.submit"
+
+[keys.command]
+# "<C-p>" = "edit.clear"

@@ -37,17 +37,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
     let body_h = area.height - 2;
-    let side = if area.width >= 70 { sidebar::WIDTH } else { 0 };
+    // [ui] sidebar, sidebar_width, sidebar_position (src/app.ts sidebarWidth)
+    let ui = &app.config.ui;
+    let side = if ui.sidebar && area.width >= ui.sidebar_width + 40 { ui.sidebar_width } else { 0 };
+    let right = ui.sidebar_position == "right";
+    let main_w = area.width - side - u16::from(side > 0);
+    let main_x = if right || side == 0 { 0 } else { side + 1 };
     if side > 0 {
-        let r = Rect::new(0, 0, side - 1, body_h);
+        let (sx, sep_x) = if right { (main_w + 1, main_w) } else { (0, side) };
+        let r = Rect::new(sx, 0, side, body_h);
         let sb = t.hl("VigentSidebar");
         f.render_widget(Paragraph::new(sidebar::lines(app, r)).style(sb), r);
         let sep: Vec<Line> = (0..body_h).map(|_| Line::from("│")).collect();
-        f.render_widget(Paragraph::new(sep).style(t.hl("WinSeparator")), Rect::new(side - 1, 0, 1, body_h));
+        f.render_widget(Paragraph::new(sep).style(t.hl("WinSeparator")), Rect::new(sep_x, 0, 1, body_h));
     }
-    let main = Rect::new(side + 1, 0, area.width - side - 1, body_h);
-    f.render_widget(Paragraph::new(winbar::line(app)), Rect::new(main.x, 0, main.width, 1));
-    let pane = Rect::new(main.x, 1, main.width.saturating_sub(1), body_h - 1);
+    let main = Rect::new(main_x, 0, main_w, body_h);
+    f.render_widget(Paragraph::new(winbar::line(app, main.width as usize)), Rect::new(main.x, 0, main.width, 1));
+    let pane = Rect::new(main.x + 1, 1, main.width.saturating_sub(2), body_h - 1);
     app.page = pane.height as usize;
     let lines = if app.focused().is_some() { transcript::lines(app, pane.width as usize) } else { dashboard::lines(app, pane) };
     let h = pane.height as usize;
@@ -68,4 +74,5 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     statusline::draw(f, app, Rect::new(0, body_h, area.width, 1));
     statusline::draw_message(f, app, Rect::new(0, body_h + 1, area.width, 1));
     floats::draw(f, app, area, body_h);
+    crate::settings::draw_any(f, app, area);
 }

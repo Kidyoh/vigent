@@ -13,34 +13,8 @@ use super::text::{fit, width};
 use crate::app::{App, Mode};
 
 pub fn draw(f: &mut Frame, app: &App, r: Rect) {
-    let t = &app.theme;
-    let (mode, mode_group) = match app.mode {
-        Mode::Normal => ("NORMAL", "VigentModeNormal"),
-        Mode::Insert => ("INSERT", "VigentModeInsert"),
-        Mode::Command => ("COMMAND", "VigentModeCommand"),
-        Mode::Search => ("SEARCH", "VigentModeCommand"),
-        Mode::Visual => ("VISUAL", "VigentModeVisual"),
-    };
-    let sl = t.hl("StatusLine");
-    let mut left = vec![Span::styled(format!(" {mode} "), t.hl(mode_group).add_modifier(Modifier::BOLD))];
-    let mut right = String::new();
-    match app.focused() {
-        Some(a) => {
-            left.push(Span::styled(format!(" {}", a.name), sl.add_modifier(Modifier::BOLD)));
-            if let Some(b) = &a.branch {
-                left.push(Span::styled(format!(" ⎇ {b} +{} −{}", a.stat.0, a.stat.1), sl));
-            }
-            let open = app.open();
-            let waiting = open.iter().filter(|&&i| app.sessions[i].busy()).count();
-            right = format!("{}  {}  {waiting}/{} ", a.model.as_deref().unwrap_or(""), a.usage(), open.len());
-        }
-        None => left.push(Span::styled(" [no session]", sl)),
-    }
-    let used: usize = left.iter().map(|s| width(&s.content)).sum();
-    let gap = (r.width as usize).saturating_sub(used + width(&right));
-    left.push(Span::styled(" ".repeat(gap), sl));
-    left.push(Span::styled(right, sl));
-    f.render_widget(Paragraph::new(Line::from(left)).style(sl), r);
+    // [statusline] left/right parts, powerline shapes (src/layout.ts)
+    f.render_widget(Paragraph::new(crate::layout::statusline(app, r.width as usize)).style(app.theme.hl("StatusLine")), r);
 }
 
 /// The message line, and the cursor while typing.

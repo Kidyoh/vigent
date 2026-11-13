@@ -14,14 +14,20 @@ use crate::cli::StartOptions;
 use crate::config::Config;
 use crate::keys::Keymap;
 
-pub fn run(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, warnings: Vec<String>, _opts: &StartOptions) -> i32 {
+#[allow(clippy::too_many_arguments)]
+pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDef, theme_name: &str, config: Config, keymap: Keymap, warnings: Vec<String>, opts: &StartOptions) -> i32 {
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP, signal_hook::consts::SIGINT] {
         let _ = signal_hook::flag::register(sig, Arc::clone(&stop));
     }
     let (tx, rx) = channel();
-    let mut app = App::new(version, cwd, theme_name, config, keymap, tx.clone());
+    let mut app = App::new(version, cwd, "default", config, keymap, tx.clone());
+    app.theme.set_def(theme_def);
+    if opts.demo || opts.auto_demo {
+        crate::demo::start(&mut app);
+    }
+    crate::follow::refresh_in_background(&app, theme_name);
     if !warnings.is_empty() {
         app.say(warnings.join(" · "), "WarningMsg");
     }

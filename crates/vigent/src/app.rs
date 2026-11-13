@@ -89,11 +89,14 @@ pub struct App {
     pub review: crate::review::Review,
     pub windows: crate::windows::Windows,
     pub serve: crate::serve::Serve,
+    /// Config area: open panels and pickers, demo mode, what :settings changed
+    pub cfg: crate::settings::ConfigState,
 }
 
 impl App {
     pub fn new(version: &'static str, cwd: PathBuf, theme_name: &str, config: Config, keymap: Keymap, tx: Sender<Msg>) -> App {
-        let theme = theme::load(theme_name).or_else(|| theme::load("default")).expect("the default theme");
+        let def = theme::load_def(theme_name).or_else(|_| theme::load_def("default")).expect("the default theme");
+        let theme = crate::looks::startup_theme(def, &config);
         App {
             version,
             root: worktree::repo_root(&cwd),
@@ -118,6 +121,7 @@ impl App {
             review: Default::default(),
             windows: Default::default(),
             serve: Default::default(),
+            cfg: Default::default(),
         }
     }
 
@@ -142,6 +146,9 @@ impl App {
 
     /// Why a new agent can't start, if it can't.
     pub fn cant_start(&self) -> Option<String> {
+        if self.cfg.demo {
+            return None;
+        }
         let e = self.engines.get(self.new_agent_engine())?;
         if e.checking {
             return None;
@@ -161,6 +168,9 @@ impl App {
     // -----------------------------------------------------------------
 
     pub fn key(&mut self, k: KeyEvent) {
+        if crate::settings::is_open(self) {
+            return crate::settings::key_any(self, k);
+        }
         if self.float.is_some() {
             return crate::ui::floats::key(self, k);
         }
@@ -246,6 +256,9 @@ impl App {
             "c" => crate::health::open(self),
             "?" => crate::help::open(self),
             "q" => crate::commands::exec(self, "q"),
+            "t" => crate::looks::open_theme_picker(self),
+            "s" => crate::settings::open(self),
+            "T" => crate::templates::open(self),
             // Config/Engines/Sessions areas: t (themes), s (settings), m (model), e (effort), E (engine), T (templates)
             _ => return false,
         }
@@ -316,6 +329,9 @@ impl App {
 
     /// A new agent, in a worktree of its own made in the background. Its slot, or None (and why, on the message line).
     pub fn start_agent(&mut self, name: &str) -> Option<usize> {
+        if self.cfg.demo {
+            return Some(crate::demo::start_agent(self, name));
+        }
         if let Some(why) = self.cant_start() {
             self.say(why, "ErrorMsg");
             return None;
@@ -350,6 +366,9 @@ impl App {
     }
 
     pub fn send(&mut self, i: usize, text: String) {
+        if self.cfg.demo {
+            return crate::demo::send(self, i, text);
+        }
         let tx = self.tx.clone();
         let info = self.engines.get(&self.sessions[i].engine).cloned();
         self.sessions[i].send(text, info.as_ref(), tx);

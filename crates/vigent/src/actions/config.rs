@@ -1,6 +1,5 @@
-//! Config area actions (still to port: theme.picker).
+//! Config area actions: the colorscheme picker.
 
-#[allow(unused_imports)]
 use super::Action;
 
-pub static ACTIONS: &[Action] = &[];
+pub static ACTIONS: &[Action] = &[Action { name: "theme.picker", run: |app, _| crate::looks::open_theme_picker(app) }];
