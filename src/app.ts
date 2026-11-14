@@ -4911,7 +4911,9 @@ export class App implements Component {
 			blocksBefore += c.blocks;
 		});
 		out = lines;
-		if (s?.thinking) {
+		// from the moment a prompt goes out, not only once the model opens a thinking block:
+		// a CLI takes a few seconds to start, and an empty pane looks stuck
+		if (s?.thinking || (s?.state === "running" && s.items.at(-1)?.kind === "user")) {
 			push("", "");
 			push(P.p("Comment", "thinking…"), "thinking…");
 		}

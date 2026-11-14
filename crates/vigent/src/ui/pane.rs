@@ -257,7 +257,9 @@ fn build_lines(app: &App, slot: Option<usize>, pane_w: usize) -> Vec<PaneLine> {
             }
         }
     }
-    if s.thinking {
+    // from the moment a prompt goes out, not only once the model opens a thinking block:
+    // a CLI takes a few seconds to start, and an empty pane looks stuck
+    if s.thinking || (s.state == State::Running && matches!(s.items.last(), Some(Item::User(_)))) {
         lines.push(blank());
         lines.push(PaneLine::new(vec![Seg::new("thinking…", t.hl("Comment"))]));
     }
@@ -452,4 +454,35 @@ pub fn row_width(row: &[Seg]) -> usize {
 
 pub fn icon_set(app: &App) -> Icons {
     icons(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn says_thinking(a: &App) -> bool {
+        build(a, Some(0), 60).iter().any(|l| l.plain == "thinking…")
+    }
+
+    #[test]
+    fn thinking_shows_as_soon_as_a_prompt_goes_out() {
+        let mut a = crate::app::tests::app();
+        a.add_session(crate::session::Session::new(0, "tidy", "claude", "/nope".into()), true);
+        assert!(!says_thinking(&a), "nothing asked yet");
+        // the prompt went out; the CLI hasn't said anything yet
+        a.sessions[0].items.push(Item::User("hi".into()));
+        a.sessions[0].state = State::Running;
+        assert!(says_thinking(&a));
+        // the first words of the reply take its place
+        a.sessions[0].items.push(Item::Text("hello".into()));
+        assert!(!says_thinking(&a));
+        // a thinking block shows it again, mid-turn
+        a.sessions[0].thinking = true;
+        assert!(says_thinking(&a));
+        // finished: gone
+        a.sessions[0].thinking = false;
+        a.sessions[0].items.push(Item::User("again".into()));
+        a.sessions[0].state = State::Idle;
+        assert!(!says_thinking(&a));
+    }
 }

@@ -141,6 +141,22 @@ test("the pane says thinking while Claude Code has a thinking block open", async
 	assert.match(view(), /done/);
 });
 
+test("the pane says thinking as soon as a prompt goes out, before the CLI says anything", async () => {
+	const { bin, release } = stagedCli([], [started(0, { type: "text", text: "" }), delta(0, { type: "text_delta", text: "done" }), assistant({ type: "text", text: "done" }), stopped(0), result]);
+	const s = session(bin);
+	const view = screen(s);
+	s.send("hi");
+
+	await until("running", () => s.state === "running");
+	assert.equal(s.thinking, false, "no thinking block yet");
+	assert.match(view(), /thinking…/);
+
+	release();
+	await until("the run to finish", () => s.state !== "running");
+	assert.doesNotMatch(view(), /thinking…/);
+	assert.match(view(), /done/);
+});
+
 test("thinking clears when the CLI exits without closing the block", async () => {
 	const { bin, release } = stagedCli([started(0, { type: "thinking", thinking: "" })], []);
 	const s = session(bin);
