@@ -120,6 +120,26 @@ test("with no node on PATH: an agent works in its own worktree, and :checkhealth
 	}
 });
 
+test("the screen: the alternate screen with no scrollback above it, and every frame drawn in one synchronized update", { skip: skipTty, timeout: 60000 }, async () => {
+	const t = new Tty([], { cwd: repo, env, command: [path.join(bin, "vigent")] });
+	try {
+		await t.waitFor(/SESSIONS/);
+		await t.ex("qa!");
+		assert.equal(await t.exited, 0);
+		const out = t.output;
+		const at = (seq) => out.indexOf(seq);
+		// what was on screen before vigent can't be scrolled back to: the scroll wheel would slide vigent's bottom bar out of view
+		assert.ok(at("\x1b[?1049h") >= 0 && at("\x1b[?1049h") < at("\x1b[2J\x1b[H\x1b[3J"), "the alternate screen, then clear the screen and the scrollback");
+		assert.ok(at("\x1b[3J") < at("\x1b[?2026h"), "cleared before the first frame");
+		const count = (seq) => out.split(seq).length - 1;
+		assert.ok(count("\x1b[?2026h") > 0);
+		assert.equal(count("\x1b[?2026h"), count("\x1b[?2026l"), "every frame ends its synchronized update");
+		assert.ok(at("\x1b[?1049l") > out.lastIndexOf("\x1b[?2026l"), "back to the main screen at the end");
+	} finally {
+		t.kill();
+	}
+});
+
 test("install.sh: checks the download, installs vigent and riftri, and links vigent where PATH finds it", { skip: skip || (windows ? "the installer is for macOS and Linux" : false), timeout: 120000 }, () => {
 	// the archive and SHA256SUMS the build wrote, served from disk in place of the GitHub release
 	const built = path.dirname(path.dirname(binary));

@@ -71,22 +71,32 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDe
     let mut terminal = ratatui::init();
     // the alternate screen (ratatui::init), pastes as text, and focus reports (a notification skips the agent you're looking at)
     let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableFocusChange);
+    // the window title, then a clean screen with no scrollback above it, as pi-tui's
+    // fullRender does: otherwise the scroll wheel scrolls the terminal into whatever
+    // was on screen before vigent and the bottom of vigent slides out of view
+    write_now(&format!("\x1b]0;vigent\x07{CLEAR}"));
+    let mut size = terminal.size().ok();
     let mut code = 0;
     while !app.quit && !stop.load(Ordering::Relaxed) {
-        if std::mem::take(&mut app.windows.redraw) {
+        // a resize clears the scrollback too (pi-tui redraws everything when the width or height changes)
+        let now = terminal.size().ok();
+        if std::mem::take(&mut app.windows.redraw) || now != size {
+            size = now;
+            write_now(CLEAR);
             let _ = terminal.clear();
         }
-        match terminal.draw(|f| crate::ui::draw(f, &mut app)) {
-            Ok(frame) => {
-                if !app.windows.links.is_empty() {
-                    crate::ui::write_links(&app, frame.buffer, &mut std::io::stdout());
-                }
+        // one synchronized update per frame, so the terminal never shows half of one
+        write_now(SYNC_BEGIN);
+        let drawn = terminal.draw(|f| crate::ui::draw(f, &mut app)).map(|frame| {
+            if !app.windows.links.is_empty() {
+                crate::ui::write_links(&app, frame.buffer, &mut std::io::stdout());
             }
-            Err(e) => {
-                eprintln!("vigent: {e}");
-                code = 1;
-                break;
-            }
+        });
+        write_now(SYNC_END);
+        if let Err(e) = drawn {
+            eprintln!("vigent: {e}");
+            code = 1;
+            break;
         }
         match event::poll(Duration::from_millis(40)) {
             Ok(true) => match event::read() {
@@ -110,4 +120,16 @@ pub fn run(version: &'static str, cwd: PathBuf, theme_def: crate::theme::ThemeDe
     let _ = execute!(std::io::stdout(), DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
     code
+}
+
+/// Clear the screen, home the cursor, then clear the scrollback.
+const CLEAR: &str = "\x1b[2J\x1b[H\x1b[3J";
+const SYNC_BEGIN: &str = "\x1b[?2026h";
+const SYNC_END: &str = "\x1b[?2026l";
+
+fn write_now(s: &str) {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(s.as_bytes());
+    let _ = out.flush();
 }
